@@ -1,0 +1,76 @@
+# Cloud Build configuration for deploying to Cloud Run
+steps:
+  # Build the container image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/whatsapp-web-service:$COMMIT_SHA'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/whatsapp-web-service:latest'
+      - '.'
+    dir: 'whatsapp-web-service'
+  
+  # Push the container image to Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - '--all-tags'
+      - 'gcr.io/$PROJECT_ID/whatsapp-web-service'
+  
+  # Deploy to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'whatsapp-web-service'
+      - '--image'
+      - 'gcr.io/$PROJECT_ID/whatsapp-web-service:$COMMIT_SHA'
+      - '--region'
+      - '${_REGION}'
+      - '--platform'
+      - 'managed'
+      - '--min-instances'
+      - '${_MIN_INSTANCES}'
+      - '--max-instances'
+      - '${_MAX_INSTANCES}'
+      - '--memory'
+      - '${_MEMORY}'
+      - '--cpu'
+      - '${_CPU}'
+      - '--timeout'
+      - '3600'
+      - '--concurrency'
+      - '1000'
+      - '--port'
+      - '8080'
+      - '--cpu-throttling'
+      - '--no-cpu-boost'
+      - '--service-account'
+      - 'whatsapp-service@$PROJECT_ID.iam.gserviceaccount.com'
+      - '--set-env-vars'
+      - 'NODE_ENV=production,GOOGLE_CLOUD_PROJECT=$PROJECT_ID'
+      - '--set-secrets'
+      - 'API_KEY=whatsapp-api-key:latest,BRIGHT_DATA_CUSTOMER_ID=bright-data-customer-id:latest,BRIGHT_DATA_ZONE_PASSWORD=bright-data-zone-password:latest,SESSION_ENCRYPTION_KEY=session-encryption-key:latest,WS_TOKEN=whatsapp-ws-token:latest'
+      - '--vpc-connector'
+      - 'projects/$PROJECT_ID/locations/${_REGION}/connectors/whatsapp-connector'
+      - '--vpc-egress'
+      - 'private-ranges-only'
+      - '--allow-unauthenticated'
+
+# Substitutions for environment-specific values
+substitutions:
+  _REGION: 'europe-central2'
+  _MIN_INSTANCES: '1'
+  _MAX_INSTANCES: '10'
+  _MEMORY: '4Gi'
+  _CPU: '2'
+
+# Build configuration options
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: 'E2_HIGHCPU_8'
+  
+# Timeout for the entire build
+timeout: '1200s'
