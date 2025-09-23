@@ -16,7 +16,7 @@ The Dynamic Proxy Allocation System enables on-demand proxy purchasing for Whats
 ## Architecture
 
 ```
-User Connects (Belgium) 
+User Connects (Belgium)
     ↓
 DynamicProxyService.assignProxy("be")
     ↓
@@ -59,6 +59,7 @@ BRIGHT_DATA_API_KEY_SECRET=projects/YOUR_PROJECT/secrets/bright-data-api-key/ver
 ### Google Secret Manager Setup
 
 1. Create secret in Google Cloud Console:
+
 ```bash
 echo -n "your-api-key" | gcloud secrets create bright-data-api-key \
   --data-file=- \
@@ -66,6 +67,7 @@ echo -n "your-api-key" | gcloud secrets create bright-data-api-key \
 ```
 
 2. Grant service account access:
+
 ```bash
 gcloud secrets add-iam-policy-binding bright-data-api-key \
   --member="serviceAccount:YOUR_SERVICE_ACCOUNT@PROJECT.iam.gserviceaccount.com" \
@@ -75,6 +77,7 @@ gcloud secrets add-iam-policy-binding bright-data-api-key \
 ## Firestore Collections
 
 ### proxy_inventory
+
 ```typescript
 {
   ip: "168.158.163.12",
@@ -91,6 +94,7 @@ gcloud secrets add-iam-policy-binding bright-data-api-key \
 ```
 
 ### proxy_assignments
+
 ```typescript
 {
   userId: "user_123",
@@ -107,6 +111,7 @@ gcloud secrets add-iam-policy-binding bright-data-api-key \
 ## API Integration
 
 ### Purchase Proxy
+
 ```typescript
 POST https://api.brightdata.com/zone/ips
 {
@@ -118,6 +123,7 @@ POST https://api.brightdata.com/zone/ips
 ```
 
 ### Release Proxy
+
 ```typescript
 DELETE https://api.brightdata.com/zone/ips
 {
@@ -140,7 +146,7 @@ Luxembourg (lu) → Germany → France → Belgium → Netherlands → UK
 Bangladesh (bd) → India → Singapore → Malaysia → UK → US
 Pakistan (pk) → India → UAE → Singapore → UK → US
 
-// Africa  
+// Africa
 Nigeria (ng) → South Africa → Kenya → Egypt → UK → US
 Ghana (gh) → South Africa → Nigeria → UK → US
 
@@ -152,11 +158,13 @@ Barbados (bb) → US → Brazil → UK
 ## Cost Analysis
 
 ### Traditional Model (Pre-Purchase)
+
 - 100 proxies × $4/month = $400/month
 - Only 30 active users = $280 wasted
 - Cannot serve unexpected countries
 
 ### Dynamic Model (This System)
+
 - 30 active users × $4/month = $120/month
 - 70% cost reduction
 - Global coverage without pre-investment
@@ -164,11 +172,13 @@ Barbados (bb) → US → Brazil → UK
 ## Testing
 
 ### Run Test Suite
+
 ```bash
 npx tsx test-dynamic-proxy.ts
 ```
 
 ### Test Coverage
+
 1. ✅ Purchase proxy for available country
 2. ✅ Fallback to nearest country
 3. ✅ Proxy recycling within 1 hour
@@ -179,6 +189,7 @@ npx tsx test-dynamic-proxy.ts
 ## Monitoring
 
 ### Get Metrics
+
 ```typescript
 const metrics = await dynamicProxyService.getMetrics();
 // Returns:
@@ -193,6 +204,7 @@ const metrics = await dynamicProxyService.getMetrics();
 ```
 
 ### Dashboard Metrics
+
 - Active proxies by country
 - Recycling efficiency rate
 - Average proxy lifetime
@@ -248,6 +260,7 @@ const metrics = await dynamicProxyService.getMetrics();
 ## Migration from Static Proxies
 
 1. Enable dynamic purchasing:
+
    ```env
    BRIGHT_DATA_PROXY_TYPE=isp
    ```
@@ -263,6 +276,7 @@ const metrics = await dynamicProxyService.getMetrics();
 ## Support
 
 For issues or questions:
+
 1. Check BrightData dashboard for proxy availability
 2. Review Firestore proxy_inventory collection
 3. Check application logs for error details

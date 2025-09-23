@@ -22,6 +22,7 @@ node test-integration.js
 ```
 
 This will:
+
 1. Initialize a WhatsApp Web session
 2. Connect via WebSocket
 3. Wait for QR code
@@ -37,6 +38,7 @@ flutter run -d chrome
 ```
 
 Then in the app:
+
 1. Navigate to WhatsApp Web settings
 2. Click "Connect WhatsApp"
 3. Enter a phone number (e.g., +1234567890)
@@ -94,6 +96,7 @@ WhatsApp Servers
 ### QR Code Not Appearing
 
 1. **Check Backend Logs**
+
    ```bash
    # Look for these key messages:
    "Connection update received" with hasQR: true
@@ -102,6 +105,7 @@ WhatsApp Servers
    ```
 
 2. **Check Frontend Console**
+
    ```
    # In browser DevTools, look for:
    "WebSocket connected"

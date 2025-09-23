@@ -1,13 +1,13 @@
 // Jest setup file for WhatsApp Web Service tests
 
 // Set test environment variables
-process.env.NODE_ENV = 'test';
-process.env.GOOGLE_CLOUD_PROJECT = 'test-project';
-process.env.MEDIA_BUCKET = 'test-media-bucket';
-process.env.STORAGE_BUCKET = 'test-storage-bucket';
-process.env.MAX_FILE_SIZE_MB = '16';
-process.env.API_KEY = 'test-api-key';
-process.env.PORT = '8080';
+process.env.NODE_ENV = "test";
+process.env.GOOGLE_CLOUD_PROJECT = "test-project";
+process.env.MEDIA_BUCKET = "test-media-bucket";
+process.env.STORAGE_BUCKET = "test-storage-bucket";
+process.env.MAX_FILE_SIZE_MB = "16";
+process.env.API_KEY = "test-api-key";
+process.env.PORT = "8080";
 
 // Mock console methods to reduce noise in test output
 global.console = {

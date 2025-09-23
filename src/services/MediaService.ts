@@ -29,7 +29,10 @@ export class MediaService {
     this.storage = new Storage({
       projectId: process.env.GOOGLE_CLOUD_PROJECT,
     });
-    this.bucket = process.env.MEDIA_BUCKET || process.env.STORAGE_BUCKET || "whatzai-whatsapp-media";
+    this.bucket =
+      process.env.MEDIA_BUCKET ||
+      process.env.STORAGE_BUCKET ||
+      "whatzai-whatsapp-media";
     this.maxFileSizeMB = parseInt(process.env.MAX_FILE_SIZE_MB || "16");
   }
 
@@ -47,7 +50,9 @@ export class MediaService {
       // Validate file size
       const maxSizeBytes = this.maxFileSizeMB * 1024 * 1024;
       if (file.size > maxSizeBytes) {
-        throw new Error(`File size ${file.size} exceeds maximum ${maxSizeBytes} bytes`);
+        throw new Error(
+          `File size ${file.size} exceeds maximum ${maxSizeBytes} bytes`,
+        );
       }
 
       // Generate unique filename
@@ -56,7 +61,8 @@ export class MediaService {
 
       // Process image if needed (compress large images)
       let processedBuffer = file.buffer;
-      if (this.isImage(file.mimetype) && file.size > 1024 * 1024) { // 1MB threshold
+      if (this.isImage(file.mimetype) && file.size > 1024 * 1024) {
+        // 1MB threshold
         processedBuffer = await this.compressImage(file.buffer, file.mimetype);
         logger.info(
           {
@@ -167,7 +173,10 @@ export class MediaService {
   /**
    * Compress image for storage optimization
    */
-  private async compressImage(buffer: Buffer, mimetype: string): Promise<Buffer> {
+  private async compressImage(
+    buffer: Buffer,
+    mimetype: string,
+  ): Promise<Buffer> {
     try {
       const image = await Jimp.read(buffer);
 
@@ -183,7 +192,10 @@ export class MediaService {
 
       return await image.getBufferAsync(mimetype as any);
     } catch (error) {
-      logger.warn({ error, mimetype }, "Failed to compress image, using original");
+      logger.warn(
+        { error, mimetype },
+        "Failed to compress image, using original",
+      );
       return buffer;
     }
   }
@@ -212,8 +224,10 @@ export class MediaService {
       "audio/mp4": ".m4a",
       "audio/ogg": ".ogg",
       "application/pdf": ".pdf",
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        ".docx",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+        ".xlsx",
       "text/plain": ".txt",
     };
 

@@ -7,6 +7,7 @@ This guide explains the comprehensive crash recovery and message persistence sys
 ## 🏗️ Architecture Components
 
 ### 1. **Message Queue Service** (`messageQueue.ts`)
+
 - **Technology**: Bull queue with Redis backend
 - **Features**:
   - Persistent message storage in Redis
@@ -16,6 +17,7 @@ This guide explains the comprehensive crash recovery and message persistence sys
   - Real-time queue metrics
 
 ### 2. **Connection State Manager** (`connectionStateManager.ts`)
+
 - **Purpose**: Maintains connection state across restarts
 - **Features**:
   - Firestore-backed state persistence
@@ -24,6 +26,7 @@ This guide explains the comprehensive crash recovery and message persistence sys
   - Connection recovery after restart
 
 ### 3. **Health Monitor** (`healthMonitor.ts`)
+
 - **Purpose**: System health monitoring and auto-recovery
 - **Features**:
   - CPU and memory monitoring
@@ -33,6 +36,7 @@ This guide explains the comprehensive crash recovery and message persistence sys
   - Circuit breaker pattern implementation
 
 ### 4. **Session Persistence** (Enhanced)
+
 - **Modes**: Local, Hybrid, Cloud
 - **Features**:
   - Automatic session backup to cloud
@@ -50,7 +54,7 @@ graph LR
     B --> C[Message Queue]
     C --> D[Connection Pool]
     D --> E[WhatsApp Server]
-    
+
     F[Health Monitor] --> D
     G[State Manager] --> H[Firestore]
     D --> G
@@ -100,11 +104,11 @@ Time: T+60s - Full recovery
 1. **WhatsApp Server Queue**: Messages sent while offline are queued on WhatsApp servers
 2. **History Sync**: On reconnection, Baileys triggers `messaging-history.set` event
 3. **Message Processing**: Missed messages are processed and stored in Firestore
-4. **Sync Configuration**: 
+4. **Sync Configuration**:
    ```typescript
-   syncFullHistory: true
-   downloadHistory: true
-   fireInitQueries: true
+   syncFullHistory: true;
+   downloadHistory: true;
+   fireInitQueries: true;
    ```
 
 ## 🚀 Quick Setup
@@ -117,6 +121,7 @@ chmod +x setup-crash-recovery.sh
 ```
 
 This script will:
+
 - Install and configure Redis
 - Install PM2 globally
 - Set up environment variables
@@ -176,6 +181,7 @@ MAX_RETRY_ATTEMPTS=5
 ### PM2 Configuration (`ecosystem.config.js`)
 
 Key settings:
+
 - `max_restarts`: 10 (maximum restart attempts)
 - `min_uptime`: 10s (minimum uptime before considering successful)
 - `max_memory_restart`: 1G (restart if memory exceeds 1GB)
@@ -241,6 +247,7 @@ GET http://localhost:8090/health
 ```
 
 Response:
+
 ```json
 {
   "status": "healthy",
@@ -284,6 +291,7 @@ pm2 info whatsapp-web-service
 ### Firestore Collections
 
 Monitor these collections for system health:
+
 - `whatsapp_connection_states` - Current connection states
 - `health_status` - Latest health check
 - `health_alerts` - Critical alerts
@@ -295,11 +303,13 @@ Monitor these collections for system health:
 ### Issue: Messages Not Recovering
 
 **Check**:
+
 1. Redis is running: `redis-cli ping`
 2. Queue is processing: Check `/health` endpoint
 3. Connection state: Check Firestore `whatsapp_connection_states`
 
 **Solution**:
+
 ```bash
 # Manually retry failed messages
 curl -X POST http://localhost:8090/api/queue/retry-failed
@@ -308,11 +318,13 @@ curl -X POST http://localhost:8090/api/queue/retry-failed
 ### Issue: Connection Not Auto-Recovering
 
 **Check**:
+
 1. Session files exist: `ls ./sessions`
 2. Session backup: Check Google Cloud Storage bucket
 3. Auto-recovery enabled: `AUTO_RECOVERY=true` in .env
 
 **Solution**:
+
 ```bash
 # Force recovery
 curl -X POST http://localhost:8090/api/connections/recover
@@ -321,11 +333,13 @@ curl -X POST http://localhost:8090/api/connections/recover
 ### Issue: High Memory Usage
 
 **Check**:
+
 1. Connection count: Not exceeding `MAX_CONNECTIONS`
 2. Queue size: Check for backlog
 3. Memory leaks: Use `pm2 monit`
 
 **Solution**:
+
 ```bash
 # Restart with memory limit
 pm2 restart whatsapp-web-service --max-memory-restart 800M
@@ -385,17 +399,18 @@ MEMORY_THRESHOLD=75
 
 After implementing this system:
 
-| Metric | Before | After |
-|--------|--------|-------|
-| Message Loss Rate | 5-10% during crashes | 0% |
-| Recovery Time | 5-10 minutes (manual) | 30-60 seconds (automatic) |
-| QR Re-scan Required | Yes | No |
-| Missed Message Recovery | Manual | Automatic |
-| Uptime | 95% | 99.9% |
+| Metric                  | Before                | After                     |
+| ----------------------- | --------------------- | ------------------------- |
+| Message Loss Rate       | 5-10% during crashes  | 0%                        |
+| Recovery Time           | 5-10 minutes (manual) | 30-60 seconds (automatic) |
+| QR Re-scan Required     | Yes                   | No                        |
+| Missed Message Recovery | Manual                | Automatic                 |
+| Uptime                  | 95%                   | 99.9%                     |
 
 ## 🆘 Support
 
 For issues:
+
 1. Check logs: `pm2 logs --lines 100`
 2. Review health status: `/health` endpoint
 3. Check Firestore for error logs
@@ -405,16 +420,19 @@ For issues:
 ## 📝 Maintenance Checklist
 
 ### Daily
+
 - [ ] Check health endpoint
 - [ ] Review error logs
 - [ ] Monitor queue depth
 
 ### Weekly
+
 - [ ] Review recovery actions in Firestore
 - [ ] Check Redis memory usage
 - [ ] Verify backup completion
 
 ### Monthly
+
 - [ ] Test crash recovery
 - [ ] Review and rotate logs
 - [ ] Update dependencies

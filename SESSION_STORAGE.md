@@ -7,18 +7,20 @@ The WhatsApp Web service uses Baileys library which requires storing authenticat
 ## Storage Modes
 
 ### 1. Local Storage (Development)
+
 - **Mode**: `SESSION_STORAGE_TYPE=local`
 - **Use Case**: Development and testing
-- **Pros**: 
+- **Pros**:
   - Fastest performance (millisecond access)
   - No cloud dependencies
   - Simple setup
-- **Cons**: 
+- **Cons**:
   - Sessions lost on server restart
   - No multi-instance support
   - Manual backup required
 
 ### 2. Hybrid Storage (Recommended for Production) ⭐
+
 - **Mode**: `SESSION_STORAGE_TYPE=hybrid`
 - **Use Case**: Production deployments
 - **Pros**:
@@ -32,6 +34,7 @@ The WhatsApp Web service uses Baileys library which requires storing authenticat
   - Slight additional complexity
 
 ### 3. Cloud Storage (High Availability)
+
 - **Mode**: `SESSION_STORAGE_TYPE=cloud`
 - **Use Case**: Multi-region deployments
 - **Pros**:
@@ -74,7 +77,9 @@ openssl rand -hex 32
 ## Architecture Details
 
 ### Session Structure
+
 Each WhatsApp session consists of:
+
 - `creds.json` - Authentication credentials
 - `app-state-sync-key-*.json` - Sync keys (40-50 files)
 - `app-state-sync-version-*.json` - Version information
@@ -107,6 +112,7 @@ Total: ~54 files per session, ~500KB-1MB total
 ### Storage Paths
 
 **Local Storage**:
+
 ```
 ./sessions/
   ├── userId1-+1234567890/
@@ -118,6 +124,7 @@ Total: ~54 files per session, ~500KB-1MB total
 ```
 
 **Cloud Storage**:
+
 ```
 gs://whatzai-whatsapp-sessions/
   └── sessions/
@@ -190,16 +197,16 @@ gcloud run deploy whatsapp-web-service \
 
 ```javascript
 // Successful backup
-"Session backed up to Cloud Storage" 
+"Session backed up to Cloud Storage";
 
 // Restoration from cloud
-"Session restored from Cloud Storage"
+"Session restored from Cloud Storage";
 
 // Backup failures (non-critical)
-"Failed to backup to Cloud Storage, continuing with local storage"
+"Failed to backup to Cloud Storage, continuing with local storage";
 
 // Automatic backup scheduled
-"Automatic backup scheduled for session"
+"Automatic backup scheduled for session";
 ```
 
 ### Metrics
@@ -214,12 +221,14 @@ gcloud run deploy whatsapp-web-service \
 ### Session Not Persisting
 
 1. Check environment variables:
+
    ```bash
    echo $SESSION_STORAGE_TYPE  # Should be "hybrid"
    echo $STORAGE_BUCKET        # Should be set
    ```
 
 2. Verify bucket permissions:
+
    ```bash
    gsutil ls gs://whatzai-whatsapp-sessions/
    ```
@@ -288,11 +297,13 @@ gcloud run deploy whatsapp-web-service \
 ## Cost Estimation
 
 **Per Session**:
+
 - Storage: ~1MB × $0.02/GB/month = $0.00002/month
 - Operations: ~50 writes × $0.005/10000 = $0.000025
 - Total: ~$0.00005/session/month
 
 **For 1000 Sessions**:
+
 - Storage: $0.02/month
 - Operations: $0.25/month (with 5-minute backups)
 - Total: <$1/month
@@ -317,6 +328,7 @@ A: Yes, set `SESSION_BACKUP_INTERVAL=0` to disable automatic backups (not recomm
 ## Support
 
 For issues or questions:
+
 1. Check logs for error messages
 2. Review this documentation
 3. Open an issue on GitHub

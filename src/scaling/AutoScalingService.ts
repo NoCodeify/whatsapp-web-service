@@ -50,7 +50,7 @@ export class AutoScalingService {
         config: this.config,
         instanceId: this.instanceId,
       },
-      "AutoScalingService initialized"
+      "AutoScalingService initialized",
     );
   }
 
@@ -67,7 +67,7 @@ export class AutoScalingService {
             lastAction: this.lastScalingAction,
             cooldownMs: this.config.cooldownPeriodMs,
           },
-          "Scaling action skipped - still in cooldown period"
+          "Scaling action skipped - still in cooldown period",
         );
         return;
       }
@@ -87,7 +87,7 @@ export class AutoScalingService {
           connectionCount: metrics.connectionCount,
           maxConnections: metrics.maxConnections,
         },
-        "Evaluating scaling needs"
+        "Evaluating scaling needs",
       );
 
       // Determine if scaling is needed
@@ -102,7 +102,7 @@ export class AutoScalingService {
             connectionLoad: `${(connectionLoad * 100).toFixed(1)}%`,
             memoryLoad: `${(memoryLoad * 100).toFixed(1)}%`,
           },
-          "No scaling action needed"
+          "No scaling action needed",
         );
       }
     } catch (error) {
@@ -112,7 +112,7 @@ export class AutoScalingService {
           instanceId: this.instanceId,
           metrics,
         },
-        "Failed to evaluate scaling"
+        "Failed to evaluate scaling",
       );
     }
   }
@@ -131,12 +131,15 @@ export class AutoScalingService {
             currentInstances,
             maxInstances: this.config.maxInstances,
           },
-          "Cannot scale up - already at maximum instances"
+          "Cannot scale up - already at maximum instances",
         );
         return;
       }
 
-      const targetInstances = Math.min(currentInstances + 1, this.config.maxInstances);
+      const targetInstances = Math.min(
+        currentInstances + 1,
+        this.config.maxInstances,
+      );
 
       logger.info(
         {
@@ -147,13 +150,18 @@ export class AutoScalingService {
           connectionLoad: `${((metrics.connectionCount / metrics.maxConnections) * 100).toFixed(1)}%`,
           memoryLoad: `${(metrics.memoryUsage * 100).toFixed(1)}%`,
         },
-        "Scaling up Cloud Run service"
+        "Scaling up Cloud Run service",
       );
 
       await this.updateCloudRunInstances(targetInstances);
 
       // Record scaling action
-      await this.recordScalingAction("scale_up", currentInstances, targetInstances, metrics);
+      await this.recordScalingAction(
+        "scale_up",
+        currentInstances,
+        targetInstances,
+        metrics,
+      );
       this.lastScalingAction = new Date();
 
       logger.info(
@@ -162,7 +170,7 @@ export class AutoScalingService {
           from: currentInstances,
           to: targetInstances,
         },
-        "Successfully scaled up"
+        "Successfully scaled up",
       );
     } catch (error) {
       logger.error(
@@ -171,7 +179,7 @@ export class AutoScalingService {
           instanceId: this.instanceId,
           metrics,
         },
-        "Failed to scale up"
+        "Failed to scale up",
       );
     }
   }
@@ -190,12 +198,15 @@ export class AutoScalingService {
             currentInstances,
             minInstances: this.config.minInstances,
           },
-          "Cannot scale down - already at minimum instances"
+          "Cannot scale down - already at minimum instances",
         );
         return;
       }
 
-      const targetInstances = Math.max(currentInstances - 1, this.config.minInstances);
+      const targetInstances = Math.max(
+        currentInstances - 1,
+        this.config.minInstances,
+      );
 
       logger.info(
         {
@@ -206,13 +217,18 @@ export class AutoScalingService {
           connectionLoad: `${((metrics.connectionCount / metrics.maxConnections) * 100).toFixed(1)}%`,
           memoryLoad: `${(metrics.memoryUsage * 100).toFixed(1)}%`,
         },
-        "Scaling down Cloud Run service"
+        "Scaling down Cloud Run service",
       );
 
       await this.updateCloudRunInstances(targetInstances);
 
       // Record scaling action
-      await this.recordScalingAction("scale_down", currentInstances, targetInstances, metrics);
+      await this.recordScalingAction(
+        "scale_down",
+        currentInstances,
+        targetInstances,
+        metrics,
+      );
       this.lastScalingAction = new Date();
 
       logger.info(
@@ -221,7 +237,7 @@ export class AutoScalingService {
           from: currentInstances,
           to: targetInstances,
         },
-        "Successfully scaled down"
+        "Successfully scaled down",
       );
     } catch (error) {
       logger.error(
@@ -230,7 +246,7 @@ export class AutoScalingService {
           instanceId: this.instanceId,
           metrics,
         },
-        "Failed to scale down"
+        "Failed to scale down",
       );
     }
   }
@@ -239,16 +255,23 @@ export class AutoScalingService {
    * Check if scaling up is needed
    */
   private shouldScaleUp(connectionLoad: number, memoryLoad: number): boolean {
-    return connectionLoad >= this.config.scaleUpThreshold ||
-           memoryLoad >= this.config.scaleUpThreshold;
+    return (
+      connectionLoad >= this.config.scaleUpThreshold ||
+      memoryLoad >= this.config.scaleUpThreshold
+    );
   }
 
   /**
    * Check if scaling down is needed (requires checking other instances)
    */
-  private async shouldScaleDown(connectionLoad: number, memoryLoad: number): Promise<boolean> {
-    if (connectionLoad > this.config.scaleDownThreshold ||
-        memoryLoad > this.config.scaleDownThreshold) {
+  private async shouldScaleDown(
+    connectionLoad: number,
+    memoryLoad: number,
+  ): Promise<boolean> {
+    if (
+      connectionLoad > this.config.scaleDownThreshold ||
+      memoryLoad > this.config.scaleDownThreshold
+    ) {
       return false;
     }
 
@@ -282,11 +305,14 @@ export class AutoScalingService {
         const data = doc.data();
         totalInstances++;
 
-        const connectionLoad = (data.connectionCount || 0) / (data.maxConnections || 1);
+        const connectionLoad =
+          (data.connectionCount || 0) / (data.maxConnections || 1);
         const memoryLoad = data.memoryUsage || 0;
 
-        if (connectionLoad <= this.config.scaleDownThreshold &&
-            memoryLoad <= this.config.scaleDownThreshold) {
+        if (
+          connectionLoad <= this.config.scaleDownThreshold &&
+          memoryLoad <= this.config.scaleDownThreshold
+        ) {
           lowLoadInstances++;
         }
       });
@@ -299,7 +325,7 @@ export class AutoScalingService {
           error,
           instanceId: this.instanceId,
         },
-        "Failed to check other instances load"
+        "Failed to check other instances load",
       );
       return false; // Don't scale down if we can't verify
     }
@@ -308,7 +334,9 @@ export class AutoScalingService {
   /**
    * Update Cloud Run service instance count
    */
-  private async updateCloudRunInstances(targetInstances: number): Promise<void> {
+  private async updateCloudRunInstances(
+    targetInstances: number,
+  ): Promise<void> {
     if (!this.config.projectId) {
       logger.warn("GOOGLE_CLOUD_PROJECT not set, skipping actual scaling");
       return;
@@ -326,7 +354,7 @@ export class AutoScalingService {
           targetInstances,
           instanceId: this.instanceId,
         },
-        "Would update Cloud Run instances (placeholder implementation)"
+        "Would update Cloud Run instances (placeholder implementation)",
       );
 
       // TODO: Implement actual Cloud Run API call with proper authentication
@@ -338,7 +366,7 @@ export class AutoScalingService {
           url,
           targetInstances,
         },
-        "Failed to update Cloud Run instances"
+        "Failed to update Cloud Run instances",
       );
       throw error;
     }
@@ -371,7 +399,7 @@ export class AutoScalingService {
           estimatedInstances,
           uniqueInstances: Array.from(uniqueInstances),
         },
-        "Estimated current instance count"
+        "Estimated current instance count",
       );
 
       return estimatedInstances;
@@ -402,7 +430,7 @@ export class AutoScalingService {
           error,
           instanceId: this.instanceId,
         },
-        "Failed to log metrics"
+        "Failed to log metrics",
       );
     }
   }
@@ -414,7 +442,7 @@ export class AutoScalingService {
     action: "scale_up" | "scale_down",
     fromInstances: number,
     toInstances: number,
-    metrics: ScalingMetrics
+    metrics: ScalingMetrics,
   ): Promise<void> {
     try {
       await this.firestore.collection("scaling_actions").add({
@@ -438,7 +466,7 @@ export class AutoScalingService {
           action,
           instanceId: this.instanceId,
         },
-        "Failed to record scaling action"
+        "Failed to record scaling action",
       );
     }
   }
@@ -473,7 +501,7 @@ export class AutoScalingService {
         updates,
         newConfig: this.config,
       },
-      "Updated scaling configuration"
+      "Updated scaling configuration",
     );
   }
 }

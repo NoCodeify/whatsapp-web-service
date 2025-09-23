@@ -118,6 +118,7 @@ npm start
 ### Google Cloud Run Deployment
 
 1. **Setup Artifact Registry**:
+
 ```bash
 gcloud artifacts repositories create whatsapp-repo \
   --repository-format=docker \
@@ -125,11 +126,13 @@ gcloud artifacts repositories create whatsapp-repo \
 ```
 
 2. **Deploy using Cloud Build**:
+
 ```bash
 gcloud builds submit --config cloudbuild-dev.yaml
 ```
 
 3. **Verify Deployment**:
+
 ```bash
 curl https://your-service-url/health
 ```
@@ -157,12 +160,15 @@ curl -H "X-API-Key: your-api-key" \
 ### Core Endpoints
 
 #### Health Check
+
 ```http
 GET /health
 ```
+
 Returns service health and metrics.
 
 #### Session Management
+
 ```http
 POST /api/sessions/{userId}/{phoneNumber}/initialize
 GET  /api/sessions/{userId}/{phoneNumber}/status
@@ -170,6 +176,7 @@ DELETE /api/sessions/{userId}/{phoneNumber}
 ```
 
 #### Message Sending
+
 ```http
 POST /api/messages/send
 Content-Type: application/json
@@ -191,11 +198,11 @@ Content-Type: application/json
 Connect to WebSocket for real-time updates:
 
 ```javascript
-const ws = new WebSocket('wss://your-service-url');
-ws.on('qr-code', (data) => {
+const ws = new WebSocket("wss://your-service-url");
+ws.on("qr-code", (data) => {
   // Display QR code for scanning
 });
-ws.on('session-status', (data) => {
+ws.on("session-status", (data) => {
   // Handle session status changes
 });
 ```
@@ -204,15 +211,15 @@ ws.on('session-status', (data) => {
 
 ### Environment Variables
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `NODE_ENV` | Environment mode | `development` |
-| `PORT` | Server port | `8090` |
-| `MAX_CONNECTIONS` | Max concurrent connections | `50` |
-| `MEMORY_THRESHOLD` | Memory usage threshold for scaling | `0.8` |
-| `LOG_LEVEL` | Logging level | `info` |
-| `AUTO_RECONNECT` | Enable auto-reconnection | `true` |
-| `MAX_RECONNECT_ATTEMPTS` | Max reconnection attempts | `3` |
+| Variable                 | Description                        | Default       |
+| ------------------------ | ---------------------------------- | ------------- |
+| `NODE_ENV`               | Environment mode                   | `development` |
+| `PORT`                   | Server port                        | `8090`        |
+| `MAX_CONNECTIONS`        | Max concurrent connections         | `50`          |
+| `MEMORY_THRESHOLD`       | Memory usage threshold for scaling | `0.8`         |
+| `LOG_LEVEL`              | Logging level                      | `info`        |
+| `AUTO_RECONNECT`         | Enable auto-reconnection           | `true`        |
+| `MAX_RECONNECT_ATTEMPTS` | Max reconnection attempts          | `3`           |
 
 ### Proxy Configuration
 
@@ -220,7 +227,7 @@ The service supports dynamic proxy assignment:
 
 ```typescript
 interface ProxyConfig {
-  type: 'isp' | 'datacenter';
+  type: "isp" | "datacenter";
   country: string;
   fallbackChain: string[];
 }
@@ -261,12 +268,15 @@ The `/health` endpoint provides comprehensive service metrics:
 Structured logging with correlation IDs for request tracing:
 
 ```typescript
-logger.info({
-  correlationId: "req_1234567890_abc123",
-  userId: "user-123",
-  phoneNumber: "+1234567890",
-  action: "message-sent"
-}, "WhatsApp message sent successfully");
+logger.info(
+  {
+    correlationId: "req_1234567890_abc123",
+    userId: "user-123",
+    phoneNumber: "+1234567890",
+    action: "message-sent",
+  },
+  "WhatsApp message sent successfully",
+);
 ```
 
 ## 🔒 Security
@@ -338,6 +348,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 🎉 **Successfully deployed and ready for production use!**
 
-*Generated with [Claude Code](https://claude.ai/code)*
+_Generated with [Claude Code](https://claude.ai/code)_
 
-*Co-Authored-By: Claude <noreply@anthropic.com>*
+_Co-Authored-By: Claude <noreply@anthropic.com>_

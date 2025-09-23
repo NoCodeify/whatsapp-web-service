@@ -2,22 +2,21 @@ name: 🚀 Deploy WhatsApp Web Service
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [main, dev]
   pull_request:
-    branches: [ main ]
+    branches: [main, dev]
   workflow_dispatch:
     inputs:
       environment:
-        description: 'Deployment environment'
+        description: "Deployment environment"
         required: true
-        default: 'dev'
+        default: "dev"
         type: choice
         options:
-        - dev
-        - prod
+          - dev
+          - prod
 
 env:
-  PROJECT_ID: whatzaidev
   REGION: europe-central2
   REPOSITORY: whatsapp-repo
   SERVICE_NAME: whatsapp-web-service
@@ -28,122 +27,122 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: 📥 Checkout code
-      uses: actions/checkout@v4
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
 
-    - name: 📦 Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '20'
-        cache: 'npm'
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
 
-    - name: 📥 Install dependencies
-      run: npm ci
+      - name: 📥 Install dependencies
+        run: npm ci
 
-    - name: 🔍 Lint code
-      run: npx prettier --check .
+      - name: 🔍 Lint code
+        run: npx prettier --check .
 
-    - name: 🏗️ Build TypeScript
-      run: npm run build
+      - name: 🏗️ Build TypeScript
+        run: npm run build
 
-    - name: 🧪 Run tests
-      run: npm test
+      - name: 🧪 Run tests
+        run: npm test
 
   build-and-deploy-dev:
     name: 🚀 Deploy to Development
     needs: test
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    if: github.ref == 'refs/heads/dev' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'dev')
     environment: development
 
     steps:
-    - name: 📥 Checkout code
-      uses: actions/checkout@v4
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
 
-    - name: 🔐 Authenticate to Google Cloud
-      uses: google-github-actions/auth@v2
-      with:
-        credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - name: 🔐 Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
 
-    - name: 🛠️ Set up Cloud SDK
-      uses: google-github-actions/setup-gcloud@v2
+      - name: 🛠️ Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
 
-    - name: 🔧 Configure Docker for Artifact Registry
-      run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev
+      - name: 🔧 Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev
 
-    - name: 🏗️ Build and deploy with Cloud Build
-      run: |
-        ENV_SUFFIX=${{ github.event.inputs.environment == 'prod' && '' || '-dev' }}
-        SERVICE_NAME="${{ env.SERVICE_NAME }}${ENV_SUFFIX}"
+      - name: 🏗️ Build and deploy with Cloud Build
+        run: |
+          gcloud builds submit \
+            --config cloudbuild-dev.yaml \
+            --project whatzaidev \
+            --region ${{ env.REGION }}
 
-        gcloud builds submit \
-          --config cloudbuild-dev.yaml \
-          --substitutions=_SERVICE_NAME=${SERVICE_NAME},_REGION=${{ env.REGION }}
+      - name: 🔍 Verify deployment
+        run: |
+          # Get service URL
+          SERVICE_URL=$(gcloud run services describe whatsapp-web-service-dev \
+            --region=${{ env.REGION }} \
+            --project=whatzaidev \
+            --format='value(status.url)')
 
-    - name: 🔍 Verify deployment
-      run: |
-        ENV_SUFFIX=${{ github.event.inputs.environment == 'prod' && '' || '-dev' }}
-        SERVICE_NAME="${{ env.SERVICE_NAME }}${ENV_SUFFIX}"
+          echo "🌐 Development service deployed at: ${SERVICE_URL}"
 
-        # Get service URL
-        SERVICE_URL=$(gcloud run services describe ${SERVICE_NAME} \
-          --region=${{ env.REGION }} \
-          --format='value(status.url)')
-
-        echo "🌐 Service deployed at: ${SERVICE_URL}"
-
-        # Health check
-        curl -f "${SERVICE_URL}/health" || exit 1
-        echo "✅ Health check passed!"
+          # Health check
+          curl -f "${SERVICE_URL}/health" || exit 1
+          echo "✅ Development health check passed!"
 
   build-and-deploy-prod:
     name: 🚀 Deploy to Production
     needs: test
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'prod'
+    if: github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'prod')
     environment: production
 
     steps:
-    - name: 📥 Checkout code
-      uses: actions/checkout@v4
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
 
-    - name: 🔐 Authenticate to Google Cloud
-      uses: google-github-actions/auth@v2
-      with:
-        credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - name: 🔐 Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY_PROD }}
 
-    - name: 🛠️ Set up Cloud SDK
-      uses: google-github-actions/setup-gcloud@v2
+      - name: 🛠️ Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
 
-    - name: 🔧 Configure Docker for Artifact Registry
-      run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev
+      - name: 🔧 Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev
 
-    - name: 🏗️ Build and deploy to production
-      run: |
-        gcloud builds submit \
-          --config cloudbuild.yaml \
-          --substitutions=_SERVICE_NAME=${{ env.SERVICE_NAME }},_REGION=${{ env.REGION }}
+      - name: 🏗️ Build and deploy to production
+        run: |
+          gcloud builds submit \
+            --config cloudbuild.yaml \
+            --project whatzai \
+            --region ${{ env.REGION }}
 
-    - name: 🔍 Verify production deployment
-      run: |
-        # Get service URL
-        SERVICE_URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
-          --region=${{ env.REGION }} \
-          --format='value(status.url)')
+      - name: 🔍 Verify production deployment
+        run: |
+          # Get service URL
+          SERVICE_URL=$(gcloud run services describe whatsapp-web-service \
+            --region=${{ env.REGION }} \
+            --project=whatzai \
+            --format='value(status.url)')
 
-        echo "🌐 Production service deployed at: ${SERVICE_URL}"
+          echo "🌐 Production service deployed at: ${SERVICE_URL}"
 
-        # Health check
-        curl -f "${SERVICE_URL}/health" || exit 1
-        echo "✅ Production health check passed!"
+          # Health check
+          curl -f "${SERVICE_URL}/health" || exit 1
+          echo "✅ Production health check passed!"
 
-    - name: 📊 Update production URL secret
-      run: |
-        SERVICE_URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
-          --region=${{ env.REGION }} \
-          --format='value(status.url)')
+      - name: 📊 Update production URL secret
+        run: |
+          SERVICE_URL=$(gcloud run services describe whatsapp-web-service \
+            --region=${{ env.REGION }} \
+            --project=whatzai \
+            --format='value(status.url)')
 
-        echo -n "${SERVICE_URL}" | gcloud secrets versions add WHATSAPP_WEB_SERVICE_URL --data-file=-
+          echo -n "${SERVICE_URL}" | gcloud secrets versions add WHATSAPP_WEB_SERVICE_URL_PROD \
+            --project=whatzai --data-file=-
 
   security-scan:
     name: 🔒 Security Scan
@@ -151,25 +150,25 @@ jobs:
     if: github.event_name == 'pull_request'
 
     steps:
-    - name: 📥 Checkout code
-      uses: actions/checkout@v4
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
 
-    - name: 📦 Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '20'
-        cache: 'npm'
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
 
-    - name: 📥 Install dependencies
-      run: npm ci
+      - name: 📥 Install dependencies
+        run: npm ci
 
-    - name: 🔍 Run security audit
-      run: npm audit --audit-level moderate
+      - name: 🔍 Run security audit
+        run: npm audit --audit-level moderate
 
-    - name: 🔒 Run CodeQL Analysis
-      uses: github/codeql-action/init@v3
-      with:
-        languages: typescript
+      - name: 🔒 Run CodeQL Analysis
+        uses: github/codeql-action/init@v3
+        with:
+          languages: typescript
 
-    - name: 🔒 Perform CodeQL Analysis
-      uses: github/codeql-action/analyze@v3
+      - name: 🔒 Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3

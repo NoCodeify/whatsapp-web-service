@@ -52,7 +52,6 @@ const authenticate = (
   return;
 };
 
-
 export function createApiRoutes(
   connectionPool: ConnectionPool,
   sessionManager: SessionManager,
@@ -362,7 +361,6 @@ export function createApiRoutes(
       }
     },
   );
-
 
   // Reconnection endpoints
   if (reconnectionService) {
@@ -695,33 +693,33 @@ export function createApiRoutes(
 
               // Convert base64 to buffer if needed
               let buffer: Buffer;
-              if (typeof media.buffer === 'string') {
+              if (typeof media.buffer === "string") {
                 // Assume base64 encoded
-                buffer = Buffer.from(media.buffer, 'base64');
+                buffer = Buffer.from(media.buffer, "base64");
               } else if (Buffer.isBuffer(media.buffer)) {
                 buffer = media.buffer;
               } else {
-                throw new Error('Invalid buffer format');
+                throw new Error("Invalid buffer format");
               }
 
               // Determine mimetype from media type
               let mimetype = media.mimetype;
               if (!mimetype) {
                 switch (media.type) {
-                  case 'image':
-                    mimetype = 'image/jpeg';
+                  case "image":
+                    mimetype = "image/jpeg";
                     break;
-                  case 'video':
-                    mimetype = 'video/mp4';
+                  case "video":
+                    mimetype = "video/mp4";
                     break;
-                  case 'audio':
-                    mimetype = 'audio/ogg';
+                  case "audio":
+                    mimetype = "audio/ogg";
                     break;
-                  case 'document':
-                    mimetype = 'application/octet-stream';
+                  case "document":
+                    mimetype = "application/octet-stream";
                     break;
                   default:
-                    mimetype = 'application/octet-stream';
+                    mimetype = "application/octet-stream";
                 }
               }
 
@@ -730,10 +728,10 @@ export function createApiRoutes(
                   buffer,
                   mimetype,
                   size: buffer.length,
-                  originalname: media.fileName || `media_${Date.now()}`
+                  originalname: media.fileName || `media_${Date.now()}`,
                 },
                 userId,
-                formattedPhone
+                formattedPhone,
               );
 
               mediaUrl = uploadResult.url;
@@ -744,9 +742,9 @@ export function createApiRoutes(
                   userId,
                   mediaType: media.type,
                   mediaSize: buffer.length,
-                  uploadedUrl: mediaUrl
+                  uploadedUrl: mediaUrl,
                 },
-                "Media uploaded successfully for sending"
+                "Media uploaded successfully for sending",
               );
             } catch (error) {
               logger.error(
@@ -754,13 +752,14 @@ export function createApiRoutes(
                   correlationId,
                   userId,
                   error,
-                  mediaType: media.type
+                  mediaType: media.type,
                 },
-                "Failed to upload media for sending"
+                "Failed to upload media for sending",
               );
               return res.status(500).json({
                 error: "Failed to upload media",
-                details: error instanceof Error ? error.message : "Unknown error"
+                details:
+                  error instanceof Error ? error.message : "Unknown error",
               });
             }
           } else if (media.url) {
@@ -768,7 +767,7 @@ export function createApiRoutes(
             mediaUrl = media.url;
           } else {
             return res.status(400).json({
-              error: "Media must include either 'url' or 'buffer' field"
+              error: "Media must include either 'url' or 'buffer' field",
             });
           }
 
@@ -973,7 +972,6 @@ export function createApiRoutes(
       }
     },
   );
-
 
   /**
    * GET /proxy/locations

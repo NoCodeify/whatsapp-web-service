@@ -1,61 +1,61 @@
 # Cloud Build configuration for deploying WhatsApp Web Service to Cloud Run (Dev Environment)
 steps:
   # Build the container image
-  - name: 'gcr.io/cloud-builders/docker'
+  - name: "gcr.io/cloud-builders/docker"
     args:
-      - 'build'
-      - '-t'
-      - 'europe-central2-docker.pkg.dev/whatzaidev/whatsapp-repo/whatsapp-web-service:dev'
-      - '-t'
-      - 'europe-central2-docker.pkg.dev/whatzaidev/whatsapp-repo/whatsapp-web-service:latest'
-      - '.'
+      - "build"
+      - "-t"
+      - "europe-central2-docker.pkg.dev/whatzaidev/whatsapp-repo/whatsapp-web-service:dev"
+      - "-t"
+      - "europe-central2-docker.pkg.dev/whatzaidev/whatsapp-repo/whatsapp-web-service:latest"
+      - "."
 
   # Push the container image
-  - name: 'gcr.io/cloud-builders/docker'
+  - name: "gcr.io/cloud-builders/docker"
     args:
-      - 'push'
-      - '--all-tags'
-      - 'europe-central2-docker.pkg.dev/whatzaidev/whatsapp-repo/whatsapp-web-service'
+      - "push"
+      - "--all-tags"
+      - "europe-central2-docker.pkg.dev/whatzaidev/whatsapp-repo/whatsapp-web-service"
 
   # Deploy to Cloud Run
-  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
     entrypoint: gcloud
     args:
-      - 'run'
-      - 'deploy'
-      - 'whatsapp-web-service-dev'
-      - '--image'
-      - 'europe-central2-docker.pkg.dev/whatzaidev/whatsapp-repo/whatsapp-web-service:dev'
-      - '--region'
-      - 'europe-central2'
-      - '--platform'
-      - 'managed'
-      - '--min-instances'
-      - '0'
-      - '--max-instances'
-      - '3'
-      - '--memory'
-      - '2Gi'
-      - '--cpu'
-      - '1'
-      - '--timeout'
-      - '3600'
-      - '--concurrency'
-      - '100'
-      - '--port'
-      - '8080'
-      - '--cpu-throttling'
-      - '--no-cpu-boost'
-      - '--service-account'
-      - 'whatsapp-service@whatzaidev.iam.gserviceaccount.com'
-      - '--set-env-vars'
-      - 'NODE_ENV=development,GOOGLE_CLOUD_PROJECT=whatzaidev,STORAGE_BUCKET=whatzaidev-whatsapp-sessions,LOG_LEVEL=debug'
-      - '--set-secrets'
-      - 'API_KEY=WHATSAPP_WEB_API_KEY:latest,BRIGHT_DATA_CUSTOMER_ID=BRIGHT_DATA_CUSTOMER_ID:latest,BRIGHT_DATA_ZONE_PASSWORD=BRIGHT_DATA_ZONE_PASSWORD:latest,SESSION_ENCRYPTION_KEY=SESSION_ENCRYPTION_KEY:latest,WS_TOKEN=WHATSAPP_WS_TOKEN:latest'
-      - '--allow-unauthenticated'
+      - "run"
+      - "deploy"
+      - "whatsapp-web-service-dev"
+      - "--image"
+      - "europe-central2-docker.pkg.dev/whatzaidev/whatsapp-repo/whatsapp-web-service:dev"
+      - "--region"
+      - "europe-central2"
+      - "--platform"
+      - "managed"
+      - "--min-instances"
+      - "0"
+      - "--max-instances"
+      - "3"
+      - "--memory"
+      - "2Gi"
+      - "--cpu"
+      - "1"
+      - "--timeout"
+      - "3600"
+      - "--concurrency"
+      - "100"
+      - "--port"
+      - "8080"
+      - "--cpu-throttling"
+      - "--no-cpu-boost"
+      - "--service-account"
+      - "whatsapp-service@whatzaidev.iam.gserviceaccount.com"
+      - "--set-env-vars"
+      - "NODE_ENV=development,GOOGLE_CLOUD_PROJECT=whatzaidev,STORAGE_BUCKET=whatzaidev-whatsapp-sessions,LOG_LEVEL=debug"
+      - "--set-secrets"
+      - "API_KEY=WHATSAPP_WEB_API_KEY:latest,BRIGHT_DATA_CUSTOMER_ID=BRIGHT_DATA_CUSTOMER_ID:latest,BRIGHT_DATA_ZONE_PASSWORD=BRIGHT_DATA_ZONE_PASSWORD:latest,SESSION_ENCRYPTION_KEY=SESSION_ENCRYPTION_KEY:latest,WS_TOKEN=WHATSAPP_WS_TOKEN:latest"
+      - "--allow-unauthenticated"
 
 options:
   logging: CLOUD_LOGGING_ONLY
-  machineType: 'E2_HIGHCPU_8'
+  machineType: "E2_HIGHCPU_8"
 
-timeout: '1200s'
+timeout: "1200s"

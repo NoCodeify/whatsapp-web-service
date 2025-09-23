@@ -20,7 +20,6 @@ export interface ProxyInfo {
   country: string;
 }
 
-
 interface AvailabilityCache {
   country: string;
   available: boolean;
@@ -73,7 +72,6 @@ export class DynamicProxyService {
   };
 
   constructor() {
-
     // Initialize API client with placeholder auth
     this.apiClient = axios.create({
       baseURL: "https://api.brightdata.com",
@@ -194,7 +192,6 @@ export class DynamicProxyService {
     }
   }
 
-
   /**
    * Check if proxies are available for a country
    */
@@ -301,10 +298,6 @@ export class DynamicProxyService {
 
     return { proxy, fallbackUsed };
   }
-
-
-
-
 
   /**
    * Get simplified proxy metrics (no tracking needed)

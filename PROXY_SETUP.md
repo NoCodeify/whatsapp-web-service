@@ -75,6 +75,7 @@ npx tsx test-isp-proxy.ts
 ```
 
 Expected output:
+
 ```
 ✅ Response: Welcome to Bright Data!
 ✅ IP Info: { "ip": "95.214.247.75", "country": "NL" }
@@ -117,12 +118,14 @@ curl -X POST http://localhost:8090/api/proxy/test \
 ### Metrics Available
 
 The proxy system tracks:
+
 - Active sessions count
 - IP assignments per phone number
 - Session age and rotation count
 - ISP proxy utilization
 
 Access metrics via:
+
 ```javascript
 GET /api/proxy/status
 
@@ -164,11 +167,13 @@ Response:
 ### Debug Mode
 
 Enable debug logging:
+
 ```env
 LOG_LEVEL=debug
 ```
 
 Check logs for proxy-related messages:
+
 ```bash
 npm run dev | grep -i proxy
 ```
@@ -195,9 +200,10 @@ npm run dev | grep -i proxy
 For production:
 
 1. **Use Secret Manager**:
+
    ```javascript
    // Use Google Secret Manager or similar
-   const apiKey = await secretManager.getSecret('BRIGHT_DATA_API_KEY');
+   const apiKey = await secretManager.getSecret("BRIGHT_DATA_API_KEY");
    ```
 
 2. **Scale Considerations**:
@@ -225,6 +231,7 @@ For production:
 ## Support
 
 For issues or questions:
+
 1. Check Bright Data documentation: https://docs.brightdata.com
 2. Contact Bright Data support for proxy-specific issues
 3. Review application logs for connection details

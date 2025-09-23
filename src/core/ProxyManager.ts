@@ -38,7 +38,10 @@ export interface ProxyLocation {
 export class ProxyManager {
   private logger = pino({ name: "ProxyManager" });
   private sessions: Map<string, ProxySession> = new Map();
-  private activeProxies: Map<string, { ip: string; country: string; assignedAt: Date }> = new Map();
+  private activeProxies: Map<
+    string,
+    { ip: string; country: string; assignedAt: Date }
+  > = new Map();
   private brightDataService?: BrightDataService;
   private dynamicProxyService?: DynamicProxyService;
   private _firestore?: Firestore;
@@ -350,7 +353,10 @@ export class ProxyManager {
     },
   ];
 
-  constructor(firestore?: Firestore, dynamicProxyService?: DynamicProxyService) {
+  constructor(
+    firestore?: Firestore,
+    dynamicProxyService?: DynamicProxyService,
+  ) {
     this._firestore = firestore;
     this.dynamicProxyService = dynamicProxyService;
 
@@ -454,11 +460,11 @@ export class ProxyManager {
             phoneNumber,
             requestedCountry,
           );
-          
+
           if (dynamicResult && dynamicResult.proxy) {
             const proxy = dynamicResult.proxy;
             const sessionId = `${userId}_${phoneNumber}_${proxy.ip}`;
-            
+
             // Convert to ProxyConfig format
             const dynamicConfig = {
               host: this.brightDataConfig.host,
@@ -499,12 +505,12 @@ export class ProxyManager {
         } catch (error) {
           this.logger.warn(
             { error, userId, phoneNumber, requestedCountry: country },
-            "Dynamic proxy allocation failed, falling back to static assignment"
+            "Dynamic proxy allocation failed, falling back to static assignment",
           );
         }
       }
 
-      // Fallback to BrightDataService (static IP assignment)  
+      // Fallback to BrightDataService (static IP assignment)
       if (this.brightDataService) {
         const ispConfig = await this.brightDataService.getProxyConfig(
           userId,
@@ -512,7 +518,12 @@ export class ProxyManager {
         );
         if (ispConfig) {
           this.logger.info(
-            { userId, phoneNumber, type: "isp_static", sessionId: ispConfig.sessionId },
+            {
+              userId,
+              phoneNumber,
+              type: "isp_static",
+              sessionId: ispConfig.sessionId,
+            },
             "Using static ISP proxy with dedicated IP assignment",
           );
           return ispConfig;
@@ -521,18 +532,22 @@ export class ProxyManager {
           // This prevents exposing user's real IP address
           this.logger.error(
             { userId, phoneNumber, proxyType: "isp" },
-            "SECURITY: No ISP proxy available - blocking connection to prevent IP exposure"
+            "SECURITY: No ISP proxy available - blocking connection to prevent IP exposure",
           );
-          throw new Error("No proxy available for secure connection. Connection blocked to protect user privacy.");
+          throw new Error(
+            "No proxy available for secure connection. Connection blocked to protect user privacy.",
+          );
         }
       }
 
       // If no proxy services are configured in ISP mode, block connection
       this.logger.error(
         { userId, phoneNumber, proxyType: "isp" },
-        "SECURITY: ISP proxy type configured but no proxy services available - blocking connection"
+        "SECURITY: ISP proxy type configured but no proxy services available - blocking connection",
       );
-      throw new Error("Proxy service not configured. Connection blocked to protect user privacy.");
+      throw new Error(
+        "Proxy service not configured. Connection blocked to protect user privacy.",
+      );
     }
 
     // Fallback to session-based residential proxy

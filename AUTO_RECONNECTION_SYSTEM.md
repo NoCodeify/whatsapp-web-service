@@ -7,24 +7,28 @@ The Auto-Reconnection System ensures seamless recovery of WhatsApp Web sessions 
 ## ✨ Key Features
 
 ### 1. **Intelligent Session Recovery**
+
 - Detects active sessions from before restart
 - Differentiates between graceful shutdowns and crashes
 - Prioritizes recovery by country and user importance
 - Handles concurrent multi-instance startups
 
 ### 2. **Smart Proxy Management**
+
 - Reactivates existing proxies when available
 - Purchases new proxies for same country if original unavailable
 - Implements regional fallback for unsupported countries
 - Tracks proxy assignments across restarts
 
 ### 3. **Cost Optimization**
+
 - Only pays for proxies during active connections
 - Recycles proxies within 1-hour window
 - Avoids duplicate purchases through assignment tracking
 - Monitors utilization and costs
 
 ### 4. **Production Resilience**
+
 - Handles multiple server instances gracefully
 - Implements exponential backoff for failed connections
 - Provides comprehensive logging and monitoring
@@ -39,7 +43,7 @@ SessionRecoveryService.recoverActiveSessions()
     ↓
 Load Active Sessions from Firestore
     ├── proxy_assignments (active proxies)
-    ├── whatsapp_phone_numbers (connected sessions)  
+    ├── whatsapp_phone_numbers (connected sessions)
     └── session_recovery (previous recovery state)
     ↓
 For Each Session:
@@ -72,6 +76,7 @@ Update Recovery Status & Metrics
 ## 🚀 How Server Restart Works
 
 ### 1. **Graceful Shutdown Process**
+
 ```typescript
 // Before shutdown
 await sessionRecoveryService.shutdown();
@@ -80,6 +85,7 @@ await sessionRecoveryService.shutdown();
 ```
 
 ### 2. **Server Startup Process**
+
 ```typescript
 // On startup (after 3 second delay)
 await sessionRecoveryService.cleanupOldInstances();
@@ -87,6 +93,7 @@ await sessionRecoveryService.recoverActiveSessions();
 ```
 
 ### 3. **Recovery Sequence**
+
 1. **Discover Active Sessions**: Query Firestore for sessions active in last 24h
 2. **Prioritize Recovery**: Sort by country priority and last activity
 3. **Batch Processing**: Recover in batches of 5 to avoid overload
@@ -118,6 +125,7 @@ BRIGHT_DATA_API_KEY_SECRET=projects/PROJECT/secrets/bright-data-api-key/versions
 ### Firestore Collections Created
 
 #### `proxy_assignments`
+
 ```json
 {
   "userId": "user_123",
@@ -133,6 +141,7 @@ BRIGHT_DATA_API_KEY_SECRET=projects/PROJECT/secrets/bright-data-api-key/versions
 ```
 
 #### `server_instances`
+
 ```json
 {
   "instanceId": "instance_hostname_timestamp",
@@ -146,9 +155,10 @@ BRIGHT_DATA_API_KEY_SECRET=projects/PROJECT/secrets/bright-data-api-key/versions
 ```
 
 #### `session_recovery`
+
 ```json
 {
-  "userId": "user_123", 
+  "userId": "user_123",
   "phoneNumber": "+14155551234",
   "status": "active",
   "instanceId": "instance_12345",
@@ -159,12 +169,14 @@ BRIGHT_DATA_API_KEY_SECRET=projects/PROJECT/secrets/bright-data-api-key/versions
 ## 💡 Advanced Features
 
 ### Multi-Instance Coordination
+
 - Each server instance has unique ID
 - Recovery state tracked per instance
 - Prevents duplicate recovery attempts
 - Automatic cleanup of old instances
 
 ### Intelligent Fallback Chains
+
 ```typescript
 // Regional fallback examples
 Belgium → Netherlands → France → Germany → UK → US
@@ -173,6 +185,7 @@ Nigeria → South Africa → Kenya → Egypt → UK → US
 ```
 
 ### Cost Monitoring
+
 ```typescript
 const metrics = await dynamicProxyService.getMetrics();
 // Returns: total, active, idle, releasing, byCountry, estimatedMonthlyCost
@@ -181,15 +194,17 @@ const metrics = await dynamicProxyService.getMetrics();
 ## 📊 Testing
 
 ### Run Comprehensive Tests
+
 ```bash
 # Test dynamic proxy allocation
 npx tsx test-dynamic-proxy.ts
 
-# Test auto-reconnection scenarios  
+# Test auto-reconnection scenarios
 npx tsx test-auto-reconnection.ts
 ```
 
 ### Test Scenarios Covered
+
 1. ✅ Graceful server restart with proxy reactivation
 2. ✅ Crash recovery without graceful shutdown
 3. ✅ Multi-instance startup coordination
@@ -201,12 +216,13 @@ npx tsx test-auto-reconnection.ts
 ## 🔍 Monitoring & Observability
 
 ### Logs to Monitor
+
 ```bash
 # Recovery startup
 "SessionRecoveryService: Starting session recovery after server restart"
 
-# Proxy reactivation  
-"SessionRecoveryService: Reactivated existing proxy" 
+# Proxy reactivation
+"SessionRecoveryService: Reactivated existing proxy"
 
 # Fallback usage
 "DynamicProxyService: Using fallback country"
@@ -216,6 +232,7 @@ npx tsx test-auto-reconnection.ts
 ```
 
 ### Key Metrics
+
 - Recovery success rate
 - Proxy reactivation rate
 - Fallback usage percentage
@@ -225,17 +242,20 @@ npx tsx test-auto-reconnection.ts
 ## ⚠️ Important Considerations
 
 ### Security
+
 - **CRITICAL**: Rotate the exposed BrightData API key immediately
 - Use Google Secret Manager for production
 - Implement proper Firestore security rules
 
 ### Performance
+
 - Recovery runs in batches to avoid overload
 - 3-second startup delay ensures services are ready
 - Exponential backoff on failed recovery attempts
 - Maximum 3 recovery attempts per session
 
 ### Cost Management
+
 - Only ISP proxy users get full recovery features
 - Residential proxy users fall back to basic recovery
 - Monitor proxy utilization to optimize costs
@@ -244,6 +264,7 @@ npx tsx test-auto-reconnection.ts
 ## 🚀 Deployment Steps
 
 ### 1. **Immediate Actions**
+
 ```bash
 # Rotate exposed API key
 gcloud secrets versions add bright-data-api-key --data-file=-
@@ -253,6 +274,7 @@ export BRIGHT_DATA_API_KEY_SECRET="projects/PROJECT/secrets/bright-data-api-key/
 ```
 
 ### 2. **Deploy to Staging**
+
 ```bash
 npm run build
 # Deploy to staging environment
@@ -260,6 +282,7 @@ npm run build
 ```
 
 ### 3. **Production Deployment**
+
 ```bash
 # Deploy during low-traffic period
 # Monitor metrics dashboard
@@ -269,12 +292,14 @@ npm run build
 ## 🎯 Expected Results
 
 ### Before Auto-Reconnection
+
 - ❌ Manual intervention needed after restarts
 - ❌ Users lose WhatsApp connections
 - ❌ Proxy assignments lost
 - ❌ Re-authentication required
 
 ### After Auto-Reconnection
+
 - ✅ Automatic recovery within 30 seconds
 - ✅ Users maintain WhatsApp connections
 - ✅ Proxy assignments preserved
@@ -301,6 +326,7 @@ npm run build
    - Check server_instances collection
 
 ### Debug Commands
+
 ```bash
 # Check recovery status
 curl -X GET /api/proxy/status -H "x-api-key: your-key"

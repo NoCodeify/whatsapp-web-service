@@ -93,6 +93,7 @@ SESSION_STORAGE_PATH=./sessions
 ## Troubleshooting
 
 ### Port Already in Use
+
 ```bash
 # Find what's using port 8090
 lsof -i :8090
@@ -102,32 +103,41 @@ PORT=8091 npm run dev
 ```
 
 ### Firebase Emulator Port Conflict
+
 By default, Firebase Firestore emulator uses port 8080. That's why we use port 8090 for the WhatsApp Web service to avoid conflicts.
 
 ### CORS Issues
+
 The service is configured to accept requests from:
+
 - `http://localhost:3000` (default Flutter web)
 - `http://localhost:*` (any localhost port)
 
 Add more origins in `.env` if needed:
+
 ```env
 ALLOWED_ORIGINS=http://localhost:3000,http://localhost:4200
 ```
 
 ### Session Not Persisting
+
 Check that `./sessions` directory exists and has write permissions:
+
 ```bash
 mkdir -p sessions
 chmod 755 sessions
 ```
 
 ### Can't Connect to WhatsApp
+
 Without proxy, WhatsApp might show security warnings if:
+
 - You're on a VPN
 - Your IP location is unusual
 - Multiple login attempts
 
 Try:
+
 1. Disable VPN
 2. Wait a few minutes between attempts
 3. Use your regular network
@@ -153,6 +163,7 @@ When ready for production:
 ## Security Note
 
 ⚠️ **Local mode is for development only!**
+
 - Uses weak API key (`wws_local_dev_key_123`)
 - No proxy protection
 - Sessions stored locally

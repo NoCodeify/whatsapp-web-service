@@ -404,9 +404,15 @@ export class ConnectionPool extends EventEmitter {
       // Properly logout from WhatsApp first, then end connection
       try {
         await connection.socket.logout();
-        this.logger.info({ userId, phoneNumber }, "WhatsApp session logged out successfully");
+        this.logger.info(
+          { userId, phoneNumber },
+          "WhatsApp session logged out successfully",
+        );
       } catch (logoutError) {
-        this.logger.warn({ userId, phoneNumber, logoutError }, "Failed to logout cleanly, proceeding with connection end");
+        this.logger.warn(
+          { userId, phoneNumber, logoutError },
+          "Failed to logout cleanly, proceeding with connection end",
+        );
       }
 
       // Close the socket
@@ -418,11 +424,12 @@ export class ConnectionPool extends EventEmitter {
       // Clean up associated caches
       const sessionKey = `${userId}-${phoneNumber}`;
       if (this.processedContactsCache.has(sessionKey)) {
-        const cacheSize = this.processedContactsCache.get(sessionKey)?.size || 0;
+        const cacheSize =
+          this.processedContactsCache.get(sessionKey)?.size || 0;
         this.processedContactsCache.delete(sessionKey);
         this.logger.debug(
           { userId, phoneNumber, cacheSize },
-          "Cleared deduplication cache for disconnected session"
+          "Cleared deduplication cache for disconnected session",
         );
       }
       this.importListRefs.delete(sessionKey);
@@ -1375,7 +1382,11 @@ export class ConnectionPool extends EventEmitter {
       // messageText already extracted at the beginning for logging
 
       // Handle media if present
-      const mediaInfo = await this.handleMediaMessage(message, userId, phoneNumber);
+      const mediaInfo = await this.handleMediaMessage(
+        message,
+        userId,
+        phoneNumber,
+      );
 
       const messageData = {
         // Core message fields
@@ -1615,7 +1626,11 @@ export class ConnectionPool extends EventEmitter {
 
       // Store the manual message
       // Handle media if present
-      const mediaInfo = await this.handleMediaMessage(message, userId, phoneNumber);
+      const mediaInfo = await this.handleMediaMessage(
+        message,
+        userId,
+        phoneNumber,
+      );
 
       const messageData = {
         // Core fields
@@ -1811,7 +1826,10 @@ export class ConnectionPool extends EventEmitter {
         const existingData = existingList.data();
 
         // Check if it's a soft-deleted list we can reactivate
-        if (existingData.status === "deleted" || existingData.status === "archived") {
+        if (
+          existingData.status === "deleted" ||
+          existingData.status === "archived"
+        ) {
           this.logger.info(
             {
               userId,
@@ -1938,7 +1956,11 @@ export class ConnectionPool extends EventEmitter {
     message: any,
     userId: string,
     phoneNumber: string,
-  ): Promise<{ media_url: string | null; media_content_type: string | null; type: string }> {
+  ): Promise<{
+    media_url: string | null;
+    media_content_type: string | null;
+    type: string;
+  }> {
     try {
       // Check if message has media
       const messageContent = message.message;
@@ -1961,7 +1983,8 @@ export class ConnectionPool extends EventEmitter {
         mimetype = messageContent.audioMessage.mimetype || "audio/ogg";
       } else if (messageContent.documentMessage) {
         mediaType = "document";
-        mimetype = messageContent.documentMessage.mimetype || "application/octet-stream";
+        mimetype =
+          messageContent.documentMessage.mimetype || "application/octet-stream";
       } else if (messageContent.stickerMessage) {
         mediaType = "sticker";
         mimetype = "image/webp";
@@ -1982,11 +2005,11 @@ export class ConnectionPool extends EventEmitter {
       );
 
       // Download media from WhatsApp
-      const mediaBuffer = await downloadMediaMessage(
+      const mediaBuffer = (await downloadMediaMessage(
         message,
         "buffer",
         {},
-      ) as Buffer;
+      )) as Buffer;
 
       if (!mediaBuffer) {
         this.logger.warn(
@@ -1998,7 +2021,11 @@ export class ConnectionPool extends EventEmitter {
           },
           "Failed to download media from WhatsApp",
         );
-        return { media_url: null, media_content_type: mimetype, type: mediaType };
+        return {
+          media_url: null,
+          media_content_type: mimetype,
+          type: mediaType,
+        };
       }
 
       // Upload to Cloud Storage
@@ -2375,13 +2402,17 @@ export class ConnectionPool extends EventEmitter {
 
           // Update names if they are currently Unknown, empty, or null
           if (
-            (!existingData.first_name || existingData.first_name === "Unknown" || existingData.first_name === "") &&
+            (!existingData.first_name ||
+              existingData.first_name === "Unknown" ||
+              existingData.first_name === "") &&
             firstName !== "Unknown"
           ) {
             updateData.first_name = firstName;
           }
           if (
-            (!existingData.last_name || existingData.last_name === "Unknown" || existingData.last_name === "") &&
+            (!existingData.last_name ||
+              existingData.last_name === "Unknown" ||
+              existingData.last_name === "") &&
             lastName !== "Unknown"
           ) {
             updateData.last_name = lastName;
@@ -2408,9 +2439,9 @@ export class ConnectionPool extends EventEmitter {
                       {
                         userId,
                         contactPhone: formattedPhone,
-                        listId: listRef.id
+                        listId: listRef.id,
                       },
-                      "Removing reference to hard-deleted list from contact in chat sync"
+                      "Removing reference to hard-deleted list from contact in chat sync",
                     );
                   } else if (listDoc.data()?.status !== "live") {
                     // List is soft-deleted or archived
@@ -2419,9 +2450,9 @@ export class ConnectionPool extends EventEmitter {
                         userId,
                         contactPhone: formattedPhone,
                         listId: listRef.id,
-                        status: listDoc.data()?.status
+                        status: listDoc.data()?.status,
                       },
-                      "Removing reference to soft-deleted/archived list from contact in chat sync"
+                      "Removing reference to soft-deleted/archived list from contact in chat sync",
                     );
                   } else {
                     // List exists and is live
@@ -2434,9 +2465,9 @@ export class ConnectionPool extends EventEmitter {
                       userId,
                       contactPhone: formattedPhone,
                       listId: listRef.id,
-                      error
+                      error,
                     },
-                    "Removing inaccessible list reference from contact in chat sync"
+                    "Removing inaccessible list reference from contact in chat sync",
                   );
                 }
               }
@@ -2444,7 +2475,7 @@ export class ConnectionPool extends EventEmitter {
 
             // Check if import list is already in valid lists
             const hasImportList = validLists.some(
-              (listRef: any) => listRef.id === importListRef.id
+              (listRef: any) => listRef.id === importListRef.id,
             );
 
             if (!hasImportList) {
@@ -2453,9 +2484,9 @@ export class ConnectionPool extends EventEmitter {
                 {
                   userId,
                   phoneNumber: formattedPhone,
-                  listId: importListRef.id
+                  listId: importListRef.id,
                 },
-                "Adding existing contact to import list from chat sync"
+                "Adding existing contact to import list from chat sync",
               );
             }
 
@@ -2465,7 +2496,8 @@ export class ConnectionPool extends EventEmitter {
 
           // Preserve important fields
           updateData.tags = existingData.tags || updateData.tags || [];
-          updateData.campaigns = existingData.campaigns || updateData.campaigns || [];
+          updateData.campaigns =
+            existingData.campaigns || updateData.campaigns || [];
 
           await contactRef.update(updateData);
 
@@ -2473,9 +2505,9 @@ export class ConnectionPool extends EventEmitter {
             {
               userId,
               phoneNumber: formattedPhone,
-              fieldsUpdated: Object.keys(updateData)
+              fieldsUpdated: Object.keys(updateData),
             },
-            "Updated existing contact from chat sync with merge logic"
+            "Updated existing contact from chat sync with merge logic",
           );
         } else {
           // Don't create new contact here - will be created when messages arrive
@@ -2611,7 +2643,10 @@ export class ConnectionPool extends EventEmitter {
       // Initialize deduplication cache for this session if not exists
       if (!this.processedContactsCache.has(sessionKey)) {
         this.processedContactsCache.set(sessionKey, new Set<string>());
-        this.logger.info({ userId, phoneNumber }, "Initialized deduplication cache for import session");
+        this.logger.info(
+          { userId, phoneNumber },
+          "Initialized deduplication cache for import session",
+        );
       }
       const processedContacts = this.processedContactsCache.get(sessionKey)!;
 
@@ -2677,7 +2712,8 @@ export class ConnectionPool extends EventEmitter {
           continue;
         }
 
-        const formattedUserPhone = formatPhoneNumberSafe(phoneNumber) || phoneNumber;
+        const formattedUserPhone =
+          formatPhoneNumberSafe(phoneNumber) || phoneNumber;
 
         // Find or create contact
         let contactRef;
@@ -2747,9 +2783,9 @@ export class ConnectionPool extends EventEmitter {
                       {
                         userId,
                         contactPhone: formattedContactPhone,
-                        listId: listRef.id
+                        listId: listRef.id,
                       },
-                      "Removing reference to hard-deleted list from contact"
+                      "Removing reference to hard-deleted list from contact",
                     );
                   } else if (listDoc.data()?.status !== "live") {
                     // List is soft-deleted or archived
@@ -2758,9 +2794,9 @@ export class ConnectionPool extends EventEmitter {
                         userId,
                         contactPhone: formattedContactPhone,
                         listId: listRef.id,
-                        status: listDoc.data()?.status
+                        status: listDoc.data()?.status,
                       },
-                      "Removing reference to soft-deleted/archived list from contact"
+                      "Removing reference to soft-deleted/archived list from contact",
                     );
                   } else {
                     // List exists and is live
@@ -2773,9 +2809,9 @@ export class ConnectionPool extends EventEmitter {
                       userId,
                       contactPhone: formattedContactPhone,
                       listId: listRef.id,
-                      error
+                      error,
                     },
-                    "Removing inaccessible list reference from contact"
+                    "Removing inaccessible list reference from contact",
                   );
                 }
               }
@@ -2783,7 +2819,7 @@ export class ConnectionPool extends EventEmitter {
 
             // Check if import list is already in valid lists
             const hasImportList = validLists.some(
-              (listRef: any) => listRef.id === importListRef.id
+              (listRef: any) => listRef.id === importListRef.id,
             );
 
             if (!hasImportList) {
@@ -2792,9 +2828,9 @@ export class ConnectionPool extends EventEmitter {
                 {
                   userId,
                   phoneNumber: formattedContactPhone,
-                  listId: importListRef.id
+                  listId: importListRef.id,
                 },
-                "Adding existing contact to import list"
+                "Adding existing contact to import list",
               );
             }
 
@@ -2804,7 +2840,8 @@ export class ConnectionPool extends EventEmitter {
 
           // Preserve important fields that shouldn't be overwritten
           updateData.tags = existingData.tags || updateData.tags || [];
-          updateData.campaigns = existingData.campaigns || updateData.campaigns || [];
+          updateData.campaigns =
+            existingData.campaigns || updateData.campaigns || [];
 
           // Update existing contact with merged data
           await contactRef.update(updateData);
@@ -2813,9 +2850,9 @@ export class ConnectionPool extends EventEmitter {
             {
               userId,
               phoneNumber: formattedContactPhone,
-              fieldsUpdated: Object.keys(updateData)
+              fieldsUpdated: Object.keys(updateData),
             },
-            "Merged existing contact with new WhatsApp sync data"
+            "Merged existing contact with new WhatsApp sync data",
           );
         } else {
           // Create contact for real conversation
@@ -2912,7 +2949,11 @@ export class ConnectionPool extends EventEmitter {
           const messageText = this.extractMessageText(msg);
 
           // Handle media if present
-          const mediaInfo = await this.handleMediaMessage(msg, userId, phoneNumber);
+          const mediaInfo = await this.handleMediaMessage(
+            msg,
+            userId,
+            phoneNumber,
+          );
 
           // Create message as subcollection of contact
           const messageData = {
@@ -3062,9 +3103,9 @@ export class ConnectionPool extends EventEmitter {
             userId,
             phoneNumber,
             contactPhone: formattedContactPhone,
-            cacheSize: processedContacts.size
+            cacheSize: processedContacts.size,
           },
-          "Added contact to deduplication cache"
+          "Added contact to deduplication cache",
         );
       }
 

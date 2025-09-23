@@ -3,34 +3,42 @@
 ## Test Procedure
 
 ### 1. Start the server
+
 ```bash
 npm run dev
 ```
 
 ### 2. Connect WhatsApp account
+
 - Open the WhatsApp Web UI
 - Scan QR code
 - Wait for sync to complete
 
 ### 3. Send test messages
+
 - Send a few messages to confirm it's working
 - Check Firestore to verify messages are being stored
 
 ### 4. Kill the server
+
 - Press `Ctrl+C` to stop the server
 - Or kill the process: `kill -9 <PID>`
 
 ### 5. Send messages while offline
+
 - Using your phone, send messages to the connected WhatsApp account
 - These messages will be queued on WhatsApp's servers
 
 ### 6. Restart the server
+
 ```bash
 npm run dev
 ```
 
 ### 7. Monitor recovery in logs
+
 Look for these log messages:
+
 ```
 "WhatsApp Web service started"
 "Initiating connection recovery after server restart"
@@ -45,6 +53,7 @@ Look for these log messages:
 ```
 
 ### 8. Verify message sync
+
 - Check Firestore contacts collection
 - Look for the messages sent during downtime
 - They should appear within 30-60 seconds of recovery
@@ -52,12 +61,14 @@ Look for these log messages:
 ## Expected Behavior
 
 ✅ **Working correctly if:**
+
 - No QR code required after restart
 - Connection automatically recovers
 - Messages sent during downtime appear in Firestore
 - Sync events fire and complete
 
 ❌ **Not working if:**
+
 - QR code is requested again
 - Messages don't appear in Firestore
 - Connection fails to recover
