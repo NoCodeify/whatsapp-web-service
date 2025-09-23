@@ -67,6 +67,20 @@ jobs:
       - name: 🛠️ Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
+      - name: 🔍 Debug Authentication
+        run: |
+          echo "Active account:"
+          gcloud auth list --filter=status:ACTIVE --format="value(account)"
+          echo "Current project:"
+          gcloud config get-value project
+
+      - name: 🔧 Activate Service Account
+        run: |
+          echo "Setting active account to whatsapp-service..."
+          gcloud config set account whatsapp-service@whatzaidev.iam.gserviceaccount.com
+          echo "Verifying active account:"
+          gcloud auth list --filter=status:ACTIVE --format="value(account)"
+
       - name: 🔧 Configure Docker for Artifact Registry
         run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev
 
@@ -75,7 +89,8 @@ jobs:
           gcloud builds submit \
             --config cloudbuild-dev.yaml \
             --project whatzaidev \
-            --region ${{ env.REGION }}
+            --region ${{ env.REGION }} \
+            --impersonate-service-account=whatsapp-service@whatzaidev.iam.gserviceaccount.com
 
       - name: 🔍 Verify deployment
         run: |
@@ -110,6 +125,20 @@ jobs:
       - name: 🛠️ Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
+      - name: 🔍 Debug Authentication
+        run: |
+          echo "Active account:"
+          gcloud auth list --filter=status:ACTIVE --format="value(account)"
+          echo "Current project:"
+          gcloud config get-value project
+
+      - name: 🔧 Activate Service Account
+        run: |
+          echo "Setting active account to whatsapp-service..."
+          gcloud config set account whatsapp-service@whatzai.iam.gserviceaccount.com
+          echo "Verifying active account:"
+          gcloud auth list --filter=status:ACTIVE --format="value(account)"
+
       - name: 🔧 Configure Docker for Artifact Registry
         run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev
 
@@ -118,7 +147,8 @@ jobs:
           gcloud builds submit \
             --config cloudbuild.yaml \
             --project whatzai \
-            --region ${{ env.REGION }}
+            --region ${{ env.REGION }} \
+            --impersonate-service-account=whatsapp-service@whatzai.iam.gserviceaccount.com
 
       - name: 🔍 Verify production deployment
         run: |
