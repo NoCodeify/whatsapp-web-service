@@ -26,6 +26,8 @@ steps:
       - "europe-central2-docker.pkg.dev/whatzai/whatsapp-repo/whatsapp-web-service:latest"
       - "--region"
       - "${_REGION}"
+      - "--impersonate-service-account"
+      - "whatsapp-service@whatzai.iam.gserviceaccount.com"
       - "--platform"
       - "managed"
       - "--min-instances"
