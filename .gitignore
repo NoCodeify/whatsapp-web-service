@@ -127,6 +127,7 @@ tmp/
 # Google Cloud
 service-account-key.json
 gcloud-key.json
+*-github-actions-key.json
 
 # Test files
 test-results/

@@ -148,15 +148,6 @@ jobs:
           curl -f "${SERVICE_URL}/health" || exit 1
           echo "✅ Production health check passed!"
 
-      - name: 📊 Update production URL secret
-        run: |
-          SERVICE_URL=$(gcloud run services describe whatsapp-web-service \
-            --region=${{ env.REGION }} \
-            --project=whatzai \
-            --format='value(status.url)')
-
-          echo -n "${SERVICE_URL}" | gcloud secrets versions add WHATSAPP_WEB_SERVICE_URL_PROD \
-            --project=whatzai --data-file=-
 
   security-scan:
     name: 🔒 Security Scan
