@@ -52,10 +52,6 @@ steps:
       - "NODE_ENV=production,GOOGLE_CLOUD_PROJECT=whatzai,STORAGE_BUCKET=whatzai-whatsapp-sessions,LOG_LEVEL=info"
       - "--set-secrets"
       - "API_KEY=WHATSAPP_WEB_API_KEY:latest,BRIGHT_DATA_CUSTOMER_ID=BRIGHT_DATA_CUSTOMER_ID:latest,BRIGHT_DATA_ZONE_PASSWORD=BRIGHT_DATA_ZONE_PASSWORD:latest,SESSION_ENCRYPTION_KEY=SESSION_ENCRYPTION_KEY:latest,WS_TOKEN=WHATSAPP_WS_TOKEN:latest"
-      - "--vpc-connector"
-      - "projects/whatzai/locations/${_REGION}/connectors/whatsapp-connector"
-      - "--vpc-egress"
-      - "private-ranges-only"
       - "--allow-unauthenticated"
 
 # Substitutions for environment-specific values
