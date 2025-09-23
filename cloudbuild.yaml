@@ -5,8 +5,6 @@ steps:
     args:
       - "build"
       - "-t"
-      - "europe-central2-docker.pkg.dev/whatzai/whatsapp-repo/whatsapp-web-service:${SHORT_SHA}"
-      - "-t"
       - "europe-central2-docker.pkg.dev/whatzai/whatsapp-repo/whatsapp-web-service:latest"
       - "."
 
@@ -25,7 +23,7 @@ steps:
       - "deploy"
       - "whatsapp-web-service"
       - "--image"
-      - "europe-central2-docker.pkg.dev/whatzai/whatsapp-repo/whatsapp-web-service:${SHORT_SHA}"
+      - "europe-central2-docker.pkg.dev/whatzai/whatsapp-repo/whatsapp-web-service:latest"
       - "--region"
       - "${_REGION}"
       - "--platform"
