@@ -9,12 +9,17 @@ import {
 } from "@whiskeysockets/baileys";
 import pino from "pino";
 import { EventEmitter } from "events";
+import * as fs from "fs";
 import { ProxyManager } from "./ProxyManager";
 import { SessionManager } from "./SessionManager";
 import { Firestore } from "@google-cloud/firestore";
 import { PubSub } from "@google-cloud/pubsub";
 import { ConnectionStateManager } from "../services/connectionStateManager";
 import { MediaService } from "../services/MediaService";
+import { CloudRunWebSocketManager } from "../services/CloudRunWebSocketManager";
+import { MemoryLeakPrevention } from "../services/MemoryLeakPrevention";
+import { ErrorHandler } from "../services/ErrorHandler";
+import { InstanceCoordinator } from "../services/InstanceCoordinator";
 import { formatPhoneNumberSafe, formatWhatsAppJid } from "../utils/phoneNumber";
 import * as admin from "firebase-admin";
 import { DocumentReference } from "@google-cloud/firestore";
@@ -50,6 +55,10 @@ export class ConnectionPool extends EventEmitter {
   private pubsub: PubSub;
   private connectionStateManager?: ConnectionStateManager;
   private mediaService: MediaService;
+  private wsManager: CloudRunWebSocketManager;
+  private memoryLeakPrevention: MemoryLeakPrevention;
+  private errorHandler: ErrorHandler;
+  private instanceCoordinator: InstanceCoordinator;
   private healthCheckTimer?: NodeJS.Timeout;
   private cleanupTimer?: NodeJS.Timeout;
   private importListRefs: Map<string, DocumentReference> = new Map(); // Store import list refs per user
@@ -87,9 +96,192 @@ export class ConnectionPool extends EventEmitter {
     this.pubsub = pubsub;
     this.connectionStateManager = connectionStateManager;
     this.mediaService = new MediaService();
+    this.wsManager = new CloudRunWebSocketManager();
+    this.memoryLeakPrevention = new MemoryLeakPrevention();
+    this.errorHandler = new ErrorHandler();
+    this.instanceCoordinator = new InstanceCoordinator(firestore);
+
+    // Set up WebSocket manager event listeners
+    this.setupWebSocketManagerListeners();
+
+    // Set up error handler event listeners
+    this.setupErrorHandlerListeners();
+
+    // Set up instance coordinator event listeners
+    this.setupInstanceCoordinatorListeners();
+
+    // Start instance coordinator
+    this.instanceCoordinator.start().catch(error => {
+      this.logger.error({ error }, "Failed to start instance coordinator");
+    });
 
     this.startHealthCheck();
     this.startCleanup();
+  }
+
+  /**
+   * Setup WebSocket manager event listeners
+   */
+  private setupWebSocketManagerListeners(): void {
+    this.wsManager.on("connection-error", async ({ connectionId, error, consecutiveFailures, shouldReconnect }) => {
+      // Parse connection ID to get userId and phoneNumber
+      const [userId, phoneNumber] = connectionId.split(":");
+
+      this.logger.warn(
+        { userId, phoneNumber, consecutiveFailures, error: error.message },
+        "WebSocket connection error detected"
+      );
+
+      if (shouldReconnect) {
+        this.logger.info(
+          { userId, phoneNumber },
+          "WebSocket manager triggering reconnection"
+        );
+
+        // Remove the current connection to trigger reconnection
+        await this.removeConnection(userId, phoneNumber);
+
+        // Attempt reconnection after a short delay
+        setTimeout(async () => {
+          try {
+            await this.addConnection(userId, phoneNumber);
+          } catch (reconnectError) {
+            this.logger.error(
+              { userId, phoneNumber, error: reconnectError },
+              "WebSocket manager reconnection failed"
+            );
+          }
+        }, 5000);
+      }
+    });
+  }
+
+  /**
+   * Setup error handler event listeners
+   */
+  private setupErrorHandlerListeners(): void {
+    // Handle WebSocket recovery requests
+    this.errorHandler.on("websocket-recovery-needed", async ({ connectionId, userId, phoneNumber }) => {
+      this.logger.info({ connectionId, userId, phoneNumber }, "WebSocket recovery requested");
+
+      if (userId && phoneNumber) {
+        try {
+          // Attempt to reconnect with retry logic
+          await this.errorHandler.executeWithRetry(
+            () => this.addConnection(userId, phoneNumber),
+            { userId, phoneNumber, connectionId, operation: "websocket-recovery", timestamp: new Date() }
+          );
+        } catch (error) {
+          this.logger.error({ userId, phoneNumber, error }, "WebSocket recovery failed");
+        }
+      }
+    });
+
+    // Handle connection restart requests
+    this.errorHandler.on("connection-restart-needed", async ({ connectionId, userId, phoneNumber }) => {
+      this.logger.info({ connectionId, userId, phoneNumber }, "Connection restart requested");
+
+      if (userId && phoneNumber) {
+        try {
+          // Remove current connection and reconnect
+          await this.removeConnection(userId, phoneNumber);
+          await this.sleep(5000); // Wait before reconnecting
+
+          await this.errorHandler.executeWithRetry(
+            () => this.addConnection(userId, phoneNumber),
+            { userId, phoneNumber, connectionId, operation: "connection-restart", timestamp: new Date() }
+          );
+        } catch (error) {
+          this.logger.error({ userId, phoneNumber, error }, "Connection restart failed");
+        }
+      }
+    });
+
+    // Handle connection refresh requests
+    this.errorHandler.on("connection-refresh-needed", async ({ connectionId, userId, phoneNumber }) => {
+      this.logger.info({ connectionId, userId, phoneNumber }, "Connection refresh requested");
+
+      if (userId && phoneNumber) {
+        const connection = this.connections.get(connectionId);
+        if (connection && this.wsManager) {
+          try {
+            // Refresh WebSocket health
+            await this.wsManager.refreshConnectionHealth(connectionId, connection.socket);
+          } catch (error) {
+            this.logger.error({ userId, phoneNumber, error }, "Connection refresh failed");
+          }
+        }
+      }
+    });
+
+    // Handle memory cleanup requests
+    this.errorHandler.on("memory-cleanup-needed", () => {
+      this.logger.warn("Emergency memory cleanup requested");
+      this.memoryLeakPrevention.performAggressiveCleanup();
+    });
+
+    // Handle reconnection requests
+    this.errorHandler.on("reconnection-needed", async ({ connectionId, userId, phoneNumber }) => {
+      this.logger.info({ connectionId, userId, phoneNumber }, "Reconnection requested");
+
+      if (userId && phoneNumber) {
+        // Use existing reconnect logic with error handling
+        try {
+          await this.reconnect(userId, phoneNumber);
+        } catch (error) {
+          this.logger.error({ userId, phoneNumber, error }, "Reconnection failed");
+        }
+      }
+    });
+
+    // Handle graceful shutdown
+    this.errorHandler.on("graceful-shutdown", () => {
+      this.logger.info("Graceful shutdown requested by error handler");
+      this.shutdown().catch(error => {
+        this.logger.error({ error }, "Error during graceful shutdown");
+      });
+    });
+  }
+
+  /**
+   * Setup instance coordinator event listeners
+   */
+  private setupInstanceCoordinatorListeners(): void {
+    // Handle session transfer requests
+    this.instanceCoordinator.on("session-transfer-needed", async ({ sessionKey, targetInstanceId, reason }) => {
+      this.logger.info({ sessionKey, targetInstanceId, reason }, "Session transfer requested");
+
+      const [userId, phoneNumber] = sessionKey.split(":");
+      if (userId && phoneNumber) {
+        try {
+          // Release current connection gracefully
+          await this.removeConnection(userId, phoneNumber);
+          this.logger.info({ sessionKey, targetInstanceId }, "Session released for transfer");
+        } catch (error) {
+          this.logger.error({ sessionKey, error }, "Error during session transfer");
+        }
+      }
+    });
+
+    // Handle load balancing recommendations
+    this.instanceCoordinator.on("load-balance-recommendation", ({ action, details }) => {
+      this.logger.info({ action, details }, "Load balancing recommendation received");
+
+      if (action === "reject_new_connections") {
+        this.logger.warn("Instance coordinator recommends rejecting new connections due to high load");
+      } else if (action === "accept_more_connections") {
+        this.logger.info("Instance coordinator indicates capacity available for new connections");
+      }
+    });
+
+    // Handle instance health status changes
+    this.instanceCoordinator.on("instance-health-changed", ({ instanceId, status, reason }) => {
+      this.logger.info({ instanceId, status, reason }, "Instance health status changed");
+
+      if (status === "failed" && instanceId !== this.instanceCoordinator.getInstanceId()) {
+        this.logger.warn({ instanceId }, "Another instance has failed - monitoring for session transfers");
+      }
+    });
   }
 
   /**
@@ -253,6 +445,22 @@ export class ConnectionPool extends EventEmitter {
     );
     const connectionKey = this.getConnectionKey(userId, phoneNumber);
 
+    // Check instance coordination - request session ownership
+    if (!isRecovery) {
+      const shouldHandle = await this.instanceCoordinator.shouldHandleSession(userId, phoneNumber);
+      if (!shouldHandle) {
+        // Try to request ownership
+        const ownershipGranted = await this.instanceCoordinator.requestSessionOwnership(userId, phoneNumber);
+        if (!ownershipGranted) {
+          this.logger.info(
+            { userId, phoneNumber, connectionKey },
+            "Session is owned by another instance, rejecting connection request"
+          );
+          return false;
+        }
+      }
+    }
+
     // Check if connection already exists
     if (this.connections.has(connectionKey)) {
       const existing = this.connections.get(connectionKey)!;
@@ -355,6 +563,11 @@ export class ConnectionPool extends EventEmitter {
       // Add to pool
       this.connections.set(connectionKey, connection);
 
+      // Update session activity in instance coordinator
+      if (!isRecovery) {
+        await this.instanceCoordinator.updateSessionActivity(userId, phoneNumber);
+      }
+
       // Update Firestore
       await this.updateConnectionStatus(userId, phoneNumber, "initializing");
 
@@ -397,6 +610,8 @@ export class ConnectionPool extends EventEmitter {
     try {
       // Clear QR timeout if exists
       if (connection.qrTimeout) {
+        const timeoutId = `${connectionKey}_qr_timeout`;
+        this.memoryLeakPrevention.clearTimer(timeoutId);
         clearTimeout(connection.qrTimeout);
         connection.qrTimeout = undefined;
       }
@@ -421,6 +636,12 @@ export class ConnectionPool extends EventEmitter {
       // Remove from pool
       this.connections.delete(connectionKey);
 
+      // Unregister from WebSocket manager
+      this.wsManager.unregisterConnection(connectionKey);
+
+      // Clean up memory leak prevention tracking
+      this.memoryLeakPrevention.cleanupConnection(connectionKey);
+
       // Clean up associated caches
       const sessionKey = `${userId}-${phoneNumber}`;
       if (this.processedContactsCache.has(sessionKey)) {
@@ -440,6 +661,9 @@ export class ConnectionPool extends EventEmitter {
 
       // Update Firestore
       await this.updateConnectionStatus(userId, phoneNumber, "disconnected");
+
+      // Release session ownership in instance coordinator
+      await this.instanceCoordinator.releaseSessionOwnership(userId, phoneNumber);
 
       this.logger.info(
         { userId, phoneNumber, totalConnections: this.connections.size },
@@ -676,6 +900,18 @@ export class ConnectionPool extends EventEmitter {
   private setupConnectionHandlers(connection: WhatsAppConnection) {
     const { socket, userId, phoneNumber } = connection;
 
+    // Register with WebSocket manager for enhanced monitoring
+    const connectionId = this.getConnectionKey(userId, phoneNumber);
+    this.wsManager.registerConnection(connectionId, socket);
+
+    // Register with memory leak prevention
+    this.memoryLeakPrevention.registerConnection(connectionId, socket);
+
+    this.logger.debug(
+      { userId, phoneNumber },
+      "Connection registered with WebSocket manager and memory leak prevention"
+    );
+
     // Track if sync has been completed to avoid duplicate events
     let syncCompleted = false;
 
@@ -684,6 +920,7 @@ export class ConnectionPool extends EventEmitter {
     let totalMessagesSynced = 0;
 
     // Connection updates
+    this.memoryLeakPrevention.trackEventListener(connectionId, "connection.update");
     socket.ev.on("connection.update", async (update) => {
       connection.state = update as ConnectionState;
 
@@ -718,6 +955,7 @@ export class ConnectionPool extends EventEmitter {
         await this.handleQRCode(userId, phoneNumber, qr);
 
         // Set QR expiration timeout to prevent orphaned proxies
+        const timeoutId = `${connectionId}_qr_timeout`;
         connection.qrTimeout = setTimeout(async () => {
           if (connection.state.connection !== "open") {
             this.logger.warn(
@@ -727,6 +965,9 @@ export class ConnectionPool extends EventEmitter {
             await this.removeConnection(userId, phoneNumber);
           }
         }, 90000); // 90 seconds timeout
+
+        // Track timeout for memory leak prevention
+        this.memoryLeakPrevention.trackTimer(timeoutId, "timeout", connection.qrTimeout);
       }
 
       if (state === "open") {
@@ -734,6 +975,8 @@ export class ConnectionPool extends EventEmitter {
 
         // Clear QR timeout since connection is now established
         if (connection.qrTimeout) {
+          const timeoutId = `${connectionId}_qr_timeout`;
+          this.memoryLeakPrevention.clearTimer(timeoutId);
           clearTimeout(connection.qrTimeout);
           connection.qrTimeout = undefined;
         }
@@ -874,9 +1117,35 @@ export class ConnectionPool extends EventEmitter {
         if (shouldReconnect) {
           this.logger.info(
             { userId, phoneNumber, disconnectReason },
-            "Connection closed, attempting reconnect",
+            "Connection closed, attempting reconnect with error handling",
           );
-          await this.reconnect(userId, phoneNumber);
+
+          // Use error handler for graceful reconnection
+          try {
+            const lastError = lastDisconnect?.error as Error;
+            const errorHandled = await this.errorHandler.handleError(
+              lastError || new Error(`Connection closed with reason: ${disconnectReason}`),
+              {
+                userId,
+                phoneNumber,
+                connectionId,
+                operation: "connection_update_reconnect",
+                errorCode: String(disconnectReason),
+                timestamp: new Date(),
+              }
+            );
+
+            if (!errorHandled) {
+              // Fallback to direct reconnection if error handler can't handle it
+              await this.reconnect(userId, phoneNumber);
+            }
+          } catch (error) {
+            this.logger.error(
+              { userId, phoneNumber, error },
+              "Error handling failed, attempting direct reconnection"
+            );
+            await this.reconnect(userId, phoneNumber);
+          }
         } else {
           await this.removeConnection(userId, phoneNumber);
         }
@@ -884,34 +1153,83 @@ export class ConnectionPool extends EventEmitter {
     });
 
     // Message handling - process BOTH incoming and outgoing
+    this.memoryLeakPrevention.trackEventListener(connectionId, "messages.upsert");
     socket.ev.on("messages.upsert", async (upsert) => {
-      for (const msg of upsert.messages) {
-        if (!msg.message) continue; // Skip empty messages
+      try {
+        // Update session activity for any message activity
+        await this.instanceCoordinator.updateSessionActivity(userId, phoneNumber);
 
-        if (!msg.key.fromMe) {
-          // Incoming message from contact
-          await this.handleIncomingMessage(userId, phoneNumber, msg);
-        } else {
-          // Outgoing message - could be manual or API-sent
-          await this.handleOutgoingMessage(userId, phoneNumber, msg);
+        for (const msg of upsert.messages) {
+          if (!msg.message) continue; // Skip empty messages
+
+          try {
+            if (!msg.key.fromMe) {
+              // Incoming message from contact
+              await this.handleIncomingMessage(userId, phoneNumber, msg);
+            } else {
+              // Outgoing message - could be manual or API-sent
+              await this.handleOutgoingMessage(userId, phoneNumber, msg);
+            }
+          } catch (messageError) {
+            // Handle individual message processing errors gracefully
+            await this.errorHandler.handleError(messageError as Error, {
+              userId,
+              phoneNumber,
+              connectionId,
+              operation: "message_processing",
+              timestamp: new Date(),
+            });
+          }
         }
+        connection.lastActivity = new Date();
+      } catch (error) {
+        // Handle overall message upsert errors
+        await this.errorHandler.handleError(error as Error, {
+          userId,
+          phoneNumber,
+          connectionId,
+          operation: "messages_upsert",
+          timestamp: new Date(),
+        });
       }
-      connection.lastActivity = new Date();
     });
 
     // Message status updates
+    this.memoryLeakPrevention.trackEventListener(connectionId, "messages.update");
     socket.ev.on("messages.update", async (updates) => {
-      for (const update of updates) {
-        await this.handleMessageUpdate(userId, phoneNumber, update);
+      try {
+        for (const update of updates) {
+          try {
+            await this.handleMessageUpdate(userId, phoneNumber, update);
+          } catch (updateError) {
+            await this.errorHandler.handleError(updateError as Error, {
+              userId,
+              phoneNumber,
+              connectionId,
+              operation: "message_update_processing",
+              timestamp: new Date(),
+            });
+          }
+        }
+      } catch (error) {
+        await this.errorHandler.handleError(error as Error, {
+          userId,
+          phoneNumber,
+          connectionId,
+          operation: "messages_update",
+          timestamp: new Date(),
+        });
       }
     });
 
     // Presence updates
+    this.memoryLeakPrevention.trackEventListener(connectionId, "presence.update");
     socket.ev.on("presence.update", async (presenceUpdate) => {
       await this.handlePresenceUpdate(userId, phoneNumber, presenceUpdate);
     });
 
     // Chat updates (typing indicators)
+    this.memoryLeakPrevention.trackEventListener(connectionId, "chats.update");
     socket.ev.on("chats.update", async (chats) => {
       for (const chat of chats) {
         if ((chat as any).typing) {
@@ -921,6 +1239,7 @@ export class ConnectionPool extends EventEmitter {
     });
 
     // History sync handler - process contacts and messages
+    this.memoryLeakPrevention.trackEventListener(connectionId, "messaging-history.set");
     socket.ev.on("messaging-history.set", async (history) => {
       // Enhanced logging to debug message sync
       this.logger.info(
@@ -3348,6 +3667,11 @@ export class ConnectionPool extends EventEmitter {
         memoryUsage: this.getMemoryUsage(),
       });
     }, this.config.healthCheckInterval);
+
+    // Track health check timer
+    if (this.healthCheckTimer) {
+      this.memoryLeakPrevention.trackTimer("health_check_timer", "interval", this.healthCheckTimer);
+    }
   }
 
   /**
@@ -3358,6 +3682,11 @@ export class ConnectionPool extends EventEmitter {
       this.proxyManager.cleanupSessions();
       this.sessionManager.cleanupSessions();
     }, this.config.sessionCleanupInterval);
+
+    // Track cleanup timer
+    if (this.cleanupTimer) {
+      this.memoryLeakPrevention.trackTimer("cleanup_timer", "interval", this.cleanupTimer);
+    }
   }
 
   /**
@@ -3365,6 +3694,10 @@ export class ConnectionPool extends EventEmitter {
    */
   private getConnectionKey(userId: string, phoneNumber: string): string {
     return `${userId}:${phoneNumber}`;
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   private formatJid(phoneNumber: string): string {
@@ -3398,9 +3731,64 @@ export class ConnectionPool extends EventEmitter {
   }
 
   private getMemoryUsage(): number {
-    const used = process.memoryUsage().heapUsed;
-    const total = process.memoryUsage().heapTotal;
-    return used / total;
+    const memUsage = process.memoryUsage();
+
+    // In Cloud Run, get container memory limit from environment or use default
+    const containerMemoryLimit = this.getContainerMemoryLimit();
+
+    if (containerMemoryLimit > 0) {
+      // Use RSS memory (actual memory usage) vs container limit
+      return memUsage.rss / containerMemoryLimit;
+    } else {
+      // Fallback to heap usage ratio for local development
+      return memUsage.heapUsed / memUsage.heapTotal;
+    }
+  }
+
+  private getContainerMemoryLimit(): number {
+    // Try to get from Cloud Run environment variables
+    const cloudRunMemory = process.env.MEMORY_LIMIT;
+    if (cloudRunMemory) {
+      // Parse Cloud Run memory format (e.g., "2Gi", "512Mi")
+      const match = cloudRunMemory.match(/^(\d+(?:\.\d+)?)([GM]i?)$/);
+      if (match) {
+        const value = parseFloat(match[1]);
+        const unit = match[2];
+        switch (unit) {
+          case 'Gi': return value * 1024 * 1024 * 1024;
+          case 'Mi': return value * 1024 * 1024;
+          case 'G': return value * 1000 * 1000 * 1000;
+          case 'M': return value * 1000 * 1000;
+          default: return value;
+        }
+      }
+    }
+
+    // Try to read from cgroup (container memory limit)
+    try {
+      // For cgroup v1
+      if (fs.existsSync('/sys/fs/cgroup/memory/memory.limit_in_bytes')) {
+        const limitStr = fs.readFileSync('/sys/fs/cgroup/memory/memory.limit_in_bytes', 'utf8').trim();
+        const limit = parseInt(limitStr);
+        // Ignore unrealistic limits (like 9223372036854775807)
+        if (limit > 0 && limit < Number.MAX_SAFE_INTEGER / 2) {
+          return limit;
+        }
+      }
+      // For cgroup v2
+      if (fs.existsSync('/sys/fs/cgroup/memory.max')) {
+        const limitStr = fs.readFileSync('/sys/fs/cgroup/memory.max', 'utf8').trim();
+        if (limitStr !== 'max') {
+          const limit = parseInt(limitStr);
+          if (limit > 0) return limit;
+        }
+      }
+    } catch (error) {
+      this.logger.debug({ error }, "Could not read container memory limit");
+    }
+
+    // Default for 2Gi Cloud Run instance
+    return 2 * 1024 * 1024 * 1024;
   }
 
   private isProxyError(error: any): boolean {
@@ -3417,6 +3805,20 @@ export class ConnectionPool extends EventEmitter {
    */
   getMetrics() {
     const connections = Array.from(this.connections.values());
+    const wsMetrics = this.wsManager.getMetrics();
+    const memoryStats = this.memoryLeakPrevention.getStats();
+    const errorStats = this.errorHandler.getStats();
+
+    // Get cache stats for memory leak analysis
+    const caches = [
+      this.connections,
+      this.importListRefs,
+      this.pendingChatMetadata,
+      this.syncedContactInfo,
+      this.sentMessageIds,
+      this.processedContactsCache,
+    ];
+    const cacheStats = this.memoryLeakPrevention.getCacheStats(caches);
 
     return {
       totalConnections: this.connections.size,
@@ -3430,6 +3832,22 @@ export class ConnectionPool extends EventEmitter {
       memoryUsage: this.getMemoryUsage(),
       uptime: process.uptime(),
       proxyMetrics: this.proxyManager.getMetrics(),
+      webSocketHealth: {
+        healthyConnections: wsMetrics.healthyConnections,
+        degradedConnections: wsMetrics.degradedConnections,
+        failedConnections: wsMetrics.failedConnections,
+        averageFailures: wsMetrics.averageFailures,
+      },
+      memoryLeakPrevention: {
+        memory: memoryStats.memory,
+        tracking: memoryStats.tracking,
+        caches: cacheStats,
+      },
+      errorHandling: {
+        circuitBreakers: errorStats.circuitBreakers,
+        errorStats: errorStats.errorStats,
+        config: errorStats.config,
+      },
     };
   }
 
@@ -3440,8 +3858,14 @@ export class ConnectionPool extends EventEmitter {
     this.logger.info("Shutting down connection pool");
 
     // Clear timers
-    if (this.healthCheckTimer) clearInterval(this.healthCheckTimer);
-    if (this.cleanupTimer) clearInterval(this.cleanupTimer);
+    if (this.healthCheckTimer) {
+      this.memoryLeakPrevention.clearTimer("health_check_timer");
+      clearInterval(this.healthCheckTimer);
+    }
+    if (this.cleanupTimer) {
+      this.memoryLeakPrevention.clearTimer("cleanup_timer");
+      clearInterval(this.cleanupTimer);
+    }
 
     // Clear memory maps
     this.syncedContactInfo.clear();
@@ -3453,6 +3877,18 @@ export class ConnectionPool extends EventEmitter {
     for (const connection of this.connections.values()) {
       await this.removeConnection(connection.userId, connection.phoneNumber);
     }
+
+    // Shutdown WebSocket manager
+    this.wsManager.shutdown();
+
+    // Shutdown memory leak prevention
+    this.memoryLeakPrevention.shutdown();
+
+    // Shutdown error handler
+    this.errorHandler.shutdown();
+
+    // Shutdown instance coordinator
+    await this.instanceCoordinator.shutdown();
 
     // Shutdown session manager (performs final backups in hybrid mode)
     await this.sessionManager.shutdown();

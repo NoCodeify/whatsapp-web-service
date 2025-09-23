@@ -11,6 +11,7 @@ import pino from "pino";
 import { ProxyManager } from "./ProxyManager";
 import { Firestore } from "@google-cloud/firestore";
 import { Storage } from "@google-cloud/storage";
+import { CloudRunSessionOptimizer } from "../services/CloudRunSessionOptimizer";
 import * as fs from "fs";
 import * as path from "path";
 import { promisify } from "util";
@@ -36,6 +37,7 @@ export class SessionManager {
   private proxyManager: ProxyManager;
   private firestore: Firestore;
   private storage?: Storage;
+  private cloudOptimizer?: CloudRunSessionOptimizer;
   private sessionsDir: string;
   private sessions: Map<string, SessionData> = new Map();
 
@@ -64,6 +66,12 @@ export class SessionManager {
         },
         "Initialized Google Cloud Storage for session backup",
       );
+
+      // Initialize CloudRunSessionOptimizer for cloud mode
+      if (this.storageType === "cloud") {
+        this.cloudOptimizer = new CloudRunSessionOptimizer(this.storage, this.firestore);
+        this.logger.info("Initialized CloudRunSessionOptimizer for enhanced Cloud Storage performance");
+      }
     }
 
     this.sessionsDir =
@@ -233,15 +241,23 @@ export class SessionManager {
       this.storage
     ) {
       try {
-        const restored = await this.restoreFromCloudStorage(
-          userId,
-          phoneNumber,
-          sessionPath,
-        );
+        let restored = false;
+
+        // Use CloudRunSessionOptimizer for cloud mode (better performance)
+        if (this.storageType === "cloud" && this.cloudOptimizer) {
+          restored = await this.cloudOptimizer.downloadSession(userId, phoneNumber, sessionPath);
+        } else {
+          // Fallback to original method for hybrid mode
+          restored = await this.restoreFromCloudStorage(
+            userId,
+            phoneNumber,
+            sessionPath,
+          );
+        }
 
         if (restored) {
           this.logger.info(
-            { userId, phoneNumber },
+            { userId, phoneNumber, method: this.cloudOptimizer ? "optimized" : "standard" },
             "Session restored from Cloud Storage",
           );
         }
@@ -340,7 +356,14 @@ export class SessionManager {
         this.storage
       ) {
         try {
-          await this.backupToCloudStorage(userId, phoneNumber);
+          // Use CloudRunSessionOptimizer for cloud mode (better performance with queuing)
+          if (this.storageType === "cloud" && this.cloudOptimizer) {
+            const sessionPath = path.join(this.sessionsDir, `${userId}-${phoneNumber}`);
+            await this.cloudOptimizer.uploadSession(userId, phoneNumber, sessionPath);
+          } else {
+            // Fallback to original method for hybrid mode
+            await this.backupToCloudStorage(userId, phoneNumber);
+          }
 
           // Update Firestore with backup status
           const sessionRef = this.firestore
@@ -603,22 +626,28 @@ export class SessionManager {
         (this.storageType === "hybrid" || this.storageType === "cloud")
       ) {
         try {
-          const bucket = this.storage.bucket(this.bucketName);
-          const prefix = `sessions/${userId}/${phoneNumber}/`;
-          const [cloudFiles] = await bucket.getFiles({ prefix });
+          // Use CloudRunSessionOptimizer for cloud mode (better error handling)
+          if (this.storageType === "cloud" && this.cloudOptimizer) {
+            await this.cloudOptimizer.deleteSession(userId, phoneNumber);
+          } else {
+            // Fallback to original method for hybrid mode
+            const bucket = this.storage.bucket(this.bucketName);
+            const prefix = `sessions/${userId}/${phoneNumber}/`;
+            const [cloudFiles] = await bucket.getFiles({ prefix });
 
-          for (const file of cloudFiles) {
-            await file.delete();
+            for (const file of cloudFiles) {
+              await file.delete();
+            }
+
+            this.logger.info(
+              {
+                userId,
+                phoneNumber,
+                deletedFiles: cloudFiles.length,
+              },
+              "Deleted session files from Cloud Storage",
+            );
           }
-
-          this.logger.info(
-            {
-              userId,
-              phoneNumber,
-              deletedFiles: cloudFiles.length,
-            },
-            "Deleted session files from Cloud Storage",
-          );
         } catch (error) {
           this.logger.debug(
             { userId, phoneNumber, error },
@@ -940,6 +969,11 @@ export class SessionManager {
         );
         await Promise.all(backupPromises);
       }
+    }
+
+    // Shutdown CloudRunSessionOptimizer if active
+    if (this.cloudOptimizer) {
+      await this.cloudOptimizer.shutdown();
     }
 
     // Clear sessions from memory
