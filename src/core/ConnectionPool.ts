@@ -3820,12 +3820,12 @@ export class ConnectionPool extends EventEmitter {
         .collection("phone_numbers")
         .doc(phoneNumber);
 
-      await phoneNumberRef.update({
+      await phoneNumberRef.set({
         whatsapp_web_status: status,
         updated_at: new Date(),
-      });
+      }, { merge: true });
 
-      this.logger.debug(
+      this.logger.info(
         { userId, phoneNumber, status },
         "Updated phone number status for UI",
       );
