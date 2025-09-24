@@ -1093,6 +1093,9 @@ export class ConnectionPool extends EventEmitter {
             );
           }
 
+          // Update phone number status for UI
+          await this.updatePhoneNumberStatus(userId, phoneNumber, "importing");
+
           this.emit("sync:started", {
             userId,
             phoneNumber,
@@ -1437,6 +1440,9 @@ export class ConnectionPool extends EventEmitter {
             );
           }
 
+          // Update phone number status for UI
+          await this.updatePhoneNumberStatus(userId, phoneNumber, "importing_messages");
+
           // Emit message sync progress for UI updates
           this.emit("messages-synced", {
             userId,
@@ -1479,6 +1485,9 @@ export class ConnectionPool extends EventEmitter {
               true // sync completed
             );
           }
+
+          // Update phone number status for UI - sync completed
+          await this.updatePhoneNumberStatus(userId, phoneNumber, "connected");
 
           // Emit sync completion event with cumulative totals
           this.emit("history-synced", {
@@ -1528,6 +1537,9 @@ export class ConnectionPool extends EventEmitter {
               false
             );
           }
+
+          // Update phone number status for UI
+          await this.updatePhoneNumberStatus(userId, phoneNumber, "importing_contacts");
 
           // Emit sync event for UI
           this.emit("contacts-synced", {
@@ -3789,6 +3801,38 @@ export class ConnectionPool extends EventEmitter {
       this.logger.error(
         { userId, phoneNumber, error },
         "Failed to update connection status",
+      );
+    }
+  }
+
+  /**
+   * Update phone number status for UI - updates the whatsapp_web_status field that UI checks
+   */
+  private async updatePhoneNumberStatus(
+    userId: string,
+    phoneNumber: string,
+    status: string,
+  ) {
+    try {
+      const phoneNumberRef = this.firestore
+        .collection("users")
+        .doc(userId)
+        .collection("phone_numbers")
+        .doc(phoneNumber);
+
+      await phoneNumberRef.update({
+        whatsapp_web_status: status,
+        updated_at: new Date(),
+      });
+
+      this.logger.debug(
+        { userId, phoneNumber, status },
+        "Updated phone number status for UI",
+      );
+    } catch (error) {
+      this.logger.error(
+        { userId, phoneNumber, status, error },
+        "Failed to update phone number status",
       );
     }
   }
