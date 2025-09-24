@@ -104,15 +104,15 @@ const memoryLeakPrevention = new MemoryLeakPrevention();
 const sessionOptimizer = new CloudRunSessionOptimizer(firestore);
 
 // Connect services to connection pool events
-connectionPool.on('websocket:created', (data) => {
+connectionPool.on("websocket:created", (data) => {
   webSocketManager.monitorConnection(data.connectionId, data.socket);
 });
 
-connectionPool.on('websocket:closed', (data) => {
+connectionPool.on("websocket:closed", (data) => {
   webSocketManager.removeConnection(data.connectionId);
 });
 
-connectionPool.on('error', (error) => {
+connectionPool.on("error", (error) => {
   errorHandler.handleError(error);
 });
 
@@ -261,12 +261,15 @@ app.get("/health", async (_req: Request, res: Response) => {
     // Get container memory limit (Cloud Run)
     const getContainerMemoryLimit = (): number => {
       try {
-        const fs = require('fs');
-        const memLimit = fs.readFileSync('/sys/fs/cgroup/memory/memory.limit_in_bytes', 'utf8');
+        const fs = require("fs");
+        const memLimit = fs.readFileSync(
+          "/sys/fs/cgroup/memory/memory.limit_in_bytes",
+          "utf8",
+        );
         return parseInt(memLimit.trim());
       } catch {
         // Fallback for non-containerized environments
-        return require('os').totalmem();
+        return require("os").totalmem();
       }
     };
 
@@ -379,13 +382,12 @@ app.get("/health", async (_req: Request, res: Response) => {
 
     // Set appropriate HTTP status based on health
     res.status(isHealthy ? 200 : 503).json(healthData);
-
   } catch (error) {
-    logger.error({ error }, 'Error in health check endpoint');
+    logger.error({ error }, "Error in health check endpoint");
     res.status(500).json({
-      status: 'error',
+      status: "error",
       timestamp: new Date().toISOString(),
-      error: 'Health check failed',
+      error: "Health check failed",
     });
   }
 });

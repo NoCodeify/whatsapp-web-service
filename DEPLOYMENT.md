@@ -21,11 +21,13 @@ graph TD
 ## 🛡️ Safety Mechanisms
 
 ### ✅ What Happens Automatically
+
 - **Dev Deployment**: Pushes to `main` branch automatically deploy to development
 - **Testing**: All deployments run tests, linting, and build verification
 - **Health Checks**: Automatic health verification after deployment
 
 ### 🚫 What Requires Manual Approval
+
 - **Production Deployment**: Always requires explicit manual trigger with confirmation
 - **Cross-Environment Promotion**: Cannot deploy to prod without dev validation
 
@@ -44,6 +46,7 @@ git push origin main
 ```
 
 **What Happens:**
+
 1. 🧪 Tests and linting run
 2. 🏗️ TypeScript builds
 3. 🐳 Container builds and pushes to dev registry
@@ -51,6 +54,7 @@ git push origin main
 5. 🔍 Health check verification
 
 **Dev Environment:**
+
 - Project: `whatzaidev`
 - Service: `whatsapp-web-service-dev`
 - Resources: 4Gi RAM, 2 CPU cores
@@ -59,6 +63,7 @@ git push origin main
 ### 2. Production Deployment (Manual Only)
 
 **Prerequisites:**
+
 - ✅ Code must be tested in dev environment
 - ✅ Dev health checks must pass
 - ✅ Manual confirmation required
@@ -73,6 +78,7 @@ gh workflow run deploy.yml \
 ```
 
 **Or via GitHub Web UI:**
+
 1. Go to Actions tab
 2. Select "🚀 Deploy WhatsApp Web Service"
 3. Click "Run workflow"
@@ -81,6 +87,7 @@ gh workflow run deploy.yml \
    - Confirmation: ✅ Check the box
 
 **What Happens:**
+
 1. 🔍 Pre-deployment verification of dev health
 2. 🏗️ Production build with optimized settings
 3. 🚀 Deploy to production Cloud Run
@@ -88,6 +95,7 @@ gh workflow run deploy.yml \
 5. 📊 Deployment summary
 
 **Production Environment:**
+
 - Project: `whatzai-prod`
 - Service: `whatsapp-web-service-prod`
 - Resources: 8Gi RAM, 4 CPU cores
@@ -218,21 +226,23 @@ gcloud run services update whatsapp-web-service-prod \
 
 ## 📊 Deployment Environments
 
-| Environment | Project | Service Name | Resources | Min Instances | Purpose |
-|-------------|---------|--------------|-----------|---------------|---------|
-| Development | `whatzaidev` | `whatsapp-web-service-dev` | 4Gi/2CPU | 1 | Testing & validation |
-| Production | `whatzai-prod` | `whatsapp-web-service-prod` | 8Gi/4CPU | 2 | Live service |
+| Environment | Project        | Service Name                | Resources | Min Instances | Purpose              |
+| ----------- | -------------- | --------------------------- | --------- | ------------- | -------------------- |
+| Development | `whatzaidev`   | `whatsapp-web-service-dev`  | 4Gi/2CPU  | 1             | Testing & validation |
+| Production  | `whatzai-prod` | `whatsapp-web-service-prod` | 8Gi/4CPU  | 2             | Live service         |
 
 ## 🔐 Security & Access
 
 ### Required Permissions
 
 **Development:**
+
 - Cloud Build Editor
 - Cloud Run Developer
 - Artifact Registry Writer
 
 **Production:**
+
 - Cloud Build Editor (whatzai-prod)
 - Cloud Run Admin (whatzai-prod)
 - Artifact Registry Writer (whatzai-prod)
@@ -240,6 +250,7 @@ gcloud run services update whatsapp-web-service-prod \
 ### Secret Management
 
 All secrets are managed through Google Cloud Secret Manager:
+
 - `WHATSAPP_WEB_API_KEY`
 - `BRIGHT_DATA_CUSTOMER_ID`
 - `BRIGHT_DATA_ZONE_PASSWORD`

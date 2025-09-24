@@ -2,7 +2,7 @@ name: 🚀 Deploy WhatsApp Web Service
 
 on:
   push:
-    branches: [main]  # Auto-deploy to dev on main branch push
+    branches: [main] # Auto-deploy to dev on main branch push
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -61,7 +61,6 @@ jobs:
       github.ref == 'refs/heads/main' ||
       (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'dev')
     environment: development
-
     steps:
       - name: 📥 Checkout code
         uses: actions/checkout@v4
@@ -107,7 +106,7 @@ jobs:
 
   build-and-deploy-prod:
     name: 🚀 Deploy to Production (Manual Approval Required)
-    needs: [test, build-and-deploy-dev]  # Must deploy to dev first
+    needs: [test, build-and-deploy-dev] # Must deploy to dev first
     runs-on: ubuntu-latest
     # Only manual workflow_dispatch with explicit confirmation
     if: |
@@ -229,7 +228,7 @@ jobs:
 
       - name: 🔍 Run security audit
         run: npm audit --audit-level moderate
-        continue-on-error: true  # Don't fail PR on audit warnings
+        continue-on-error: true # Don't fail PR on audit warnings
 
       - name: 🔒 Run CodeQL Analysis
         uses: github/codeql-action/init@v3
