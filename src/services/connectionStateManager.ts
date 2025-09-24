@@ -424,20 +424,43 @@ export class ConnectionStateManager extends EventEmitter {
         .collection("whatsapp_web_sessions")
         .doc(state.phoneNumber);
 
-      await ref.set(
-        {
-          status: state.status,
-          instance_url: state.instanceUrl,
-          updated_at: admin.firestore.Timestamp.now(),
-          session_exists: state.sessionExists,
-          qr_scanned: state.qrScanned,
-          sync_completed: state.syncCompleted,
-          message_count: state.messageCount,
-          error_count: state.errorCount,
-          last_error: state.lastError,
-        },
-        { merge: true },
-      );
+      const firestoreData: any = {
+        status: state.status,
+        instance_url: state.instanceUrl,
+        updated_at: admin.firestore.Timestamp.now(),
+        session_exists: state.sessionExists,
+        qr_scanned: state.qrScanned,
+        sync_completed: state.syncCompleted,
+        message_count: state.messageCount,
+        error_count: state.errorCount,
+        last_error: state.lastError,
+      };
+
+      // Add sync progress fields if available
+      if (state.syncProgress) {
+        firestoreData.sync_contacts_count = state.syncProgress.contacts;
+        firestoreData.sync_messages_count = state.syncProgress.messages;
+        firestoreData.sync_started_at = admin.firestore.Timestamp.fromDate(state.syncProgress.startedAt);
+
+        if (state.syncProgress.completedAt) {
+          firestoreData.sync_completed_at = admin.firestore.Timestamp.fromDate(state.syncProgress.completedAt);
+        }
+
+        // Add sync status based on progress
+        if (state.syncCompleted) {
+          firestoreData.sync_status = "completed";
+        } else if (state.syncProgress.messages > 0) {
+          firestoreData.sync_status = "importing_messages";
+        } else if (state.syncProgress.contacts > 0) {
+          firestoreData.sync_status = "importing_contacts";
+        } else {
+          firestoreData.sync_status = "started";
+        }
+
+        firestoreData.sync_last_update = admin.firestore.Timestamp.now();
+      }
+
+      await ref.set(firestoreData, { merge: true });
     } catch (error) {
       this.logger.error({ error, state }, "Failed to persist state");
     }

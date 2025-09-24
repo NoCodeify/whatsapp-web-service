@@ -1076,11 +1076,23 @@ export class ConnectionPool extends EventEmitter {
         );
 
         // Emit sync started event with small delay to ensure WebSocket clients are ready
-        setTimeout(() => {
+        setTimeout(async () => {
           this.logger.info(
             { userId, phoneNumber },
             "Emitting sync:started event",
           );
+
+          // Initialize sync progress in database
+          if (this.connectionStateManager) {
+            await this.connectionStateManager.updateSyncProgress(
+              userId,
+              phoneNumber,
+              0, // contacts count (starting)
+              0, // messages count (starting)
+              false // not completed yet
+            );
+          }
+
           this.emit("sync:started", {
             userId,
             phoneNumber,
@@ -1122,6 +1134,17 @@ export class ConnectionPool extends EventEmitter {
             "Connection restart required after pairing - this is expected",
           );
           connection.qrCode = undefined; // Clear QR as we're now paired
+          connection.hasConnectedSuccessfully = true; // Mark as successfully connected
+
+          // Clear QR timeout to prevent it from firing during restart
+          if (connection.qrTimeout) {
+            clearTimeout(connection.qrTimeout);
+            connection.qrTimeout = undefined;
+            this.logger.debug(
+              { userId, phoneNumber },
+              "Cleared QR timeout before restart to prevent race condition"
+            );
+          }
 
           // Emit status update
           this.emit("connection-update", {
@@ -1362,6 +1385,17 @@ export class ConnectionPool extends EventEmitter {
             "Skipping bulk contact import - will only import contacts with chat history",
           );
 
+          // Update sync progress in database
+          if (this.connectionStateManager) {
+            await this.connectionStateManager.updateSyncProgress(
+              userId,
+              phoneNumber,
+              0, // contacts count (skipped)
+              totalMessagesSynced,
+              false
+            );
+          }
+
           // Still emit event but with 0 count to indicate we're not importing all contacts
           this.emit("contacts-synced", {
             userId,
@@ -1391,6 +1425,17 @@ export class ConnectionPool extends EventEmitter {
             history.messages,
           );
           totalMessagesSynced += count;
+
+          // Update sync progress in database
+          if (this.connectionStateManager) {
+            await this.connectionStateManager.updateSyncProgress(
+              userId,
+              phoneNumber,
+              totalContactsSynced,
+              totalMessagesSynced,
+              false
+            );
+          }
 
           // Emit message sync progress for UI updates
           this.emit("messages-synced", {
@@ -1423,6 +1468,17 @@ export class ConnectionPool extends EventEmitter {
             },
             "Latest history batch received, completing sync",
           );
+
+          // Mark sync as completed in database
+          if (this.connectionStateManager) {
+            await this.connectionStateManager.updateSyncProgress(
+              userId,
+              phoneNumber,
+              totalContactsSynced,
+              totalMessagesSynced,
+              true // sync completed
+            );
+          }
 
           // Emit sync completion event with cumulative totals
           this.emit("history-synced", {
@@ -1462,6 +1518,17 @@ export class ConnectionPool extends EventEmitter {
         // Only emit sync event if we have substantial data (more than 10 contacts)
         // This prevents the misleading "5 contacts" display
         if (contacts.length > 10) {
+          // Update sync progress in database
+          if (this.connectionStateManager) {
+            await this.connectionStateManager.updateSyncProgress(
+              userId,
+              phoneNumber,
+              totalContactsSynced,
+              totalMessagesSynced,
+              false
+            );
+          }
+
           // Emit sync event for UI
           this.emit("contacts-synced", {
             userId,
@@ -1542,6 +1609,17 @@ export class ConnectionPool extends EventEmitter {
             oldMessages,
           );
           totalMessagesSynced += count;
+
+          // Update sync progress in database
+          if (this.connectionStateManager) {
+            await this.connectionStateManager.updateSyncProgress(
+              userId,
+              phoneNumber,
+              totalContactsSynced,
+              totalMessagesSynced,
+              false
+            );
+          }
 
           // Emit progress event
           this.emit("sync:progress", {
@@ -2698,6 +2776,17 @@ export class ConnectionPool extends EventEmitter {
             { userId, phoneNumber, syncedCount },
             "Contacts sync progress",
           );
+
+          // Update sync progress in database every 100 contacts for UI polling
+          if (this.connectionStateManager) {
+            await this.connectionStateManager.updateSyncProgress(
+              userId,
+              phoneNumber,
+              syncedCount,
+              0, // messages count not available in this context
+              false
+            );
+          }
         }
       }
 
@@ -2705,6 +2794,17 @@ export class ConnectionPool extends EventEmitter {
         { userId, phoneNumber, totalSynced: syncedCount },
         "Contacts sync completed",
       );
+
+      // Update sync progress in database
+      if (this.connectionStateManager) {
+        await this.connectionStateManager.updateSyncProgress(
+          userId,
+          phoneNumber,
+          syncedCount,
+          0, // messages count not available here
+          false
+        );
+      }
 
       // Emit event for UI updates
       this.emit("contacts-synced", {
