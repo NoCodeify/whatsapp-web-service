@@ -1019,6 +1019,9 @@ export class ConnectionPool extends EventEmitter {
 
       // Emit connecting state if applicable
       if (state === "connecting") {
+        // Update phone number status for UI
+        await this.updatePhoneNumberStatus(userId, phoneNumber, "connecting");
+
         this.emit("connection-update", {
           userId,
           phoneNumber,
@@ -1068,6 +1071,9 @@ export class ConnectionPool extends EventEmitter {
         }
 
         await this.updateConnectionStatus(userId, phoneNumber, "connected");
+
+        // Update phone number status for UI immediately
+        await this.updatePhoneNumberStatus(userId, phoneNumber, "connected");
 
         // Emit connection established event
         this.emit("connection-update", {
@@ -1708,6 +1714,9 @@ export class ConnectionPool extends EventEmitter {
         { userId, phoneNumber, qrLength: qr.length },
         "QR code event emitted to WebSocket clients",
       );
+
+      // Update phone number status for UI immediately
+      await this.updatePhoneNumberStatus(userId, phoneNumber, "qr_pending");
 
       // Store QR code in Firestore (async, don't block)
       const sessionRef = this.firestore
