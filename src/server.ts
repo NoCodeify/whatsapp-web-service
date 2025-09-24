@@ -297,11 +297,15 @@ app.get("/health", async (_req: Request, res: Response) => {
     const memoryLeakStats = memoryLeakPrevention.getStats();
 
     // Determine overall health status
-    const hasOpenCircuitBreaker = errorStats.circuitBreakers.some(cb => cb.state === "open");
+    const hasOpenCircuitBreaker = errorStats.circuitBreakers.some(
+      (cb) => cb.state === "open",
+    );
     const isHealthy =
       rssMemoryPercentage < 90 &&
       metrics.activeConnections >= 0 &&
-      (webSocketStats.failedConnections || 0) / Math.max(webSocketStats.totalConnections || 1, 1) < 0.5 &&
+      (webSocketStats.failedConnections || 0) /
+        Math.max(webSocketStats.totalConnections || 1, 1) <
+        0.5 &&
       !hasOpenCircuitBreaker;
 
     const healthData = {
@@ -360,10 +364,14 @@ app.get("/health", async (_req: Request, res: Response) => {
       // Error handling statistics
       errors: {
         totalCircuitBreakers: errorStats.circuitBreakers.length,
-        openCircuitBreakers: errorStats.circuitBreakers.filter(cb => cb.state === "open").length,
+        openCircuitBreakers: errorStats.circuitBreakers.filter(
+          (cb) => cb.state === "open",
+        ).length,
         totalErrorTypes: errorStats.errorStats.length,
-        recentErrors: errorStats.errorStats.filter(e =>
-          (new Date().getTime() - new Date(e.lastOccurrence).getTime()) < 300000 // 5 minutes
+        recentErrors: errorStats.errorStats.filter(
+          (e) =>
+            new Date().getTime() - new Date(e.lastOccurrence).getTime() <
+            300000, // 5 minutes
         ).length,
         circuitBreakers: errorStats.circuitBreakers,
         errorStats: errorStats.errorStats,
