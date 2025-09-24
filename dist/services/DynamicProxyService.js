@@ -11,6 +11,7 @@ class DynamicProxyService {
     logger = (0, pino_1.default)({ name: "DynamicProxyService" });
     apiClient;
     availabilityCache = new Map();
+    customerId = "";
     CACHE_TTL = 3600000; // 1 hour
     config = {
         apiKey: process.env.BRIGHT_DATA_API_KEY || "",
@@ -53,28 +54,49 @@ class DynamicProxyService {
             },
             timeout: 30000,
         });
-        // Initialize API key from Secret Manager
-        this.initializeApiKey();
+        // Initialize credentials from Secret Manager
+        this.initializeCredentials();
     }
     /**
-     * Initialize API key from Secret Manager
+     * Initialize credentials from Secret Manager
      */
-    async initializeApiKey() {
+    async initializeCredentials() {
         try {
+            // Initialize API key
             const apiKey = await secrets_1.secretManager.getBrightDataApiKey();
-            // Update axios instance with the API key
             this.apiClient.defaults.headers["Authorization"] = `Bearer ${apiKey}`;
-            this.logger.info("Successfully initialized BrightData API key from Secret Manager");
+            // Initialize customer ID
+            this.customerId = await secrets_1.secretManager.getBrightDataCustomerId();
+            // Validate customer ID is not a placeholder
+            if (this.customerId.includes("your_") || this.customerId.includes("placeholder")) {
+                throw new Error("Customer ID appears to be a placeholder value");
+            }
+            this.logger.info("Successfully initialized BrightData credentials from Secret Manager");
         }
         catch (error) {
-            this.logger.error({ error: error.message }, "Failed to initialize API key from Secret Manager");
-            // Try to use environment variable as fallback
+            this.logger.error({ error: error.message }, "Failed to initialize credentials from Secret Manager");
+            // Try to use environment variables as fallback
             if (this.config.apiKey) {
                 this.apiClient.defaults.headers["Authorization"] =
                     `Bearer ${this.config.apiKey}`;
                 this.logger.warn("Using API key from environment variable as fallback");
             }
+            if (this.config.customerId &&
+                !this.config.customerId.includes("your_") &&
+                !this.config.customerId.includes("placeholder")) {
+                this.customerId = this.config.customerId;
+                this.logger.warn("Using Customer ID from environment variable as fallback");
+            }
+            else {
+                this.logger.error("No valid Customer ID available - proxy purchases will fail");
+            }
         }
+    }
+    /**
+     * Check if the service is ready for use
+     */
+    isReady() {
+        return !!(this.customerId && this.apiClient.defaults.headers["Authorization"]);
     }
     /**
      * Purchase a new proxy for the specified country
@@ -83,8 +105,12 @@ class DynamicProxyService {
         try {
             // Purchase new proxy from BrightData
             this.logger.info({ country }, "Purchasing new proxy");
+            // Ensure credentials are initialized
+            if (!this.customerId) {
+                throw new Error("Customer ID not initialized - cannot purchase proxy");
+            }
             const response = await this.apiClient.post("/zone/ips", {
-                customer: this.config.customerId,
+                customer: this.customerId,
                 zone: this.config.zone,
                 count: 1,
                 country: country.toLowerCase(),

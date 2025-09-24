@@ -17,14 +17,19 @@ export declare class DynamicProxyService {
     private logger;
     private apiClient;
     private availabilityCache;
+    private customerId;
     private readonly CACHE_TTL;
     private readonly config;
     private readonly FALLBACK_CHAINS;
     constructor();
     /**
-     * Initialize API key from Secret Manager
+     * Initialize credentials from Secret Manager
      */
-    private initializeApiKey;
+    private initializeCredentials;
+    /**
+     * Check if the service is ready for use
+     */
+    isReady(): boolean;
     /**
      * Purchase a new proxy for the specified country
      */

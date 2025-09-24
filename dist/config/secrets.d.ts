@@ -8,6 +8,10 @@ export declare class SecretManager {
      */
     getBrightDataApiKey(): Promise<string>;
     /**
+     * Get BrightData Customer ID from Secret Manager
+     */
+    getBrightDataCustomerId(): Promise<string>;
+    /**
      * Get a secret from Google Secret Manager with caching
      */
     private getSecret;

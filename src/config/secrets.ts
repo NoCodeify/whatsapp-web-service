@@ -36,6 +36,31 @@ export class SecretManager {
   }
 
   /**
+   * Get BrightData Customer ID from Secret Manager
+   */
+  async getBrightDataCustomerId(): Promise<string> {
+    const secretName =
+      process.env.BRIGHT_DATA_CUSTOMER_ID_SECRET ||
+      `projects/${process.env.GOOGLE_CLOUD_PROJECT}/secrets/bright-data-customer-id/versions/latest`;
+
+    // Check if we have a hardcoded customer ID (for local dev)
+    // Validate it's not a placeholder value
+    if (
+      process.env.BRIGHT_DATA_CUSTOMER_ID &&
+      process.env.NODE_ENV === "development" &&
+      !process.env.BRIGHT_DATA_CUSTOMER_ID.includes("your_") &&
+      !process.env.BRIGHT_DATA_CUSTOMER_ID.includes("placeholder")
+    ) {
+      logger.warn(
+        "Using hardcoded Customer ID from environment variable - only for development!",
+      );
+      return process.env.BRIGHT_DATA_CUSTOMER_ID;
+    }
+
+    return this.getSecret(secretName);
+  }
+
+  /**
    * Get a secret from Google Secret Manager with caching
    */
   private async getSecret(secretName: string): Promise<string> {
