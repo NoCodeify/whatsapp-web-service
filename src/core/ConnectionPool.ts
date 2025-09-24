@@ -256,7 +256,6 @@ export class ConnectionPool extends EventEmitter {
       },
     );
 
-
     // Handle reconnection requests
     this.errorHandler.on(
       "reconnection-needed",
@@ -583,7 +582,6 @@ export class ConnectionPool extends EventEmitter {
       return false;
     }
 
-
     try {
       // Initialize connection state if manager is available
       if (this.connectionStateManager) {
@@ -667,7 +665,11 @@ export class ConnectionPool extends EventEmitter {
   /**
    * Remove a connection from the pool
    */
-  async removeConnection(userId: string, phoneNumber: string): Promise<void> {
+  async removeConnection(
+    userId: string,
+    phoneNumber: string,
+    skipLogout = false,
+  ): Promise<void> {
     // Format phone number for consistency
     const formattedPhone = formatPhoneNumberSafe(phoneNumber);
     if (formattedPhone) {
@@ -692,17 +694,24 @@ export class ConnectionPool extends EventEmitter {
         connection.qrTimeout = undefined;
       }
 
-      // Properly logout from WhatsApp first, then end connection
-      try {
-        await connection.socket.logout();
+      // Logout from WhatsApp (unless we want to preserve session)
+      if (!skipLogout) {
+        try {
+          await connection.socket.logout();
+          this.logger.info(
+            { userId, phoneNumber },
+            "WhatsApp session logged out successfully",
+          );
+        } catch (logoutError) {
+          this.logger.warn(
+            { userId, phoneNumber, logoutError },
+            "Failed to logout cleanly, proceeding with connection end",
+          );
+        }
+      } else {
         this.logger.info(
           { userId, phoneNumber },
-          "WhatsApp session logged out successfully",
-        );
-      } catch (logoutError) {
-        this.logger.warn(
-          { userId, phoneNumber, logoutError },
-          "Failed to logout cleanly, proceeding with connection end",
+          "Gracefully closing connection without logout to preserve session",
         );
       }
 
@@ -714,7 +723,6 @@ export class ConnectionPool extends EventEmitter {
 
       // Unregister from WebSocket manager
       this.wsManager.unregisterConnection(connectionKey);
-
 
       // Clean up associated caches
       const sessionKey = `${userId}-${phoneNumber}`;
@@ -981,7 +989,6 @@ export class ConnectionPool extends EventEmitter {
     const connectionId = this.getConnectionKey(userId, phoneNumber);
     this.wsManager.registerConnection(connectionId, socket);
 
-
     this.logger.debug(
       { userId, phoneNumber },
       "Connection registered with WebSocket manager and memory leak prevention",
@@ -1043,7 +1050,6 @@ export class ConnectionPool extends EventEmitter {
             await this.removeConnection(userId, phoneNumber);
           }
         }, 90000); // 90 seconds timeout
-
       }
 
       if (state === "open") {
@@ -1089,7 +1095,7 @@ export class ConnectionPool extends EventEmitter {
               phoneNumber,
               0, // contacts count (starting)
               0, // messages count (starting)
-              false // not completed yet
+              false, // not completed yet
             );
           }
 
@@ -1145,7 +1151,7 @@ export class ConnectionPool extends EventEmitter {
             connection.qrTimeout = undefined;
             this.logger.debug(
               { userId, phoneNumber },
-              "Cleared QR timeout before restart to prevent race condition"
+              "Cleared QR timeout before restart to prevent race condition",
             );
           }
 
@@ -1395,7 +1401,7 @@ export class ConnectionPool extends EventEmitter {
               phoneNumber,
               0, // contacts count (skipped)
               totalMessagesSynced,
-              false
+              false,
             );
           }
 
@@ -1436,12 +1442,16 @@ export class ConnectionPool extends EventEmitter {
               phoneNumber,
               totalContactsSynced,
               totalMessagesSynced,
-              false
+              false,
             );
           }
 
           // Update phone number status for UI
-          await this.updatePhoneNumberStatus(userId, phoneNumber, "importing_messages");
+          await this.updatePhoneNumberStatus(
+            userId,
+            phoneNumber,
+            "importing_messages",
+          );
 
           // Emit message sync progress for UI updates
           this.emit("messages-synced", {
@@ -1482,7 +1492,7 @@ export class ConnectionPool extends EventEmitter {
               phoneNumber,
               totalContactsSynced,
               totalMessagesSynced,
-              true // sync completed
+              true, // sync completed
             );
           }
 
@@ -1534,12 +1544,16 @@ export class ConnectionPool extends EventEmitter {
               phoneNumber,
               totalContactsSynced,
               totalMessagesSynced,
-              false
+              false,
             );
           }
 
           // Update phone number status for UI
-          await this.updatePhoneNumberStatus(userId, phoneNumber, "importing_contacts");
+          await this.updatePhoneNumberStatus(
+            userId,
+            phoneNumber,
+            "importing_contacts",
+          );
 
           // Emit sync event for UI
           this.emit("contacts-synced", {
@@ -1629,7 +1643,7 @@ export class ConnectionPool extends EventEmitter {
               phoneNumber,
               totalContactsSynced,
               totalMessagesSynced,
-              false
+              false,
             );
           }
 
@@ -2796,7 +2810,7 @@ export class ConnectionPool extends EventEmitter {
               phoneNumber,
               syncedCount,
               0, // messages count not available in this context
-              false
+              false,
             );
           }
         }
@@ -2814,7 +2828,7 @@ export class ConnectionPool extends EventEmitter {
           phoneNumber,
           syncedCount,
           0, // messages count not available here
-          false
+          false,
         );
       }
 
@@ -3682,7 +3696,11 @@ export class ConnectionPool extends EventEmitter {
 
     try {
       // Try to reconnect with preserved proxy country
-      const success = await this.addConnection(userId, phoneNumber, storedProxyCountry);
+      const success = await this.addConnection(
+        userId,
+        phoneNumber,
+        storedProxyCountry,
+      );
       if (!success) {
         // If addConnection failed, try again (only increment if not immediate reconnect)
         const nextAttempt = attempt === 0 ? 1 : attempt + 1;
@@ -3820,10 +3838,13 @@ export class ConnectionPool extends EventEmitter {
         .collection("phone_numbers")
         .doc(phoneNumber);
 
-      await phoneNumberRef.set({
-        whatsapp_web_status: status,
-        updated_at: new Date(),
-      }, { merge: true });
+      await phoneNumberRef.set(
+        {
+          whatsapp_web_status: status,
+          updated_at: new Date(),
+        },
+        { merge: true },
+      );
 
       this.logger.info(
         { userId, phoneNumber, status },
@@ -3889,7 +3910,6 @@ export class ConnectionPool extends EventEmitter {
         memoryUsage: this.getMemoryUsage(),
       });
     }, this.config.healthCheckInterval);
-
   }
 
   /**
@@ -3900,7 +3920,6 @@ export class ConnectionPool extends EventEmitter {
       this.proxyManager.cleanupSessions();
       this.sessionManager.cleanupSessions();
     }, this.config.sessionCleanupInterval);
-
   }
 
   /**
@@ -3932,7 +3951,6 @@ export class ConnectionPool extends EventEmitter {
   private hasCapacity(): boolean {
     return this.connections.size < this.config.maxConnections;
   }
-
 
   private getMemoryUsage(): number {
     const memUsage = process.memoryUsage();
@@ -4060,9 +4078,10 @@ export class ConnectionPool extends EventEmitter {
 
   /**
    * Shutdown the pool
+   * @param preserveSessions - If true, close connections without logging out (for deployments)
    */
-  async shutdown() {
-    this.logger.info("Shutting down connection pool");
+  async shutdown(preserveSessions = true) {
+    this.logger.info({ preserveSessions }, "Shutting down connection pool");
 
     // Clear timers
     if (this.healthCheckTimer) {
@@ -4079,13 +4098,30 @@ export class ConnectionPool extends EventEmitter {
     this.sentMessageIds.clear();
 
     // Close all connections
-    for (const connection of this.connections.values()) {
-      await this.removeConnection(connection.userId, connection.phoneNumber);
+    if (preserveSessions) {
+      this.logger.info(
+        "Gracefully closing connections to preserve sessions for recovery",
+      );
+      for (const connection of this.connections.values()) {
+        await this.removeConnection(
+          connection.userId,
+          connection.phoneNumber,
+          true,
+        ); // skipLogout = true
+      }
+    } else {
+      this.logger.info("Fully logging out all connections");
+      for (const connection of this.connections.values()) {
+        await this.removeConnection(
+          connection.userId,
+          connection.phoneNumber,
+          false,
+        ); // skipLogout = false
+      }
     }
 
     // Shutdown WebSocket manager
     this.wsManager.shutdown();
-
 
     // Shutdown error handler
     this.errorHandler.shutdown();

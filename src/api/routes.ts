@@ -345,7 +345,7 @@ export function createApiRoutes(
           "Processing session deletion request",
         );
 
-        await connectionPool.removeConnection(userId, formattedPhone);
+        await connectionPool.removeConnection(userId, formattedPhone, false); // User-initiated disconnect = explicit logout
         await sessionManager.deleteSession(userId, formattedPhone);
 
         res.json({

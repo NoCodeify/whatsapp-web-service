@@ -96,7 +96,6 @@ if (sessionRecoveryService) {
 // Set connection pool reference for reconnection service
 (reconnectionService as any).connectionPool = connectionPool;
 
-
 // Initialize Cloud Run optimization services
 const instanceCoordinator = new InstanceCoordinator(firestore);
 const webSocketManager = new CloudRunWebSocketManager();
@@ -288,7 +287,6 @@ app.get("/health", async (_req: Request, res: Response) => {
     // Get error handler statistics
     const errorStats = errorHandler.getStats();
 
-
     // Determine overall health status
     const hasOpenCircuitBreaker = errorStats.circuitBreakers.some(
       (cb) => cb.state === "open",
@@ -369,7 +367,6 @@ app.get("/health", async (_req: Request, res: Response) => {
         circuitBreakers: errorStats.circuitBreakers,
         errorStats: errorStats.errorStats,
       },
-
 
       // Proxy metrics
       proxy: metrics.proxyMetrics,
@@ -509,8 +506,8 @@ const gracefulShutdown = async (signal: string) => {
     await sessionRecoveryService.shutdown();
   }
 
-  // Shutdown connection pool
-  await connectionPool.shutdown();
+  // Shutdown connection pool with session preservation for deployments
+  await connectionPool.shutdown(true); // preserveSessions = true
 
   // Exit process
   process.exit(0);
