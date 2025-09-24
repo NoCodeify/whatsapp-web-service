@@ -41,37 +41,6 @@ export class DynamicProxyService {
     port: parseInt(process.env.BRIGHT_DATA_PORT || "33335"),
   };
 
-  // Regional fallback chains for unavailable countries
-  private readonly FALLBACK_CHAINS: Record<string, string[]> = {
-    // Europe
-    be: ["nl", "fr", "de", "gb", "us"],
-    lu: ["de", "fr", "be", "nl", "gb"],
-    mt: ["it", "es", "fr", "gb", "de"],
-    is: ["dk", "no", "se", "gb", "de"],
-
-    // Asia
-    bd: ["in", "sg", "my", "gb", "us"],
-    pk: ["in", "ae", "sg", "gb", "us"],
-    lk: ["in", "sg", "my", "gb", "us"],
-    np: ["in", "sg", "gb", "us"],
-
-    // Africa
-    ng: ["za", "ke", "eg", "gb", "us"],
-    gh: ["za", "ng", "gb", "us"],
-    ke: ["za", "eg", "ae", "gb", "us"],
-
-    // Caribbean
-    jm: ["us", "mx", "br", "gb"],
-    bb: ["us", "br", "gb"],
-    tt: ["us", "br", "mx", "gb"],
-
-    // Pacific Islands
-    fj: ["au", "nz", "sg", "us"],
-    gu: ["us", "jp", "au", "sg"],
-
-    // Default fallback for unknown countries
-    default: ["us", "gb", "de", "sg", "au", "ca", "fr", "nl", "jp", "br"],
-  };
 
   constructor() {
     // Initialize API client with placeholder auth
@@ -320,28 +289,6 @@ export class DynamicProxyService {
     }
   }
 
-  /**
-   * Get fallback country for unavailable location
-   */
-  async getFallbackCountry(requestedCountry: string): Promise<string> {
-    const fallbackChain =
-      this.FALLBACK_CHAINS[requestedCountry.toLowerCase()] ||
-      this.FALLBACK_CHAINS.default;
-
-    // Try each fallback in order
-    for (const fallbackCountry of fallbackChain) {
-      if (await this.checkAvailability(fallbackCountry)) {
-        this.logger.info(
-          { requested: requestedCountry, fallback: fallbackCountry },
-          "Using fallback country",
-        );
-        return fallbackCountry;
-      }
-    }
-
-    // Last resort - return US (most likely to be available)
-    return "us";
-  }
 
   /**
    * Assign a proxy to a user
@@ -352,7 +299,6 @@ export class DynamicProxyService {
     requestedCountry: string,
   ): Promise<{ proxy: ProxyInfo; fallbackUsed: boolean }> {
     let country = requestedCountry.toLowerCase();
-    let fallbackUsed = false;
     let proxy: ProxyInfo | null = null;
 
     try {
@@ -360,12 +306,8 @@ export class DynamicProxyService {
       proxy = await this.purchaseProxy(country);
     } catch (error: any) {
       if (error.message.startsWith("NO_PROXY_AVAILABLE")) {
-        // Get fallback country
-        country = await this.getFallbackCountry(requestedCountry);
-        fallbackUsed = true;
-
-        // Try to purchase proxy for fallback country
-        proxy = await this.purchaseProxy(country);
+        // Don't fallback to other countries - only use requested country
+        throw new Error(`No proxy available for ${requestedCountry} - not falling back to other countries`);
       } else {
         throw error;
       }
@@ -381,12 +323,12 @@ export class DynamicProxyService {
         phoneNumber,
         ip: proxy.ip,
         country: proxy.country,
-        fallbackUsed,
+        fallbackUsed: false,
       },
       "Proxy assigned to user",
     );
 
-    return { proxy, fallbackUsed };
+    return { proxy, fallbackUsed: false };
   }
 
   /**

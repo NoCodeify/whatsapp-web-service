@@ -1025,6 +1025,12 @@ export class ConnectionPool extends EventEmitter {
         connection.qrCode = qr;
         await this.handleQRCode(userId, phoneNumber, qr);
 
+        // Clear any existing QR timeout before setting a new one to prevent race condition
+        if (connection.qrTimeout) {
+          clearTimeout(connection.qrTimeout);
+          connection.qrTimeout = undefined;
+        }
+
         // Set QR expiration timeout to prevent orphaned proxies
         connection.qrTimeout = setTimeout(async () => {
           if (!connection.hasConnectedSuccessfully) {
