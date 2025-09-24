@@ -96,13 +96,15 @@ export class DynamicProxyService {
       const apiKey = await secretManager.getBrightDataApiKey();
       this.apiClient.defaults.headers["Authorization"] = `Bearer ${apiKey}`;
 
-      // Initialize customer ID
-      this.customerId = await secretManager.getBrightDataCustomerId();
+      // Initialize customer ID with validation
+      const customerIdFromSecret = await secretManager.getBrightDataCustomerId();
 
-      // Validate customer ID is not a placeholder
-      if (this.customerId.includes("your_") || this.customerId.includes("placeholder")) {
+      // Validate customer ID is not a placeholder before assignment
+      if (customerIdFromSecret.includes("your_") || customerIdFromSecret.includes("placeholder")) {
         throw new Error("Customer ID appears to be a placeholder value");
       }
+
+      this.customerId = customerIdFromSecret;
 
       this.logger.info(
         "Successfully initialized BrightData credentials from Secret Manager",
@@ -112,6 +114,9 @@ export class DynamicProxyService {
         { error: error.message },
         "Failed to initialize credentials from Secret Manager",
       );
+
+      // Reset customer ID to ensure no placeholder value persists
+      this.customerId = "";
 
       // Try to use environment variables as fallback
       if (this.config.apiKey) {
@@ -158,6 +163,11 @@ export class DynamicProxyService {
 
       if (!this.customerId) {
         throw new Error("Customer ID not initialized - cannot purchase proxy");
+      }
+
+      // Validate customer ID is not a placeholder value
+      if (this.customerId.includes("your_") || this.customerId.includes("placeholder")) {
+        throw new Error("Customer ID contains placeholder value - configure valid credentials");
       }
 
       const response = await this.apiClient.post<ProxyPurchaseResponse>(
@@ -225,6 +235,15 @@ export class DynamicProxyService {
     try {
       // Ensure credentials are initialized
       await this.ensureInitialized();
+
+      if (!this.customerId) {
+        throw new Error("Customer ID not initialized - cannot release proxy");
+      }
+
+      // Validate customer ID is not a placeholder value
+      if (this.customerId.includes("your_") || this.customerId.includes("placeholder")) {
+        throw new Error("Customer ID contains placeholder value - configure valid credentials");
+      }
 
       this.logger.info({ ip }, "Releasing proxy");
 

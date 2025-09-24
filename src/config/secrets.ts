@@ -84,10 +84,19 @@ export class SecretManager {
 		} catch (error: any) {
 			logger.error({ error: error.message, secretName }, "Failed to retrieve secret");
 
-			// Fallback to environment variable if Secret Manager fails
-			if (process.env.BRIGHT_DATA_API_KEY) {
+			// Fallback to environment variable based on secret type
+			if (secretName.includes('BRIGHT_DATA_API_KEY') && process.env.BRIGHT_DATA_API_KEY) {
 				logger.warn("Falling back to environment variable for API key");
 				return process.env.BRIGHT_DATA_API_KEY;
+			} else if (secretName.includes('BRIGHT_DATA_CUSTOMER_ID') && process.env.BRIGHT_DATA_CUSTOMER_ID) {
+				// Validate that the customer ID is not a placeholder
+				if (!process.env.BRIGHT_DATA_CUSTOMER_ID.includes("your_") &&
+					!process.env.BRIGHT_DATA_CUSTOMER_ID.includes("placeholder")) {
+					logger.warn("Falling back to environment variable for customer ID");
+					return process.env.BRIGHT_DATA_CUSTOMER_ID;
+				} else {
+					logger.error("Environment variable BRIGHT_DATA_CUSTOMER_ID contains placeholder value");
+				}
 			}
 
 			throw new Error(`Failed to retrieve secret: ${error.message}`);
