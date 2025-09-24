@@ -31,6 +31,7 @@ export class DynamicProxyService {
   private apiClient: AxiosInstance;
   private availabilityCache: Map<string, AvailabilityCache> = new Map();
   private customerId: string = "";
+  private initializationPromise: Promise<void>;
   private readonly CACHE_TTL = 3600000; // 1 hour
 
   private readonly config = {
@@ -82,8 +83,8 @@ export class DynamicProxyService {
       timeout: 30000,
     });
 
-    // Initialize credentials from Secret Manager
-    this.initializeCredentials();
+    // Initialize credentials from Secret Manager (store promise for awaiting)
+    this.initializationPromise = this.initializeCredentials();
   }
 
   /**
@@ -131,6 +132,13 @@ export class DynamicProxyService {
   }
 
   /**
+   * Ensure service is initialized before use
+   */
+  private async ensureInitialized(): Promise<void> {
+    await this.initializationPromise;
+  }
+
+  /**
    * Check if the service is ready for use
    */
   isReady(): boolean {
@@ -146,6 +154,8 @@ export class DynamicProxyService {
       this.logger.info({ country }, "Purchasing new proxy");
 
       // Ensure credentials are initialized
+      await this.ensureInitialized();
+
       if (!this.customerId) {
         throw new Error("Customer ID not initialized - cannot purchase proxy");
       }
@@ -200,12 +210,15 @@ export class DynamicProxyService {
    */
   async releaseProxy(ip: string): Promise<void> {
     try {
+      // Ensure credentials are initialized
+      await this.ensureInitialized();
+
       this.logger.info({ ip }, "Releasing proxy");
 
       // Call BrightData API to release the IP
       await this.apiClient.delete("/zone/ips", {
         data: {
-          customer: this.config.customerId,
+          customer: this.customerId,
           zone: this.config.zone,
           ips: [ip],
         },
@@ -232,10 +245,13 @@ export class DynamicProxyService {
     }
 
     try {
+      // Ensure credentials are initialized
+      await this.ensureInitialized();
+
       // Try to get availability from BrightData
       // Note: This endpoint may not exist, so we'll try purchasing with dry_run
       const response = await this.apiClient.post("/zone/ips", {
-        customer: this.config.customerId,
+        customer: this.customerId,
         zone: this.config.zone,
         count: 1,
         country: country.toLowerCase(),
