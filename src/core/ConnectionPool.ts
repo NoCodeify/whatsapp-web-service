@@ -3536,6 +3536,10 @@ export class ConnectionPool extends EventEmitter {
     const maxAttempts = 5;
     const baseDelay = 5000;
 
+    // Get existing connection's proxy country BEFORE deleting
+    const existingConnection = this.connections.get(connectionKey);
+    const storedProxyCountry = existingConnection?.proxyCountry;
+
     // Remove old connection from pool (but keep auth state)
     this.connections.delete(connectionKey);
 
@@ -3565,11 +3569,6 @@ export class ConnectionPool extends EventEmitter {
     }
 
     try {
-      // Get existing connection's proxy country before reconnecting
-      const connectionKey = this.getConnectionKey(userId, phoneNumber);
-      const existingConnection = this.connections.get(connectionKey);
-      const storedProxyCountry = existingConnection?.proxyCountry;
-
       // Try to reconnect with preserved proxy country
       const success = await this.addConnection(userId, phoneNumber, storedProxyCountry);
       if (!success) {
