@@ -60,6 +60,7 @@ export class ConnectionPool extends EventEmitter {
   private instanceCoordinator: InstanceCoordinator;
   private healthCheckTimer?: NodeJS.Timeout;
   private cleanupTimer?: NodeJS.Timeout;
+  private isShuttingDown: boolean = false;
   private importListRefs: Map<string, DocumentReference> = new Map(); // Store import list refs per user
   private pendingChatMetadata: Map<string, any> = new Map(); // Store chat metadata for contacts to be created
   private syncedContactInfo: Map<
@@ -741,8 +742,15 @@ export class ConnectionPool extends EventEmitter {
       // Release the proxy immediately
       await this.proxyManager.releaseProxy(userId, phoneNumber);
 
-      // Update Firestore
-      await this.updateConnectionStatus(userId, phoneNumber, "disconnected");
+      // Update Firestore - preserve status for recovery when preserving session
+      if (!skipLogout) {
+        await this.updateConnectionStatus(userId, phoneNumber, "disconnected");
+      } else {
+        this.logger.info(
+          { userId, phoneNumber },
+          "Preserving connection status for session recovery",
+        );
+      }
 
       // Release session ownership in instance coordinator
       await this.instanceCoordinator.releaseSessionOwnership(
@@ -1227,7 +1235,7 @@ export class ConnectionPool extends EventEmitter {
           status: "disconnected",
         });
 
-        if (shouldReconnect) {
+        if (shouldReconnect && !this.isShuttingDown) {
           this.logger.info(
             { userId, phoneNumber, disconnectReason },
             "Connection closed, attempting reconnect with error handling",
@@ -1260,6 +1268,11 @@ export class ConnectionPool extends EventEmitter {
             );
             await this.reconnect(userId, phoneNumber);
           }
+        } else if (shouldReconnect && this.isShuttingDown) {
+          this.logger.info(
+            { userId, phoneNumber, disconnectReason },
+            "Skipping reconnection during graceful shutdown",
+          );
         } else {
           await this.removeConnection(userId, phoneNumber);
         }
@@ -4090,6 +4103,7 @@ export class ConnectionPool extends EventEmitter {
    * @param preserveSessions - If true, close connections without logging out (for deployments)
    */
   async shutdown(preserveSessions = true) {
+    this.isShuttingDown = true;
     this.logger.info({ preserveSessions }, "Shutting down connection pool");
 
     // Clear timers
