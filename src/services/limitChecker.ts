@@ -270,18 +270,8 @@ export class LimitChecker {
         whatsapp_web_usage: usage,
       });
 
-      // Calculate delay for new contacts
+      // No delay applied - send messages immediately
       let delayMs = 0;
-      if (isNewContact) {
-        delayMs = settings.delay_between_new_messages * 1000;
-        // Add random variation
-        delayMs += Math.random() * settings.delay_random_variation * 1000;
-
-        logger.info(
-          { userId, phoneNumber, delayMs, isNewContact },
-          `Applying delay of ${Math.round(delayMs / 1000)}s for new contact`,
-        );
-      }
 
       // Calculate usage stats
       const remaining = dailyLimit - usage.new_contacts_today;
@@ -331,12 +321,10 @@ export class LimitChecker {
   }
 
   /**
-   * Apply delay if needed
+   * Apply delay if needed (DEPRECATED - no longer applies delays)
    */
-  async applyDelay(delayMs: number): Promise<void> {
-    if (delayMs > 0) {
-      logger.info({ delayMs }, `Applying delay of ${delayMs}ms`);
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
-    }
+  async applyDelay(_delayMs: number): Promise<void> {
+    // Delay functionality has been removed - messages now send immediately
+    return Promise.resolve();
   }
 }

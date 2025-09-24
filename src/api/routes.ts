@@ -665,18 +665,14 @@ export function createApiRoutes(
           });
         }
 
-        // Apply delay if needed (for new contacts)
-        if (limitCheck.delayMs > 0) {
-          logger.info(
-            {
-              correlationId,
-              delayMs: limitCheck.delayMs,
-              reason: "new_contact_throttling",
-            },
-            "Applying delay for new contact",
-          );
-          await limitChecker.applyDelay(limitCheck.delayMs);
-        }
+        // Delay functionality removed - messages now send immediately
+        logger.info(
+          {
+            correlationId,
+            isNewContact: limitCheck.isNewContact,
+          },
+          "Message ready to send immediately",
+        );
 
         // Build message content
         let content: WAMessageContent;
