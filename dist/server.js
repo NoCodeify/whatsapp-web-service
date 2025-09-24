@@ -45,6 +45,7 @@ const socket_io_1 = require("socket.io");
 const pino_1 = __importDefault(require("pino"));
 const firestore_1 = require("@google-cloud/firestore");
 const pubsub_1 = require("@google-cloud/pubsub");
+// import { Storage } from "@google-cloud/storage"; // Commented out - not currently used
 const dotenv = __importStar(require("dotenv"));
 // Core modules
 const ProxyManager_1 = require("./core/ProxyManager");
@@ -59,7 +60,7 @@ const InstanceCoordinator_1 = require("./services/InstanceCoordinator");
 const CloudRunWebSocketManager_1 = require("./services/CloudRunWebSocketManager");
 const ErrorHandler_1 = require("./services/ErrorHandler");
 const MemoryLeakPrevention_1 = require("./services/MemoryLeakPrevention");
-const CloudRunSessionOptimizer_1 = require("./services/CloudRunSessionOptimizer");
+// import { CloudRunSessionOptimizer } from "./services/CloudRunSessionOptimizer"; // Commented out - not currently used
 // API routes
 const routes_1 = require("./api/routes");
 const websocket_1 = require("./api/websocket");
@@ -84,6 +85,9 @@ const firestore = new firestore_1.Firestore({
 const pubsub = new pubsub_1.PubSub({
     projectId: process.env.GOOGLE_CLOUD_PROJECT,
 });
+// const storage = new Storage({
+//   projectId: process.env.GOOGLE_CLOUD_PROJECT,
+// }); // Commented out - not currently used
 // Initialize recovery services (only if proxy type is ISP)
 let dynamicProxyService;
 let sessionRecoveryService;
@@ -111,16 +115,19 @@ const instanceCoordinator = new InstanceCoordinator_1.InstanceCoordinator(firest
 const webSocketManager = new CloudRunWebSocketManager_1.CloudRunWebSocketManager();
 const errorHandler = new ErrorHandler_1.ErrorHandler();
 const memoryLeakPrevention = new MemoryLeakPrevention_1.MemoryLeakPrevention();
-const sessionOptimizer = new CloudRunSessionOptimizer_1.CloudRunSessionOptimizer(firestore);
+// const sessionOptimizer = new CloudRunSessionOptimizer(storage, firestore); // Commented out - not currently used
 // Connect services to connection pool events
-connectionPool.on('websocket:created', (data) => {
-    webSocketManager.monitorConnection(data.connectionId, data.socket);
+connectionPool.on("websocket:created", (data) => {
+    webSocketManager.registerConnection(data.connectionId, data.socket);
 });
-connectionPool.on('websocket:closed', (data) => {
-    webSocketManager.removeConnection(data.connectionId);
+connectionPool.on("websocket:closed", (data) => {
+    webSocketManager.unregisterConnection(data.connectionId);
 });
-connectionPool.on('error', (error) => {
-    errorHandler.handleError(error);
+connectionPool.on("error", (error) => {
+    errorHandler.handleError(error, {
+        operation: "connection_pool_error",
+        timestamp: new Date(),
+    });
 });
 // Create Express app
 const app = (0, express_1.default)();
@@ -231,30 +238,31 @@ app.get("/health", async (_req, res) => {
         // Get container memory limit (Cloud Run)
         const getContainerMemoryLimit = () => {
             try {
-                const fs = require('fs');
-                const memLimit = fs.readFileSync('/sys/fs/cgroup/memory/memory.limit_in_bytes', 'utf8');
+                const fs = require("fs");
+                const memLimit = fs.readFileSync("/sys/fs/cgroup/memory/memory.limit_in_bytes", "utf8");
                 return parseInt(memLimit.trim());
             }
             catch {
                 // Fallback for non-containerized environments
-                return require('os').totalmem();
+                return require("os").totalmem();
             }
         };
         const containerMemLimit = getContainerMemoryLimit();
         const rssMemoryPercentage = (memUsage.rss / containerMemLimit) * 100;
-        // Get WebSocket health statistics
-        const webSocketStats = webSocketManager.getHealthStats();
+        // Get WebSocket metrics
+        const webSocketStats = webSocketManager.getMetrics();
         // Get instance coordination metrics
-        const coordinationMetrics = await instanceCoordinator.getMetrics();
+        const coordinationMetrics = instanceCoordinator.getStats();
         // Get error handler statistics
         const errorStats = errorHandler.getStats();
         // Get memory leak prevention metrics
-        const memoryLeakStats = memoryLeakPrevention.getMetrics();
+        const memoryLeakStats = memoryLeakPrevention.getStats();
         // Determine overall health status
+        const hasOpenCircuitBreaker = errorStats.circuitBreakers.some(cb => cb.state === "open");
         const isHealthy = rssMemoryPercentage < 90 &&
             metrics.activeConnections >= 0 &&
-            webSocketStats.failureRate < 0.5 &&
-            !errorStats.circuitBreakerOpen;
+            (webSocketStats.failedConnections || 0) / Math.max(webSocketStats.totalConnections || 1, 1) < 0.5 &&
+            !hasOpenCircuitBreaker;
         const healthData = {
             status: isHealthy ? "healthy" : "degraded",
             timestamp: new Date().toISOString(),
@@ -288,36 +296,35 @@ app.get("/health", async (_req, res) => {
             },
             // WebSocket health (critical for WhatsApp connections)
             websocket: {
-                monitored: webSocketStats.monitoredConnections,
-                healthy: webSocketStats.healthyConnections,
-                failed: webSocketStats.failedConnections,
-                failureRate: webSocketStats.failureRate,
-                avgKeepAliveLatency: webSocketStats.avgKeepAliveLatency,
-                circuitBreakerOpen: webSocketStats.circuitBreakerOpen,
+                total: webSocketStats.totalConnections || 0,
+                healthy: webSocketStats.healthyConnections || 0,
+                degraded: webSocketStats.degradedConnections || 0,
+                failed: webSocketStats.failedConnections || 0,
+                averageFailures: webSocketStats.averageFailures || 0,
             },
             // Instance coordination metrics (for multi-instance deployment)
             instance: {
                 id: coordinationMetrics.instanceId,
-                isLeader: coordinationMetrics.isLeader,
-                sessionOwnership: coordinationMetrics.sessionOwnership,
-                lastHeartbeat: coordinationMetrics.lastHeartbeat,
-                otherInstances: coordinationMetrics.otherInstances,
+                ownedSessions: coordinationMetrics.ownedSessions,
+                totalInstances: coordinationMetrics.totalInstances,
+                healthyInstances: coordinationMetrics.healthyInstances,
+                config: coordinationMetrics.config,
             },
             // Error handling statistics
             errors: {
-                totalErrors: errorStats.totalErrors,
-                recentErrors: errorStats.recentErrors,
-                circuitBreakerOpen: errorStats.circuitBreakerOpen,
-                recoveryAttempts: errorStats.recoveryAttempts,
-                lastError: errorStats.lastError,
+                totalCircuitBreakers: errorStats.circuitBreakers.length,
+                openCircuitBreakers: errorStats.circuitBreakers.filter(cb => cb.state === "open").length,
+                totalErrorTypes: errorStats.errorStats.length,
+                recentErrors: errorStats.errorStats.filter(e => (new Date().getTime() - new Date(e.lastOccurrence).getTime()) < 300000 // 5 minutes
+                ).length,
+                circuitBreakers: errorStats.circuitBreakers,
+                errorStats: errorStats.errorStats,
             },
             // Memory leak prevention metrics
             memoryLeak: {
-                trackedListeners: memoryLeakStats.trackedListeners,
-                trackedTimers: memoryLeakStats.trackedTimers,
-                trackedSockets: memoryLeakStats.trackedSockets,
-                cleanupOperations: memoryLeakStats.cleanupOperations,
-                lastCleanup: memoryLeakStats.lastCleanup,
+                memory: memoryLeakStats.memory,
+                tracking: memoryLeakStats.tracking,
+                config: memoryLeakStats.config,
             },
             // Proxy metrics
             proxy: metrics.proxyMetrics,
@@ -334,11 +341,11 @@ app.get("/health", async (_req, res) => {
         res.status(isHealthy ? 200 : 503).json(healthData);
     }
     catch (error) {
-        logger.error({ error }, 'Error in health check endpoint');
+        logger.error({ error }, "Error in health check endpoint");
         res.status(500).json({
-            status: 'error',
+            status: "error",
             timestamp: new Date().toISOString(),
-            error: 'Health check failed',
+            error: "Health check failed",
         });
     }
 });
