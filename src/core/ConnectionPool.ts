@@ -31,6 +31,7 @@ export interface WhatsAppConnection {
   qrCode?: string;
   qrTimeout?: NodeJS.Timeout;
   hasConnectedSuccessfully?: boolean;
+  proxyCountry?: string;
   createdAt: Date;
   lastActivity: Date;
   messageCount: number;
@@ -623,6 +624,7 @@ export class ConnectionPool extends EventEmitter {
         socket,
         state: { connection: "connecting" } as ConnectionState,
         hasConnectedSuccessfully: false,
+        proxyCountry: proxyCountry,
         createdAt: new Date(),
         lastActivity: new Date(),
         messageCount: 0,
@@ -3563,8 +3565,13 @@ export class ConnectionPool extends EventEmitter {
     }
 
     try {
-      // Try to reconnect
-      const success = await this.addConnection(userId, phoneNumber);
+      // Get existing connection's proxy country before reconnecting
+      const connectionKey = this.getConnectionKey(userId, phoneNumber);
+      const existingConnection = this.connections.get(connectionKey);
+      const storedProxyCountry = existingConnection?.proxyCountry;
+
+      // Try to reconnect with preserved proxy country
+      const success = await this.addConnection(userId, phoneNumber, storedProxyCountry);
       if (!success) {
         // If addConnection failed, try again (only increment if not immediate reconnect)
         const nextAttempt = attempt === 0 ? 1 : attempt + 1;
