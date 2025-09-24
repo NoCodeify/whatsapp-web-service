@@ -188,8 +188,21 @@ export class DynamicProxyService {
       );
       return proxyInfo;
     } catch (error: any) {
+      const errorInfo: any = {
+        message: error.message,
+        country,
+        customerId: this.customerId ? 'present' : 'missing',
+      };
+
+      if (axios.isAxiosError(error) && error.response) {
+        errorInfo.status = error.response.status;
+        errorInfo.statusText = error.response.statusText;
+        errorInfo.apiError = error.response.data;
+        errorInfo.headers = error.response.headers;
+      }
+
       this.logger.error(
-        { error: error.message, country },
+        errorInfo,
         "Failed to purchase proxy",
       );
 
@@ -226,8 +239,21 @@ export class DynamicProxyService {
 
       this.logger.info({ ip }, "Successfully released proxy");
     } catch (error: any) {
+      const errorInfo: any = {
+        message: error.message,
+        ip,
+        customerId: this.customerId ? 'present' : 'missing',
+      };
+
+      if (axios.isAxiosError(error) && error.response) {
+        errorInfo.status = error.response.status;
+        errorInfo.statusText = error.response.statusText;
+        errorInfo.apiError = error.response.data;
+        errorInfo.headers = error.response.headers;
+      }
+
       this.logger.error(
-        { error: error.message, ip },
+        errorInfo,
         "Failed to release proxy",
       );
       throw error;
