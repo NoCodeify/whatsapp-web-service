@@ -69,8 +69,13 @@ export class SessionManager {
 
       // Initialize CloudRunSessionOptimizer for cloud mode
       if (this.storageType === "cloud") {
-        this.cloudOptimizer = new CloudRunSessionOptimizer(this.storage, this.firestore);
-        this.logger.info("Initialized CloudRunSessionOptimizer for enhanced Cloud Storage performance");
+        this.cloudOptimizer = new CloudRunSessionOptimizer(
+          this.storage,
+          this.firestore,
+        );
+        this.logger.info(
+          "Initialized CloudRunSessionOptimizer for enhanced Cloud Storage performance",
+        );
       }
     }
 
@@ -245,7 +250,11 @@ export class SessionManager {
 
         // Use CloudRunSessionOptimizer for cloud mode (better performance)
         if (this.storageType === "cloud" && this.cloudOptimizer) {
-          restored = await this.cloudOptimizer.downloadSession(userId, phoneNumber, sessionPath);
+          restored = await this.cloudOptimizer.downloadSession(
+            userId,
+            phoneNumber,
+            sessionPath,
+          );
         } else {
           // Fallback to original method for hybrid mode
           restored = await this.restoreFromCloudStorage(
@@ -257,7 +266,11 @@ export class SessionManager {
 
         if (restored) {
           this.logger.info(
-            { userId, phoneNumber, method: this.cloudOptimizer ? "optimized" : "standard" },
+            {
+              userId,
+              phoneNumber,
+              method: this.cloudOptimizer ? "optimized" : "standard",
+            },
             "Session restored from Cloud Storage",
           );
         }
@@ -358,8 +371,15 @@ export class SessionManager {
         try {
           // Use CloudRunSessionOptimizer for cloud mode (better performance with queuing)
           if (this.storageType === "cloud" && this.cloudOptimizer) {
-            const sessionPath = path.join(this.sessionsDir, `${userId}-${phoneNumber}`);
-            await this.cloudOptimizer.uploadSession(userId, phoneNumber, sessionPath);
+            const sessionPath = path.join(
+              this.sessionsDir,
+              `${userId}-${phoneNumber}`,
+            );
+            await this.cloudOptimizer.uploadSession(
+              userId,
+              phoneNumber,
+              sessionPath,
+            );
           } else {
             // Fallback to original method for hybrid mode
             await this.backupToCloudStorage(userId, phoneNumber);

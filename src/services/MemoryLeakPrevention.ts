@@ -11,7 +11,7 @@ export interface EventListenerTracker {
 
 export interface TimerTracker {
   id: string;
-  type: 'timeout' | 'interval';
+  type: "timeout" | "interval";
   createdAt: Date;
   timer: NodeJS.Timeout;
 }
@@ -68,7 +68,10 @@ export class MemoryLeakPrevention {
     this.eventListeners.set(connectionId, []);
 
     if (this.config.enableDebugLogging) {
-      this.logger.debug({ connectionId }, "Registered connection for memory tracking");
+      this.logger.debug(
+        { connectionId },
+        "Registered connection for memory tracking",
+      );
     }
   }
 
@@ -78,7 +81,7 @@ export class MemoryLeakPrevention {
   trackEventListener(connectionId: string, eventName: string): void {
     const listeners = this.eventListeners.get(connectionId) || [];
 
-    const existing = listeners.find(l => l.eventName === eventName);
+    const existing = listeners.find((l) => l.eventName === eventName);
     if (existing) {
       existing.listenerCount++;
     } else {
@@ -93,11 +96,18 @@ export class MemoryLeakPrevention {
     this.eventListeners.set(connectionId, listeners);
 
     // Warn if too many listeners
-    const totalListeners = listeners.reduce((sum, l) => sum + l.listenerCount, 0);
+    const totalListeners = listeners.reduce(
+      (sum, l) => sum + l.listenerCount,
+      0,
+    );
     if (totalListeners > this.config.maxEventListeners) {
       this.logger.warn(
-        { connectionId, totalListeners, maxAllowed: this.config.maxEventListeners },
-        "Connection has excessive event listeners - potential memory leak"
+        {
+          connectionId,
+          totalListeners,
+          maxAllowed: this.config.maxEventListeners,
+        },
+        "Connection has excessive event listeners - potential memory leak",
       );
     }
   }
@@ -105,7 +115,11 @@ export class MemoryLeakPrevention {
   /**
    * Track timer creation
    */
-  trackTimer(id: string, type: 'timeout' | 'interval', timer: NodeJS.Timeout): void {
+  trackTimer(
+    id: string,
+    type: "timeout" | "interval",
+    timer: NodeJS.Timeout,
+  ): void {
     this.timers.set(id, {
       id,
       type,
@@ -124,7 +138,7 @@ export class MemoryLeakPrevention {
   clearTimer(id: string): void {
     const timer = this.timers.get(id);
     if (timer) {
-      if (timer.type === 'timeout') {
+      if (timer.type === "timeout") {
         clearTimeout(timer.timer);
       } else {
         clearInterval(timer.timer);
@@ -147,14 +161,15 @@ export class MemoryLeakPrevention {
     if (listeners) {
       this.logger.debug(
         { connectionId, listenerCount: listeners.length },
-        "Cleaning up tracked event listeners"
+        "Cleaning up tracked event listeners",
       );
       this.eventListeners.delete(connectionId);
     }
 
     // Clear any timers associated with this connection
-    const connectionTimers = Array.from(this.timers.entries())
-      .filter(([id]) => id.startsWith(connectionId));
+    const connectionTimers = Array.from(this.timers.entries()).filter(([id]) =>
+      id.startsWith(connectionId),
+    );
 
     for (const [id] of connectionTimers) {
       this.clearTimer(id);
@@ -165,7 +180,7 @@ export class MemoryLeakPrevention {
 
     this.logger.debug(
       { connectionId, clearedTimers: connectionTimers.length },
-      "Connection cleanup completed"
+      "Connection cleanup completed",
     );
   }
 
@@ -191,7 +206,7 @@ export class MemoryLeakPrevention {
 
     // Clean up stale event listener tracking
     for (const [connectionId, listeners] of this.eventListeners.entries()) {
-      const hasStaleListeners = listeners.some(l => {
+      const hasStaleListeners = listeners.some((l) => {
         const age = now.getTime() - l.addedAt.getTime();
         return age > this.config.maxCacheAge;
       });
@@ -225,7 +240,7 @@ export class MemoryLeakPrevention {
         remainingListeners: this.eventListeners.size,
         remainingSockets: this.socketReferences.size,
       },
-      "Aggressive cleanup completed"
+      "Aggressive cleanup completed",
     );
   }
 
@@ -255,7 +270,8 @@ export class MemoryLeakPrevention {
 
     // Calculate memory growth rate
     const timeDiff = currentTime - this.lastMemoryCheck;
-    const memoryGrowth = timeDiff > 0 ? (memUsage.heapUsed - this.lastMemoryCheck) / timeDiff : 0;
+    const memoryGrowth =
+      timeDiff > 0 ? (memUsage.heapUsed - this.lastMemoryCheck) / timeDiff : 0;
 
     this.lastMemoryCheck = memUsage.heapUsed;
 
@@ -272,19 +288,20 @@ export class MemoryLeakPrevention {
           trackedListeners: this.eventListeners.size,
           trackedSockets: this.socketReferences.size,
         },
-        "Memory usage check"
+        "Memory usage check",
       );
     }
 
     // Trigger aggressive cleanup if memory growth is concerning
     const heapUsagePercent = memUsage.heapUsed / memUsage.heapTotal;
-    if (heapUsagePercent > 0.8 || memoryGrowth > 10000) { // 10KB/ms growth
+    if (heapUsagePercent > 0.8 || memoryGrowth > 10000) {
+      // 10KB/ms growth
       this.logger.warn(
         {
           heapUsagePercent: Math.round(heapUsagePercent * 100),
           memoryGrowthRate: Math.round(memoryGrowth * 100) / 100,
         },
-        "High memory usage detected, triggering aggressive cleanup"
+        "High memory usage detected, triggering aggressive cleanup",
       );
       this.performAggressiveCleanup();
     }
@@ -302,7 +319,9 @@ export class MemoryLeakPrevention {
         heapTotalMB: Math.round(memUsage.heapTotal / 1024 / 1024),
         rssMB: Math.round(memUsage.rss / 1024 / 1024),
         externalMB: Math.round(memUsage.external / 1024 / 1024),
-        heapUsagePercent: Math.round((memUsage.heapUsed / memUsage.heapTotal) * 100),
+        heapUsagePercent: Math.round(
+          (memUsage.heapUsed / memUsage.heapTotal) * 100,
+        ),
       },
       tracking: {
         trackedTimers: this.timers.size,
@@ -330,8 +349,12 @@ export class MemoryLeakPrevention {
 
       // Try to find date-based entries
       for (const [, value] of cache.entries()) {
-        if (value && typeof value === 'object') {
-          const date = value.createdAt || value.addedAt || value.lastUsed || value.timestamp;
+        if (value && typeof value === "object") {
+          const date =
+            value.createdAt ||
+            value.addedAt ||
+            value.lastUsed ||
+            value.timestamp;
           if (date instanceof Date) {
             if (!oldestEntry || date < oldestEntry) oldestEntry = date;
             if (!newestEntry || date > newestEntry) newestEntry = date;

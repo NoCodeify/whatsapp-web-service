@@ -31,7 +31,9 @@ export class CloudRunWebSocketManager extends EventEmitter {
 
   private readonly config: CloudRunConfig = {
     keepAliveInterval: parseInt(process.env.WS_KEEPALIVE_INTERVAL || "20000"), // 20 seconds
-    healthCheckInterval: parseInt(process.env.WS_HEALTH_CHECK_INTERVAL || "30000"), // 30 seconds
+    healthCheckInterval: parseInt(
+      process.env.WS_HEALTH_CHECK_INTERVAL || "30000",
+    ), // 30 seconds
     maxConsecutiveFailures: parseInt(process.env.WS_MAX_FAILURES || "3"),
     reconnectDelay: parseInt(process.env.WS_RECONNECT_DELAY || "5000"), // 5 seconds
     maxReconnectDelay: parseInt(process.env.WS_MAX_RECONNECT_DELAY || "60000"), // 60 seconds
@@ -110,10 +112,7 @@ export class CloudRunWebSocketManager extends EventEmitter {
       try {
         await this.sendKeepAlive(connectionId, socket);
       } catch (error) {
-        this.logger.error(
-          { connectionId, error },
-          "Keep-alive failed"
-        );
+        this.logger.error({ connectionId, error }, "Keep-alive failed");
         this.handleConnectionError(connectionId, error as Error);
       }
     }, this.config.keepAliveInterval);
@@ -135,7 +134,10 @@ export class CloudRunWebSocketManager extends EventEmitter {
   /**
    * Setup WebSocket-specific monitoring
    */
-  private setupWebSocketMonitoring(connectionId: string, socket: WASocket): void {
+  private setupWebSocketMonitoring(
+    connectionId: string,
+    socket: WASocket,
+  ): void {
     // Monitor connection state changes
     socket.ev.on("connection.update", (update) => {
       const health = this.healthChecks.get(connectionId);
@@ -153,7 +155,7 @@ export class CloudRunWebSocketManager extends EventEmitter {
       socket.ws.on("error", (error: Error) => {
         this.logger.error(
           { connectionId, error: error.message },
-          "WebSocket error detected"
+          "WebSocket error detected",
         );
         this.handleConnectionError(connectionId, error);
       });
@@ -161,9 +163,12 @@ export class CloudRunWebSocketManager extends EventEmitter {
       socket.ws.on("close", (code: number, reason: string) => {
         this.logger.warn(
           { connectionId, code, reason },
-          "WebSocket closed unexpectedly"
+          "WebSocket closed unexpectedly",
         );
-        this.handleConnectionError(connectionId, new Error(`WebSocket closed: ${code} ${reason}`));
+        this.handleConnectionError(
+          connectionId,
+          new Error(`WebSocket closed: ${code} ${reason}`),
+        );
       });
     }
   }
@@ -171,7 +176,10 @@ export class CloudRunWebSocketManager extends EventEmitter {
   /**
    * Send keep-alive ping
    */
-  private async sendKeepAlive(connectionId: string, socket: WASocket): Promise<void> {
+  private async sendKeepAlive(
+    connectionId: string,
+    socket: WASocket,
+  ): Promise<void> {
     const health = this.healthChecks.get(connectionId);
     if (!health || !health.isConnected) {
       return;
@@ -184,26 +192,31 @@ export class CloudRunWebSocketManager extends EventEmitter {
 
       // Create a promise that times out if no response
       const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error("Keep-alive timeout")), this.config.connectionTimeout);
+        setTimeout(
+          () => reject(new Error("Keep-alive timeout")),
+          this.config.connectionTimeout,
+        );
       });
 
       // Send a minimal query (we use getBusinessProfile as it's lightweight)
-      const queryPromise = socket.query({
-        tag: "iq",
-        attrs: {
-          id: socket.generateMessageTag(),
-          type: "get",
-          to: socket.user?.id || "",
-        },
-        content: [
-          {
-            tag: "w:profile:business",
-            attrs: {},
+      const queryPromise = socket
+        .query({
+          tag: "iq",
+          attrs: {
+            id: socket.generateMessageTag(),
+            type: "get",
+            to: socket.user?.id || "",
           },
-        ],
-      }).catch(() => {
-        // Ignore query failures, we just want to test connectivity
-      });
+          content: [
+            {
+              tag: "w:profile:business",
+              attrs: {},
+            },
+          ],
+        })
+        .catch(() => {
+          // Ignore query failures, we just want to test connectivity
+        });
 
       await Promise.race([queryPromise, timeoutPromise]);
 
@@ -211,10 +224,7 @@ export class CloudRunWebSocketManager extends EventEmitter {
       health.lastPongTime = new Date();
       health.consecutiveFailures = 0;
 
-      this.logger.debug(
-        { connectionId },
-        "Keep-alive successful"
-      );
+      this.logger.debug({ connectionId }, "Keep-alive successful");
     } catch (error) {
       throw new Error(`Keep-alive failed: ${(error as Error).message}`);
     }
@@ -234,16 +244,16 @@ export class CloudRunWebSocketManager extends EventEmitter {
       ? now.getTime() - health.lastPongTime.getTime()
       : Number.MAX_SAFE_INTEGER;
 
-    const isStale = timeSinceLastPong > (this.config.healthCheckInterval * 2);
+    const isStale = timeSinceLastPong > this.config.healthCheckInterval * 2;
 
     if (isStale && health.isConnected) {
       this.logger.warn(
         {
           connectionId,
           timeSinceLastPong: Math.round(timeSinceLastPong / 1000),
-          threshold: Math.round((this.config.healthCheckInterval * 2) / 1000)
+          threshold: Math.round((this.config.healthCheckInterval * 2) / 1000),
         },
-        "Connection appears stale - no recent activity"
+        "Connection appears stale - no recent activity",
       );
 
       this.handleConnectionError(connectionId, new Error("Connection stale"));
@@ -252,13 +262,17 @@ export class CloudRunWebSocketManager extends EventEmitter {
     // Check WebSocket readyState if available
     if (socket.ws) {
       const readyState = socket.ws.readyState;
-      if (readyState === 2 || readyState === 3) { // CLOSING or CLOSED
+      if (readyState === 2 || readyState === 3) {
+        // CLOSING or CLOSED
         this.logger.warn(
           { connectionId, readyState },
-          "WebSocket is closing or closed"
+          "WebSocket is closing or closed",
         );
         health.isConnected = false;
-        this.handleConnectionError(connectionId, new Error(`WebSocket readyState: ${readyState}`));
+        this.handleConnectionError(
+          connectionId,
+          new Error(`WebSocket readyState: ${readyState}`),
+        );
       }
     }
   }
@@ -278,9 +292,9 @@ export class CloudRunWebSocketManager extends EventEmitter {
         connectionId,
         consecutiveFailures: health.consecutiveFailures,
         maxFailures: this.config.maxConsecutiveFailures,
-        error: error.message
+        error: error.message,
       },
-      "Connection error recorded"
+      "Connection error recorded",
     );
 
     // Emit error event for connection pool to handle
@@ -288,7 +302,8 @@ export class CloudRunWebSocketManager extends EventEmitter {
       connectionId,
       error,
       consecutiveFailures: health.consecutiveFailures,
-      shouldReconnect: health.consecutiveFailures >= this.config.maxConsecutiveFailures,
+      shouldReconnect:
+        health.consecutiveFailures >= this.config.maxConsecutiveFailures,
     });
 
     // If max failures reached, mark as disconnected
@@ -296,7 +311,7 @@ export class CloudRunWebSocketManager extends EventEmitter {
       health.isConnected = false;
       this.logger.error(
         { connectionId },
-        "Max consecutive failures reached, marking connection as failed"
+        "Max consecutive failures reached, marking connection as failed",
       );
     }
   }
@@ -304,7 +319,10 @@ export class CloudRunWebSocketManager extends EventEmitter {
   /**
    * Force refresh of a connection's health status
    */
-  async refreshConnectionHealth(connectionId: string, socket: WASocket): Promise<void> {
+  async refreshConnectionHealth(
+    connectionId: string,
+    socket: WASocket,
+  ): Promise<void> {
     try {
       await this.sendKeepAlive(connectionId, socket);
       const health = this.healthChecks.get(connectionId);
@@ -326,18 +344,22 @@ export class CloudRunWebSocketManager extends EventEmitter {
 
     return {
       totalConnections: connections.length,
-      healthyConnections: connections.filter(([_, health]) =>
-        health.isConnected && health.consecutiveFailures === 0
+      healthyConnections: connections.filter(
+        ([_, health]) => health.isConnected && health.consecutiveFailures === 0,
       ).length,
-      degradedConnections: connections.filter(([_, health]) =>
-        health.isConnected && health.consecutiveFailures > 0
+      degradedConnections: connections.filter(
+        ([_, health]) => health.isConnected && health.consecutiveFailures > 0,
       ).length,
-      failedConnections: connections.filter(([_, health]) =>
-        !health.isConnected
+      failedConnections: connections.filter(
+        ([_, health]) => !health.isConnected,
       ).length,
-      averageFailures: connections.length > 0
-        ? connections.reduce((sum, [_, health]) => sum + health.consecutiveFailures, 0) / connections.length
-        : 0,
+      averageFailures:
+        connections.length > 0
+          ? connections.reduce(
+              (sum, [_, health]) => sum + health.consecutiveFailures,
+              0,
+            ) / connections.length
+          : 0,
     };
   }
 
