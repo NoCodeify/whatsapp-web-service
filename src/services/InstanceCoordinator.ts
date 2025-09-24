@@ -1,4 +1,4 @@
-import { Firestore } from "@google-cloud/firestore";
+import { Firestore, Timestamp } from "@google-cloud/firestore";
 import pino from "pino";
 import { EventEmitter } from "events";
 import * as os from "os";
@@ -322,8 +322,8 @@ export class InstanceCoordinator extends EventEmitter {
       .doc(this.instanceId)
       .set({
         ...instanceInfo,
-        startedAt: this.firestore.Timestamp.fromDate(instanceInfo.startedAt),
-        lastHeartbeat: this.firestore.Timestamp.fromDate(
+        startedAt: Timestamp.fromDate(instanceInfo.startedAt),
+        lastHeartbeat: Timestamp.fromDate(
           instanceInfo.lastHeartbeat,
         ),
       });
@@ -366,7 +366,7 @@ export class InstanceCoordinator extends EventEmitter {
       .doc(this.instanceId)
       .update({
         ...instanceInfo,
-        lastHeartbeat: this.firestore.Timestamp.fromDate(
+        lastHeartbeat: Timestamp.fromDate(
           instanceInfo.lastHeartbeat!,
         ),
       });
@@ -567,8 +567,8 @@ export class InstanceCoordinator extends EventEmitter {
       .doc(ownership.sessionKey)
       .set({
         instanceId: ownership.instanceId,
-        acquiredAt: this.firestore.Timestamp.fromDate(ownership.acquiredAt),
-        lastActivity: this.firestore.Timestamp.fromDate(ownership.lastActivity),
+        acquiredAt: Timestamp.fromDate(ownership.acquiredAt),
+        lastActivity: Timestamp.fromDate(ownership.lastActivity),
         status: ownership.status,
       });
   }
@@ -580,7 +580,7 @@ export class InstanceCoordinator extends EventEmitter {
       .collection("session_ownership")
       .doc(ownership.sessionKey)
       .update({
-        lastActivity: this.firestore.Timestamp.fromDate(ownership.lastActivity),
+        lastActivity: Timestamp.fromDate(ownership.lastActivity),
         status: ownership.status,
       });
   }
@@ -704,7 +704,7 @@ export class InstanceCoordinator extends EventEmitter {
         .doc(this.instanceId)
         .update({
           status: "shutting_down",
-          lastHeartbeat: this.firestore.Timestamp.now(),
+          lastHeartbeat: Timestamp.now(),
         });
     } catch (error) {
       this.logger.error({ error }, "Failed to update shutdown status");

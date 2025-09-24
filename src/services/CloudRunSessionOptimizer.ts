@@ -6,9 +6,7 @@ import * as path from "path";
 import { promisify } from "util";
 
 const readFile = promisify(fs.readFile);
-const writeFile = promisify(fs.writeFile);
 const mkdir = promisify(fs.mkdir);
-const stat = promisify(fs.stat);
 const readdir = promisify(fs.readdir);
 
 export interface SessionCacheEntry {
@@ -119,8 +117,6 @@ export class CloudRunSessionOptimizer {
     phoneNumber: string,
     localPath: string,
   ): Promise<boolean> {
-    const sessionKey = this.getSessionKey(userId, phoneNumber);
-
     try {
       // Create local directory
       await mkdir(localPath, { recursive: true });

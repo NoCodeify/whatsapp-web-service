@@ -261,7 +261,7 @@ export class CloudRunWebSocketManager extends EventEmitter {
 
     // Check WebSocket readyState if available
     if (socket.ws) {
-      const readyState = socket.ws.readyState;
+      const readyState = (socket.ws as any).readyState;
       if (readyState === 2 || readyState === 3) {
         // CLOSING or CLOSED
         this.logger.warn(

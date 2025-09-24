@@ -3944,7 +3944,7 @@ export class ConnectionPool extends EventEmitter {
   /**
    * Get pool metrics
    */
-  getMetrics() {
+  getMetrics(): any {
     const connections = Array.from(this.connections.values());
     const wsMetrics = this.wsManager.getMetrics();
     const memoryStats = this.memoryLeakPrevention.getStats();

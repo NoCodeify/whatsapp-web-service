@@ -1,6 +1,5 @@
 import { WASocket } from "@whiskeysockets/baileys";
 import pino from "pino";
-import { EventEmitter } from "events";
 
 export interface EventListenerTracker {
   socketId: string;
