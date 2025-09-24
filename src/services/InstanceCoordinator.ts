@@ -323,9 +323,7 @@ export class InstanceCoordinator extends EventEmitter {
       .set({
         ...instanceInfo,
         startedAt: Timestamp.fromDate(instanceInfo.startedAt),
-        lastHeartbeat: Timestamp.fromDate(
-          instanceInfo.lastHeartbeat,
-        ),
+        lastHeartbeat: Timestamp.fromDate(instanceInfo.lastHeartbeat),
       });
 
     this.instanceRegistry.set(this.instanceId, instanceInfo);
@@ -366,9 +364,7 @@ export class InstanceCoordinator extends EventEmitter {
       .doc(this.instanceId)
       .update({
         ...instanceInfo,
-        lastHeartbeat: Timestamp.fromDate(
-          instanceInfo.lastHeartbeat!,
-        ),
+        lastHeartbeat: Timestamp.fromDate(instanceInfo.lastHeartbeat!),
       });
 
     // Update local registry
