@@ -440,10 +440,14 @@ export class ConnectionStateManager extends EventEmitter {
       if (state.syncProgress) {
         firestoreData.sync_contacts_count = state.syncProgress.contacts;
         firestoreData.sync_messages_count = state.syncProgress.messages;
-        firestoreData.sync_started_at = admin.firestore.Timestamp.fromDate(state.syncProgress.startedAt);
+        firestoreData.sync_started_at = admin.firestore.Timestamp.fromDate(
+          state.syncProgress.startedAt,
+        );
 
         if (state.syncProgress.completedAt) {
-          firestoreData.sync_completed_at = admin.firestore.Timestamp.fromDate(state.syncProgress.completedAt);
+          firestoreData.sync_completed_at = admin.firestore.Timestamp.fromDate(
+            state.syncProgress.completedAt,
+          );
         }
 
         // Add sync status based on progress

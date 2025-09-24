@@ -510,7 +510,9 @@ export function createWebSocketHandlers(
       const userRoomSockets = io.sockets.adapter.rooms.get(`user:${userId}`);
       if (userRoomSockets) {
         userRoomSockets.forEach((socketId) => {
-          const socket = io.sockets.sockets.get(socketId) as AuthenticatedSocket;
+          const socket = io.sockets.sockets.get(
+            socketId,
+          ) as AuthenticatedSocket;
           if (socket && socket.userId === userId) {
             // Auto-join the session room for sync updates
             const sessionRoomName = `session:${userId}:${phoneNumber}`;

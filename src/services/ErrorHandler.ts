@@ -258,7 +258,6 @@ export class ErrorHandler extends EventEmitter {
       return true;
     });
 
-
     // Connection closed errors
     this.registerRecoveryStrategy("connection_closed", async (context) => {
       this.logger.info({ context }, "Attempting connection closed recovery");

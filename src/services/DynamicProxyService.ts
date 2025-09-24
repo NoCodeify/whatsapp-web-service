@@ -41,7 +41,6 @@ export class DynamicProxyService {
     port: parseInt(process.env.BRIGHT_DATA_PORT || "33335"),
   };
 
-
   constructor() {
     // Initialize API client with placeholder auth
     this.apiClient = axios.create({
@@ -66,10 +65,14 @@ export class DynamicProxyService {
       this.apiClient.defaults.headers["Authorization"] = `Bearer ${apiKey}`;
 
       // Initialize customer ID with validation
-      const customerIdFromSecret = await secretManager.getBrightDataCustomerId();
+      const customerIdFromSecret =
+        await secretManager.getBrightDataCustomerId();
 
       // Validate customer ID is not a placeholder before assignment
-      if (customerIdFromSecret.includes("your_") || customerIdFromSecret.includes("placeholder")) {
+      if (
+        customerIdFromSecret.includes("your_") ||
+        customerIdFromSecret.includes("placeholder")
+      ) {
         throw new Error("Customer ID appears to be a placeholder value");
       }
 
@@ -94,13 +97,19 @@ export class DynamicProxyService {
         this.logger.warn("Using API key from environment variable as fallback");
       }
 
-      if (this.config.customerId &&
-          !this.config.customerId.includes("your_") &&
-          !this.config.customerId.includes("placeholder")) {
+      if (
+        this.config.customerId &&
+        !this.config.customerId.includes("your_") &&
+        !this.config.customerId.includes("placeholder")
+      ) {
         this.customerId = this.config.customerId;
-        this.logger.warn("Using Customer ID from environment variable as fallback");
+        this.logger.warn(
+          "Using Customer ID from environment variable as fallback",
+        );
       } else {
-        this.logger.error("No valid Customer ID available - proxy purchases will fail");
+        this.logger.error(
+          "No valid Customer ID available - proxy purchases will fail",
+        );
       }
     }
   }
@@ -116,7 +125,9 @@ export class DynamicProxyService {
    * Check if the service is ready for use
    */
   isReady(): boolean {
-    return !!(this.customerId && this.apiClient.defaults.headers["Authorization"]);
+    return !!(
+      this.customerId && this.apiClient.defaults.headers["Authorization"]
+    );
   }
 
   /**
@@ -135,8 +146,13 @@ export class DynamicProxyService {
       }
 
       // Validate customer ID is not a placeholder value
-      if (this.customerId.includes("your_") || this.customerId.includes("placeholder")) {
-        throw new Error("Customer ID contains placeholder value - configure valid credentials");
+      if (
+        this.customerId.includes("your_") ||
+        this.customerId.includes("placeholder")
+      ) {
+        throw new Error(
+          "Customer ID contains placeholder value - configure valid credentials",
+        );
       }
 
       const response = await this.apiClient.post<ProxyPurchaseResponse>(
@@ -170,7 +186,7 @@ export class DynamicProxyService {
       const errorInfo: any = {
         message: error.message,
         country,
-        customerId: this.customerId ? 'present' : 'missing',
+        customerId: this.customerId ? "present" : "missing",
       };
 
       if (axios.isAxiosError(error) && error.response) {
@@ -180,10 +196,7 @@ export class DynamicProxyService {
         errorInfo.headers = error.response.headers;
       }
 
-      this.logger.error(
-        errorInfo,
-        "Failed to purchase proxy",
-      );
+      this.logger.error(errorInfo, "Failed to purchase proxy");
 
       if (
         error.response?.status === 400 ||
@@ -210,8 +223,13 @@ export class DynamicProxyService {
       }
 
       // Validate customer ID is not a placeholder value
-      if (this.customerId.includes("your_") || this.customerId.includes("placeholder")) {
-        throw new Error("Customer ID contains placeholder value - configure valid credentials");
+      if (
+        this.customerId.includes("your_") ||
+        this.customerId.includes("placeholder")
+      ) {
+        throw new Error(
+          "Customer ID contains placeholder value - configure valid credentials",
+        );
       }
 
       this.logger.info({ ip }, "Releasing proxy");
@@ -230,7 +248,7 @@ export class DynamicProxyService {
       const errorInfo: any = {
         message: error.message,
         ip,
-        customerId: this.customerId ? 'present' : 'missing',
+        customerId: this.customerId ? "present" : "missing",
       };
 
       if (axios.isAxiosError(error) && error.response) {
@@ -240,10 +258,7 @@ export class DynamicProxyService {
         errorInfo.headers = error.response.headers;
       }
 
-      this.logger.error(
-        errorInfo,
-        "Failed to release proxy",
-      );
+      this.logger.error(errorInfo, "Failed to release proxy");
       throw error;
     }
   }
@@ -289,7 +304,6 @@ export class DynamicProxyService {
     }
   }
 
-
   /**
    * Assign a proxy to a user
    */
@@ -307,7 +321,9 @@ export class DynamicProxyService {
     } catch (error: any) {
       if (error.message.startsWith("NO_PROXY_AVAILABLE")) {
         // Don't fallback to other countries - only use requested country
-        throw new Error(`No proxy available for ${requestedCountry} - not falling back to other countries`);
+        throw new Error(
+          `No proxy available for ${requestedCountry} - not falling back to other countries`,
+        );
       } else {
         throw error;
       }
