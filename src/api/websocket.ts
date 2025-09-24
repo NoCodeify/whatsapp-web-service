@@ -493,6 +493,50 @@ export function createWebSocketHandlers(
       phoneNumber,
       status,
     });
+
+    // Auto-subscribe clients to session updates when connection becomes active
+    if (status === "connected" || status === "connecting") {
+      logger.info(
+        {
+          userId,
+          phoneNumber,
+          status,
+          event: "auto_subscribe_clients",
+        },
+        "Auto-subscribing clients to session updates",
+      );
+
+      // Get all sockets in the user room and auto-subscribe them to session updates
+      const userRoomSockets = io.sockets.adapter.rooms.get(`user:${userId}`);
+      if (userRoomSockets) {
+        userRoomSockets.forEach((socketId) => {
+          const socket = io.sockets.sockets.get(socketId) as AuthenticatedSocket;
+          if (socket && socket.userId === userId) {
+            // Auto-join the session room for sync updates
+            const sessionRoomName = `session:${userId}:${phoneNumber}`;
+            socket.join(sessionRoomName);
+
+            logger.debug(
+              {
+                userId,
+                phoneNumber,
+                socketId: socket.id,
+                sessionRoomName,
+                roomsJoined: Array.from(socket.rooms),
+              },
+              "Auto-subscribed client to session room",
+            );
+
+            // Send current connection status to newly subscribed client
+            socket.emit("connection:status", {
+              phoneNumber,
+              status,
+              hasQR: false, // No QR needed since we're connected
+            });
+          }
+        });
+      }
+    }
   });
 
   connectionPool.on("message-received", (data: any) => {
