@@ -18,11 +18,9 @@ import { ConnectionStateManager } from "./services/connectionStateManager";
 import { DynamicProxyService } from "./services/DynamicProxyService";
 import { SessionRecoveryService } from "./services/SessionRecoveryService";
 import { ReconnectionService } from "./services/ReconnectionService";
-import { AutoScalingService } from "./scaling/AutoScalingService";
 import { InstanceCoordinator } from "./services/InstanceCoordinator";
 import { CloudRunWebSocketManager } from "./services/CloudRunWebSocketManager";
 import { ErrorHandler } from "./services/ErrorHandler";
-import { MemoryLeakPrevention } from "./services/MemoryLeakPrevention";
 // import { CloudRunSessionOptimizer } from "./services/CloudRunSessionOptimizer"; // Commented out - not currently used
 
 // API routes
@@ -98,14 +96,11 @@ if (sessionRecoveryService) {
 // Set connection pool reference for reconnection service
 (reconnectionService as any).connectionPool = connectionPool;
 
-// Initialize autoscaling service
-const autoScalingService = new AutoScalingService(firestore);
 
 // Initialize Cloud Run optimization services
 const instanceCoordinator = new InstanceCoordinator(firestore);
 const webSocketManager = new CloudRunWebSocketManager();
 const errorHandler = new ErrorHandler();
-const memoryLeakPrevention = new MemoryLeakPrevention();
 // const sessionOptimizer = new CloudRunSessionOptimizer(storage, firestore); // Commented out - not currently used
 
 // Connect services to connection pool events
@@ -293,8 +288,6 @@ app.get("/health", async (_req: Request, res: Response) => {
     // Get error handler statistics
     const errorStats = errorHandler.getStats();
 
-    // Get memory leak prevention metrics
-    const memoryLeakStats = memoryLeakPrevention.getStats();
 
     // Determine overall health status
     const hasOpenCircuitBreaker = errorStats.circuitBreakers.some(
@@ -377,12 +370,6 @@ app.get("/health", async (_req: Request, res: Response) => {
         errorStats: errorStats.errorStats,
       },
 
-      // Memory leak prevention metrics
-      memoryLeak: {
-        memory: memoryLeakStats.memory,
-        tracking: memoryLeakStats.tracking,
-        config: memoryLeakStats.config,
-      },
 
       // Proxy metrics
       proxy: metrics.proxyMetrics,
@@ -498,66 +485,9 @@ app.use((req: Request, res: Response) => {
 });
 
 // Connection pool event handlers
-connectionPool.on("capacity-reached", async (data) => {
-  logger.warn(
-    "Connection pool capacity reached, triggering autoscaling evaluation",
-  );
-
-  try {
-    await autoScalingService.evaluateScaling({
-      connectionCount:
-        data?.connectionCount || connectionPool.getMetrics().activeConnections,
-      maxConnections: parseInt(process.env.MAX_CONNECTIONS || "50"),
-      memoryUsage: data?.memoryUsage || connectionPool.getMetrics().memoryUsage,
-      memoryThreshold: parseFloat(process.env.MEMORY_THRESHOLD || "0.8"),
-      instanceId: process.env.HOSTNAME || `instance_${Date.now()}`,
-      timestamp: new Date(),
-    });
-  } catch (error) {
-    logger.error(
-      { error },
-      "Failed to trigger autoscaling on capacity reached",
-    );
-  }
-});
-
-connectionPool.on("memory-threshold-exceeded", async (data) => {
-  logger.warn("Memory threshold exceeded, triggering autoscaling evaluation");
-
-  try {
-    await autoScalingService.evaluateScaling({
-      connectionCount:
-        data?.connectionCount || connectionPool.getMetrics().activeConnections,
-      maxConnections: parseInt(process.env.MAX_CONNECTIONS || "50"),
-      memoryUsage: data?.memoryUsage || connectionPool.getMetrics().memoryUsage,
-      memoryThreshold: parseFloat(process.env.MEMORY_THRESHOLD || "0.8"),
-      instanceId: process.env.HOSTNAME || `instance_${Date.now()}`,
-      timestamp: new Date(),
-    });
-  } catch (error) {
-    logger.error(
-      { error },
-      "Failed to trigger autoscaling on memory threshold exceeded",
-    );
-  }
-});
 
 connectionPool.on("health-check", async (metrics) => {
   logger.debug({ metrics }, "Health check completed");
-
-  // Also evaluate scaling on regular health checks
-  try {
-    await autoScalingService.evaluateScaling({
-      connectionCount: metrics.activeConnections,
-      maxConnections: parseInt(process.env.MAX_CONNECTIONS || "50"),
-      memoryUsage: metrics.memoryUsage,
-      memoryThreshold: parseFloat(process.env.MEMORY_THRESHOLD || "0.8"),
-      instanceId: process.env.HOSTNAME || `instance_${Date.now()}`,
-      timestamp: new Date(),
-    });
-  } catch (error) {
-    logger.debug({ error }, "Failed to evaluate autoscaling on health check");
-  }
 });
 
 // Graceful shutdown

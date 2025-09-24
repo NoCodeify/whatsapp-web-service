@@ -258,15 +258,6 @@ export class ErrorHandler extends EventEmitter {
       return true;
     });
 
-    // Memory pressure errors
-    this.registerRecoveryStrategy("memory_error", async (context) => {
-      this.logger.warn({ context }, "Attempting memory pressure recovery");
-
-      // Trigger aggressive cleanup
-      this.emit("memory-cleanup-needed", context);
-
-      return true;
-    });
 
     // Connection closed errors
     this.registerRecoveryStrategy("connection_closed", async (context) => {

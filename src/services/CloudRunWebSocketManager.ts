@@ -37,7 +37,7 @@ export class CloudRunWebSocketManager extends EventEmitter {
     maxConsecutiveFailures: parseInt(process.env.WS_MAX_FAILURES || "3"),
     reconnectDelay: parseInt(process.env.WS_RECONNECT_DELAY || "5000"), // 5 seconds
     maxReconnectDelay: parseInt(process.env.WS_MAX_RECONNECT_DELAY || "60000"), // 60 seconds
-    connectionTimeout: parseInt(process.env.WS_CONNECTION_TIMEOUT || "45000"), // 45 seconds
+    connectionTimeout: parseInt(process.env.WS_CONNECTION_TIMEOUT || "120000"), // 120 seconds
   };
 
   constructor() {

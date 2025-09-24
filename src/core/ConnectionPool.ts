@@ -17,7 +17,6 @@ import { PubSub } from "@google-cloud/pubsub";
 import { ConnectionStateManager } from "../services/connectionStateManager";
 import { MediaService } from "../services/MediaService";
 import { CloudRunWebSocketManager } from "../services/CloudRunWebSocketManager";
-import { MemoryLeakPrevention } from "../services/MemoryLeakPrevention";
 import { ErrorHandler } from "../services/ErrorHandler";
 import { InstanceCoordinator } from "../services/InstanceCoordinator";
 import { formatPhoneNumberSafe, formatWhatsAppJid } from "../utils/phoneNumber";
@@ -31,6 +30,7 @@ export interface WhatsAppConnection {
   state: ConnectionState;
   qrCode?: string;
   qrTimeout?: NodeJS.Timeout;
+  hasConnectedSuccessfully?: boolean;
   createdAt: Date;
   lastActivity: Date;
   messageCount: number;
@@ -40,7 +40,6 @@ export interface WhatsAppConnection {
 
 export interface ConnectionPoolConfig {
   maxConnections: number;
-  memoryThreshold: number;
   healthCheckInterval: number;
   sessionCleanupInterval: number;
   instanceUrl: string;
@@ -56,7 +55,6 @@ export class ConnectionPool extends EventEmitter {
   private connectionStateManager?: ConnectionStateManager;
   private mediaService: MediaService;
   private wsManager: CloudRunWebSocketManager;
-  private memoryLeakPrevention: MemoryLeakPrevention;
   private errorHandler: ErrorHandler;
   private instanceCoordinator: InstanceCoordinator;
   private healthCheckTimer?: NodeJS.Timeout;
@@ -72,7 +70,6 @@ export class ConnectionPool extends EventEmitter {
 
   private readonly config: ConnectionPoolConfig = {
     maxConnections: parseInt(process.env.MAX_CONNECTIONS || "50"),
-    memoryThreshold: parseFloat(process.env.MEMORY_THRESHOLD || "0.8"),
     healthCheckInterval: parseInt(process.env.HEALTH_CHECK_INTERVAL || "30000"),
     sessionCleanupInterval: parseInt(
       process.env.SESSION_CLEANUP_INTERVAL || "3600000",
@@ -97,7 +94,6 @@ export class ConnectionPool extends EventEmitter {
     this.connectionStateManager = connectionStateManager;
     this.mediaService = new MediaService();
     this.wsManager = new CloudRunWebSocketManager();
-    this.memoryLeakPrevention = new MemoryLeakPrevention();
     this.errorHandler = new ErrorHandler();
     this.instanceCoordinator = new InstanceCoordinator(firestore);
 
@@ -259,11 +255,6 @@ export class ConnectionPool extends EventEmitter {
       },
     );
 
-    // Handle memory cleanup requests
-    this.errorHandler.on("memory-cleanup-needed", () => {
-      this.logger.warn("Emergency memory cleanup requested");
-      this.memoryLeakPrevention.performAggressiveCleanup();
-    });
 
     // Handle reconnection requests
     this.errorHandler.on(
@@ -591,20 +582,6 @@ export class ConnectionPool extends EventEmitter {
       return false;
     }
 
-    // Check memory usage
-    if (!this.hasMemory()) {
-      const memoryPercentage = (this.getMemoryUsage() * 100).toFixed(1);
-      this.logger.warn(
-        {
-          memoryUsage: `${memoryPercentage}%`,
-          threshold: `${(this.config.memoryThreshold * 100).toFixed(0)}%`,
-          connections: this.connections.size,
-        },
-        "Memory threshold exceeded",
-      );
-      this.emit("memory-threshold-exceeded");
-      return false;
-    }
 
     try {
       // Initialize connection state if manager is available
@@ -645,6 +622,7 @@ export class ConnectionPool extends EventEmitter {
         phoneNumber,
         socket,
         state: { connection: "connecting" } as ConnectionState,
+        hasConnectedSuccessfully: false,
         createdAt: new Date(),
         lastActivity: new Date(),
         messageCount: 0,
@@ -708,8 +686,6 @@ export class ConnectionPool extends EventEmitter {
     try {
       // Clear QR timeout if exists
       if (connection.qrTimeout) {
-        const timeoutId = `${connectionKey}_qr_timeout`;
-        this.memoryLeakPrevention.clearTimer(timeoutId);
         clearTimeout(connection.qrTimeout);
         connection.qrTimeout = undefined;
       }
@@ -737,8 +713,6 @@ export class ConnectionPool extends EventEmitter {
       // Unregister from WebSocket manager
       this.wsManager.unregisterConnection(connectionKey);
 
-      // Clean up memory leak prevention tracking
-      this.memoryLeakPrevention.cleanupConnection(connectionKey);
 
       // Clean up associated caches
       const sessionKey = `${userId}-${phoneNumber}`;
@@ -1005,8 +979,6 @@ export class ConnectionPool extends EventEmitter {
     const connectionId = this.getConnectionKey(userId, phoneNumber);
     this.wsManager.registerConnection(connectionId, socket);
 
-    // Register with memory leak prevention
-    this.memoryLeakPrevention.registerConnection(connectionId, socket);
 
     this.logger.debug(
       { userId, phoneNumber },
@@ -1020,11 +992,6 @@ export class ConnectionPool extends EventEmitter {
     let totalContactsSynced = 0;
     let totalMessagesSynced = 0;
 
-    // Connection updates
-    this.memoryLeakPrevention.trackEventListener(
-      connectionId,
-      "connection.update",
-    );
     socket.ev.on("connection.update", async (update) => {
       connection.state = update as ConnectionState;
 
@@ -1059,9 +1026,8 @@ export class ConnectionPool extends EventEmitter {
         await this.handleQRCode(userId, phoneNumber, qr);
 
         // Set QR expiration timeout to prevent orphaned proxies
-        const timeoutId = `${connectionId}_qr_timeout`;
         connection.qrTimeout = setTimeout(async () => {
-          if (connection.state.connection !== "open") {
+          if (!connection.hasConnectedSuccessfully) {
             this.logger.warn(
               { userId, phoneNumber },
               "QR code expired without connection - removing connection to prevent proxy leak",
@@ -1070,21 +1036,14 @@ export class ConnectionPool extends EventEmitter {
           }
         }, 90000); // 90 seconds timeout
 
-        // Track timeout for memory leak prevention
-        this.memoryLeakPrevention.trackTimer(
-          timeoutId,
-          "timeout",
-          connection.qrTimeout,
-        );
       }
 
       if (state === "open") {
         connection.qrCode = undefined;
+        connection.hasConnectedSuccessfully = true;
 
         // Clear QR timeout since connection is now established
         if (connection.qrTimeout) {
-          const timeoutId = `${connectionId}_qr_timeout`;
-          this.memoryLeakPrevention.clearTimer(timeoutId);
           clearTimeout(connection.qrTimeout);
           connection.qrTimeout = undefined;
         }
@@ -1262,10 +1221,6 @@ export class ConnectionPool extends EventEmitter {
     });
 
     // Message handling - process BOTH incoming and outgoing
-    this.memoryLeakPrevention.trackEventListener(
-      connectionId,
-      "messages.upsert",
-    );
     socket.ev.on("messages.upsert", async (upsert) => {
       try {
         // Update session activity for any message activity
@@ -1310,10 +1265,6 @@ export class ConnectionPool extends EventEmitter {
     });
 
     // Message status updates
-    this.memoryLeakPrevention.trackEventListener(
-      connectionId,
-      "messages.update",
-    );
     socket.ev.on("messages.update", async (updates) => {
       try {
         for (const update of updates) {
@@ -1341,16 +1292,11 @@ export class ConnectionPool extends EventEmitter {
     });
 
     // Presence updates
-    this.memoryLeakPrevention.trackEventListener(
-      connectionId,
-      "presence.update",
-    );
     socket.ev.on("presence.update", async (presenceUpdate) => {
       await this.handlePresenceUpdate(userId, phoneNumber, presenceUpdate);
     });
 
     // Chat updates (typing indicators)
-    this.memoryLeakPrevention.trackEventListener(connectionId, "chats.update");
     socket.ev.on("chats.update", async (chats) => {
       for (const chat of chats) {
         if ((chat as any).typing) {
@@ -1360,10 +1306,6 @@ export class ConnectionPool extends EventEmitter {
     });
 
     // History sync handler - process contacts and messages
-    this.memoryLeakPrevention.trackEventListener(
-      connectionId,
-      "messaging-history.set",
-    );
     socket.ev.on("messaging-history.set", async (history) => {
       // Enhanced logging to debug message sync
       this.logger.info(
@@ -3792,14 +3734,6 @@ export class ConnectionPool extends EventEmitter {
       });
     }, this.config.healthCheckInterval);
 
-    // Track health check timer
-    if (this.healthCheckTimer) {
-      this.memoryLeakPrevention.trackTimer(
-        "health_check_timer",
-        "interval",
-        this.healthCheckTimer,
-      );
-    }
   }
 
   /**
@@ -3811,14 +3745,6 @@ export class ConnectionPool extends EventEmitter {
       this.sessionManager.cleanupSessions();
     }, this.config.sessionCleanupInterval);
 
-    // Track cleanup timer
-    if (this.cleanupTimer) {
-      this.memoryLeakPrevention.trackTimer(
-        "cleanup_timer",
-        "interval",
-        this.cleanupTimer,
-      );
-    }
   }
 
   /**
@@ -3851,16 +3777,6 @@ export class ConnectionPool extends EventEmitter {
     return this.connections.size < this.config.maxConnections;
   }
 
-  private hasMemory(): boolean {
-    // Skip memory check if disabled for local development
-    if (
-      process.env.DISABLE_MEMORY_CHECK === "true" ||
-      process.env.NODE_ENV === "development"
-    ) {
-      return true;
-    }
-    return this.getMemoryUsage() < this.config.memoryThreshold;
-  }
 
   private getMemoryUsage(): number {
     const memUsage = process.memoryUsage();
@@ -3947,20 +3863,10 @@ export class ConnectionPool extends EventEmitter {
   getMetrics(): any {
     const connections = Array.from(this.connections.values());
     const wsMetrics = this.wsManager.getMetrics();
-    const memoryStats = this.memoryLeakPrevention.getStats();
     const errorStats = this.errorHandler.getStats();
     const coordinatorStats = this.instanceCoordinator.getStats();
 
     // Get cache stats for memory leak analysis
-    const caches = [
-      this.connections,
-      this.importListRefs,
-      this.pendingChatMetadata,
-      this.syncedContactInfo,
-      this.sentMessageIds,
-      this.processedContactsCache,
-    ];
-    const cacheStats = this.memoryLeakPrevention.getCacheStats(caches);
 
     return {
       totalConnections: this.connections.size,
@@ -3979,11 +3885,6 @@ export class ConnectionPool extends EventEmitter {
         degradedConnections: wsMetrics.degradedConnections,
         failedConnections: wsMetrics.failedConnections,
         averageFailures: wsMetrics.averageFailures,
-      },
-      memoryLeakPrevention: {
-        memory: memoryStats.memory,
-        tracking: memoryStats.tracking,
-        caches: cacheStats,
       },
       errorHandling: {
         circuitBreakers: errorStats.circuitBreakers,
@@ -4009,11 +3910,9 @@ export class ConnectionPool extends EventEmitter {
 
     // Clear timers
     if (this.healthCheckTimer) {
-      this.memoryLeakPrevention.clearTimer("health_check_timer");
       clearInterval(this.healthCheckTimer);
     }
     if (this.cleanupTimer) {
-      this.memoryLeakPrevention.clearTimer("cleanup_timer");
       clearInterval(this.cleanupTimer);
     }
 
@@ -4031,8 +3930,6 @@ export class ConnectionPool extends EventEmitter {
     // Shutdown WebSocket manager
     this.wsManager.shutdown();
 
-    // Shutdown memory leak prevention
-    this.memoryLeakPrevention.shutdown();
 
     // Shutdown error handler
     this.errorHandler.shutdown();
