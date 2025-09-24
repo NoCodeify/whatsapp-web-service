@@ -55,6 +55,11 @@ const DynamicProxyService_1 = require("./services/DynamicProxyService");
 const SessionRecoveryService_1 = require("./services/SessionRecoveryService");
 const ReconnectionService_1 = require("./services/ReconnectionService");
 const AutoScalingService_1 = require("./scaling/AutoScalingService");
+const InstanceCoordinator_1 = require("./services/InstanceCoordinator");
+const CloudRunWebSocketManager_1 = require("./services/CloudRunWebSocketManager");
+const ErrorHandler_1 = require("./services/ErrorHandler");
+const MemoryLeakPrevention_1 = require("./services/MemoryLeakPrevention");
+const CloudRunSessionOptimizer_1 = require("./services/CloudRunSessionOptimizer");
 // API routes
 const routes_1 = require("./api/routes");
 const websocket_1 = require("./api/websocket");
@@ -82,10 +87,9 @@ const pubsub = new pubsub_1.PubSub({
 // Initialize recovery services (only if proxy type is ISP)
 let dynamicProxyService;
 let sessionRecoveryService;
-if (process.env.BRIGHT_DATA_PROXY_TYPE === "isp") {
-    dynamicProxyService = new DynamicProxyService_1.DynamicProxyService();
-    sessionRecoveryService = new SessionRecoveryService_1.SessionRecoveryService(firestore, dynamicProxyService, `instance_${process.env.HOSTNAME || "unknown"}_${Date.now()}`);
-}
+// Always initialize ISP proxy services since we hardcode to ISP
+dynamicProxyService = new DynamicProxyService_1.DynamicProxyService();
+sessionRecoveryService = new SessionRecoveryService_1.SessionRecoveryService(firestore, dynamicProxyService, `instance_${process.env.HOSTNAME || "unknown"}_${Date.now()}`);
 // Initialize core components with proper dependencies
 const proxyManager = new ProxyManager_1.ProxyManager(firestore, dynamicProxyService);
 const sessionManager = new SessionManager_1.SessionManager(proxyManager, firestore);
@@ -102,6 +106,22 @@ if (sessionRecoveryService) {
 reconnectionService.connectionPool = connectionPool;
 // Initialize autoscaling service
 const autoScalingService = new AutoScalingService_1.AutoScalingService(firestore);
+// Initialize Cloud Run optimization services
+const instanceCoordinator = new InstanceCoordinator_1.InstanceCoordinator(firestore);
+const webSocketManager = new CloudRunWebSocketManager_1.CloudRunWebSocketManager();
+const errorHandler = new ErrorHandler_1.ErrorHandler();
+const memoryLeakPrevention = new MemoryLeakPrevention_1.MemoryLeakPrevention();
+const sessionOptimizer = new CloudRunSessionOptimizer_1.CloudRunSessionOptimizer(firestore);
+// Connect services to connection pool events
+connectionPool.on('websocket:created', (data) => {
+    webSocketManager.monitorConnection(data.connectionId, data.socket);
+});
+connectionPool.on('websocket:closed', (data) => {
+    webSocketManager.removeConnection(data.connectionId);
+});
+connectionPool.on('error', (error) => {
+    errorHandler.handleError(error);
+});
 // Create Express app
 const app = (0, express_1.default)();
 const server = (0, http_1.createServer)(app);
@@ -202,26 +222,125 @@ app.use((req, res, next) => {
     });
     next();
 });
-// Health check endpoint
-app.get("/health", (_req, res) => {
-    const metrics = connectionPool.getMetrics();
-    res.json({
-        status: "healthy",
-        timestamp: new Date().toISOString(),
-        uptime: process.uptime(),
-        memory: {
-            used: process.memoryUsage().heapUsed,
-            total: process.memoryUsage().heapTotal,
-            percentage: (process.memoryUsage().heapUsed / process.memoryUsage().heapTotal) *
-                100,
-        },
-        connections: {
-            total: metrics.totalConnections,
-            active: metrics.activeConnections,
-            pending: metrics.pendingConnections,
-        },
-        proxy: metrics.proxyMetrics,
-    });
+// Enhanced health check endpoint with comprehensive Cloud Run monitoring
+app.get("/health", async (_req, res) => {
+    try {
+        const metrics = connectionPool.getMetrics();
+        const memUsage = process.memoryUsage();
+        const cpuUsage = process.cpuUsage();
+        // Get container memory limit (Cloud Run)
+        const getContainerMemoryLimit = () => {
+            try {
+                const fs = require('fs');
+                const memLimit = fs.readFileSync('/sys/fs/cgroup/memory/memory.limit_in_bytes', 'utf8');
+                return parseInt(memLimit.trim());
+            }
+            catch {
+                // Fallback for non-containerized environments
+                return require('os').totalmem();
+            }
+        };
+        const containerMemLimit = getContainerMemoryLimit();
+        const rssMemoryPercentage = (memUsage.rss / containerMemLimit) * 100;
+        // Get WebSocket health statistics
+        const webSocketStats = webSocketManager.getHealthStats();
+        // Get instance coordination metrics
+        const coordinationMetrics = await instanceCoordinator.getMetrics();
+        // Get error handler statistics
+        const errorStats = errorHandler.getStats();
+        // Get memory leak prevention metrics
+        const memoryLeakStats = memoryLeakPrevention.getMetrics();
+        // Determine overall health status
+        const isHealthy = rssMemoryPercentage < 90 &&
+            metrics.activeConnections >= 0 &&
+            webSocketStats.failureRate < 0.5 &&
+            !errorStats.circuitBreakerOpen;
+        const healthData = {
+            status: isHealthy ? "healthy" : "degraded",
+            timestamp: new Date().toISOString(),
+            uptime: process.uptime(),
+            // Enhanced memory metrics (critical for Cloud Run)
+            memory: {
+                heap: {
+                    used: memUsage.heapUsed,
+                    total: memUsage.heapTotal,
+                    percentage: (memUsage.heapUsed / memUsage.heapTotal) * 100,
+                },
+                rss: {
+                    used: memUsage.rss,
+                    containerLimit: containerMemLimit,
+                    percentage: rssMemoryPercentage,
+                },
+                external: memUsage.external,
+                arrayBuffers: memUsage.arrayBuffers,
+            },
+            // CPU metrics
+            cpu: {
+                user: cpuUsage.user,
+                system: cpuUsage.system,
+            },
+            // Connection metrics
+            connections: {
+                total: metrics.totalConnections,
+                active: metrics.activeConnections,
+                pending: metrics.pendingConnections,
+                memoryUsage: metrics.memoryUsage,
+            },
+            // WebSocket health (critical for WhatsApp connections)
+            websocket: {
+                monitored: webSocketStats.monitoredConnections,
+                healthy: webSocketStats.healthyConnections,
+                failed: webSocketStats.failedConnections,
+                failureRate: webSocketStats.failureRate,
+                avgKeepAliveLatency: webSocketStats.avgKeepAliveLatency,
+                circuitBreakerOpen: webSocketStats.circuitBreakerOpen,
+            },
+            // Instance coordination metrics (for multi-instance deployment)
+            instance: {
+                id: coordinationMetrics.instanceId,
+                isLeader: coordinationMetrics.isLeader,
+                sessionOwnership: coordinationMetrics.sessionOwnership,
+                lastHeartbeat: coordinationMetrics.lastHeartbeat,
+                otherInstances: coordinationMetrics.otherInstances,
+            },
+            // Error handling statistics
+            errors: {
+                totalErrors: errorStats.totalErrors,
+                recentErrors: errorStats.recentErrors,
+                circuitBreakerOpen: errorStats.circuitBreakerOpen,
+                recoveryAttempts: errorStats.recoveryAttempts,
+                lastError: errorStats.lastError,
+            },
+            // Memory leak prevention metrics
+            memoryLeak: {
+                trackedListeners: memoryLeakStats.trackedListeners,
+                trackedTimers: memoryLeakStats.trackedTimers,
+                trackedSockets: memoryLeakStats.trackedSockets,
+                cleanupOperations: memoryLeakStats.cleanupOperations,
+                lastCleanup: memoryLeakStats.lastCleanup,
+            },
+            // Proxy metrics
+            proxy: metrics.proxyMetrics,
+            // Environment info
+            environment: {
+                nodeEnv: process.env.NODE_ENV,
+                cloudRun: !!process.env.K_SERVICE,
+                maxConnections: process.env.MAX_CONNECTIONS,
+                memoryThreshold: process.env.MEMORY_THRESHOLD,
+                sessionStorageType: process.env.SESSION_STORAGE_TYPE,
+            },
+        };
+        // Set appropriate HTTP status based on health
+        res.status(isHealthy ? 200 : 503).json(healthData);
+    }
+    catch (error) {
+        logger.error({ error }, 'Error in health check endpoint');
+        res.status(500).json({
+            status: 'error',
+            timestamp: new Date().toISOString(),
+            error: 'Health check failed',
+        });
+    }
 });
 // Liveness probe for Kubernetes/Cloud Run
 app.get("/liveness", (_req, res) => {

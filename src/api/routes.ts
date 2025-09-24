@@ -1121,7 +1121,7 @@ export function createApiRoutes(
     async (_req: AuthenticatedRequest, res: Response): Promise<any> => {
       try {
         const metrics = proxyManager.getMetrics();
-        const proxyType = process.env.BRIGHT_DATA_PROXY_TYPE || "residential";
+        const proxyType = "isp";
         const useProxy = process.env.USE_PROXY !== "false";
 
         res.json({

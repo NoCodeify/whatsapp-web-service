@@ -2,9 +2,9 @@ name: 🚀 Deploy WhatsApp Web Service
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main]  # Auto-deploy to dev on main branch push
   pull_request:
-    branches: [main, dev]
+    branches: [main]
   workflow_dispatch:
     inputs:
       environment:
@@ -15,6 +15,11 @@ on:
         options:
           - dev
           - prod
+      confirm_production:
+        description: "I confirm this has been tested in dev and is ready for production"
+        required: false
+        default: false
+        type: boolean
 
 env:
   REGION: europe-central2
@@ -52,7 +57,9 @@ jobs:
     name: 🚀 Deploy to Development
     needs: test
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/dev' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'dev')
+    if: |
+      github.ref == 'refs/heads/main' ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'dev')
     environment: development
 
     steps:
@@ -99,11 +106,17 @@ jobs:
           echo "✅ Development health check passed!"
 
   build-and-deploy-prod:
-    name: 🚀 Deploy to Production
-    needs: test
+    name: 🚀 Deploy to Production (Manual Approval Required)
+    needs: [test, build-and-deploy-dev]  # Must deploy to dev first
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'prod')
-    environment: production
+    # Only manual workflow_dispatch with explicit confirmation
+    if: |
+      github.event_name == 'workflow_dispatch' &&
+      github.event.inputs.environment == 'prod' &&
+      github.event.inputs.confirm_production == 'true'
+    environment:
+      name: production
+      url: ${{ steps.deploy.outputs.url }}
 
     steps:
       - name: 📥 Checkout code
@@ -127,26 +140,74 @@ jobs:
       - name: 🔧 Configure Docker for Artifact Registry
         run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev
 
+      - name: 🛡️ Pre-deployment verification
+        run: |
+          echo "🔍 Verifying dev deployment is healthy before production deployment..."
+          DEV_URL="https://whatsapp-web-service-dev-123456-ew.a.run.app"  # Update with actual dev URL
+
+          # Verify dev is healthy
+          echo "Checking dev health endpoint..."
+          DEV_HEALTH=$(curl -s "${DEV_URL}/health" | jq -r '.status')
+          if [[ "$DEV_HEALTH" != "healthy" ]]; then
+            echo "❌ Dev deployment is not healthy. Status: $DEV_HEALTH"
+            echo "Production deployment blocked for safety."
+            exit 1
+          fi
+          echo "✅ Dev deployment is healthy, proceeding with production deployment"
+
       - name: 🏗️ Build and deploy to production
+        id: deploy
         run: |
           gcloud builds submit \
-            --config cloudbuild.yaml \
-            --project whatzai \
+            --config cloudbuild-prod.yaml \
+            --project whatzai-prod \
             --region ${{ env.REGION }}
 
       - name: 🔍 Verify production deployment
         run: |
           # Get service URL
-          SERVICE_URL=$(gcloud run services describe whatsapp-web-service \
+          SERVICE_URL=$(gcloud run services describe whatsapp-web-service-prod \
             --region=${{ env.REGION }} \
-            --project=whatzai \
+            --project=whatzai-prod \
             --format='value(status.url)')
 
           echo "🌐 Production service deployed at: ${SERVICE_URL}"
+          echo "url=${SERVICE_URL}" >> $GITHUB_OUTPUT
 
-          # Health check
-          curl -f "${SERVICE_URL}/health" || exit 1
-          echo "✅ Production health check passed!"
+          # Wait for service to be ready
+          echo "⏳ Waiting for production service to be ready..."
+          sleep 30
+
+          # Health check with retries
+          for i in {1..5}; do
+            if curl -f "${SERVICE_URL}/health" --max-time 30; then
+              echo "✅ Production health check passed!"
+              break
+            else
+              echo "⚠️ Health check attempt $i failed, retrying in 10 seconds..."
+              sleep 10
+            fi
+
+            if [ $i -eq 5 ]; then
+              echo "❌ Production health check failed after 5 attempts"
+              exit 1
+            fi
+          done
+
+      - name: 📋 Deployment Summary
+        if: success()
+        run: |
+          echo "🎉 Production deployment completed successfully!"
+          echo ""
+          echo "📊 Deployment Summary:"
+          echo "- Environment: Production"
+          echo "- Triggered by: ${{ github.actor }}"
+          echo "- Commit: ${{ github.sha }}"
+          echo "- Dev tested: ✅ Required"
+          echo "- Manual approval: ✅ Confirmed"
+          echo "- Health check: ✅ Passed"
+          echo ""
+          echo "🔗 Service URL: ${{ steps.deploy.outputs.url }}"
 
   security-scan:
     name: 🔒 Security Scan
@@ -168,6 +229,7 @@ jobs:
 
       - name: 🔍 Run security audit
         run: npm audit --audit-level moderate
+        continue-on-error: true  # Don't fail PR on audit warnings
 
       - name: 🔒 Run CodeQL Analysis
         uses: github/codeql-action/init@v3

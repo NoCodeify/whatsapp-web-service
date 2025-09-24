@@ -3949,6 +3949,7 @@ export class ConnectionPool extends EventEmitter {
     const wsMetrics = this.wsManager.getMetrics();
     const memoryStats = this.memoryLeakPrevention.getStats();
     const errorStats = this.errorHandler.getStats();
+    const coordinatorStats = this.instanceCoordinator.getStats();
 
     // Get cache stats for memory leak analysis
     const caches = [
@@ -3988,6 +3989,14 @@ export class ConnectionPool extends EventEmitter {
         circuitBreakers: errorStats.circuitBreakers,
         errorStats: errorStats.errorStats,
         config: errorStats.config,
+      },
+      instanceCoordination: {
+        instanceId: coordinatorStats.instanceId,
+        ownedSessions: coordinatorStats.ownedSessions,
+        totalInstances: coordinatorStats.totalInstances,
+        healthyInstances: coordinatorStats.healthyInstances,
+        instances: coordinatorStats.instances,
+        config: coordinatorStats.config,
       },
     };
   }

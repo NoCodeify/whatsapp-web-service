@@ -40,7 +40,7 @@ export class BrightDataService {
     zonePassword: process.env.BRIGHT_DATA_ZONE_PASSWORD || "",
     host: process.env.BRIGHT_DATA_HOST || "brd.superproxy.io",
     port: parseInt(process.env.BRIGHT_DATA_PORT || "33335"),
-    proxyType: process.env.BRIGHT_DATA_PROXY_TYPE || "isp",
+    proxyType: "isp",
   };
 
   constructor(firestore: Firestore) {

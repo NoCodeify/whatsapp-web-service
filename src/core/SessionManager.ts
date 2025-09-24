@@ -186,8 +186,8 @@ export class SessionManager {
         socketConfig.agent = proxyAgent;
         socketConfig.fetchAgent = proxyAgent;
 
-        // Get proxy type from environment
-        const proxyType = process.env.BRIGHT_DATA_PROXY_TYPE || "residential";
+        // Use hardcoded ISP proxy type
+        const proxyType = "isp";
         this.logger.info(
           {
             userId,

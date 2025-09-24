@@ -837,7 +837,7 @@ function createApiRoutes(connectionPool, sessionManager, proxyManager, connectio
     router.get("/proxy/status", async (_req, res) => {
         try {
             const metrics = proxyManager.getMetrics();
-            const proxyType = process.env.BRIGHT_DATA_PROXY_TYPE || "residential";
+            const proxyType = "isp";
             const useProxy = process.env.USE_PROXY !== "false";
             res.json({
                 enabled: useProxy,

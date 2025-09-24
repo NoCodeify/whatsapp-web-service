@@ -9,7 +9,12 @@
     "start": "node dist/server.js",
     "test": "jest",
     "lint": "eslint src/**/*.ts",
-    "format": "prettier --write src/**/*.ts"
+    "format": "prettier --write src/**/*.ts",
+    "deploy:dev": "gcloud builds submit --config cloudbuild-dev.yaml --project whatzaidev --region europe-central2",
+    "deploy:prod": "echo '⚠️  Production deployment requires manual approval via GitHub Actions' && echo 'Use: gh workflow run deploy.yml --field environment=prod --field confirm_production=true'",
+    "deploy:check-dev": "curl -s https://whatsapp-web-service-dev-123456-ew.a.run.app/health | jq",
+    "deploy:check-prod": "curl -s https://whatsapp-web-service-prod-123456-ew.a.run.app/health | jq",
+    "pre-deploy": "npm run lint && npm run build && npm test"
   },
   "dependencies": {
     "@google-cloud/firestore": "^7.10.0",

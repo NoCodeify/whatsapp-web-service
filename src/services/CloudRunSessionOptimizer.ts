@@ -317,6 +317,24 @@ export class CloudRunSessionOptimizer {
       const sessionKey = this.getSessionKey(userId, phoneNumber);
       this.sessionCache.delete(sessionKey);
 
+      // Delete session metadata from Firestore
+      try {
+        await this.firestore
+          .collection("session_metadata")
+          .doc(`${userId}-${phoneNumber}`)
+          .delete();
+
+        this.logger.info(
+          { userId, phoneNumber },
+          "Deleted session metadata from Firestore",
+        );
+      } catch (error) {
+        this.logger.warn(
+          { userId, phoneNumber, error },
+          "Failed to delete session metadata from Firestore",
+        );
+      }
+
       this.logger.info(
         { userId, phoneNumber, deletedFiles: files.length },
         "Session deleted from Cloud Storage",

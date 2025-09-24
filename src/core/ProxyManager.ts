@@ -52,7 +52,7 @@ export class ProxyManager {
     customerID: process.env.BRIGHT_DATA_CUSTOMER_ID || "",
     zone: process.env.BRIGHT_DATA_ZONE || "residential",
     zonePassword: process.env.BRIGHT_DATA_ZONE_PASSWORD || "",
-    proxyType: process.env.BRIGHT_DATA_PROXY_TYPE || "residential",
+    proxyType: "isp",
   };
 
   // Available proxy locations supported by Bright Data
