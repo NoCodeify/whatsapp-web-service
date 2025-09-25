@@ -894,13 +894,13 @@ export function createApiRoutes(
 
   /**
    * POST /messages/typing
-   * Send typing indicator
+   * Send typing indicator or presence subscription
    */
   router.post(
     "/messages/typing",
     async (req: AuthenticatedRequest, res: Response): Promise<any> => {
       try {
-        const { phoneNumber, toNumber, isTyping } = req.body;
+        const { phoneNumber, toNumber, isTyping, action } = req.body;
         const userId = req.user!.userId;
 
         const connection = connectionPool.getConnection(userId, phoneNumber);
@@ -911,10 +911,39 @@ export function createApiRoutes(
 
         const jid = `${toNumber.replace(/\D/g, "")}@s.whatsapp.net`;
 
-        if (isTyping) {
-          await connection.socket.sendPresenceUpdate("composing", jid);
+        // Handle new action-based approach
+        if (action) {
+          if (action === "subscribe") {
+            // Subscribe to presence updates for this contact
+            await connection.socket.presenceSubscribe(jid);
+            logger.debug(
+              { userId, phoneNumber, toNumber },
+              "Subscribed to presence updates",
+            );
+          } else if (action === "composing") {
+            await connection.socket.sendPresenceUpdate("composing", jid);
+            logger.debug(
+              { userId, phoneNumber, toNumber },
+              "Started typing indicator",
+            );
+          } else if (action === "paused") {
+            await connection.socket.sendPresenceUpdate("paused", jid);
+            logger.debug(
+              { userId, phoneNumber, toNumber },
+              "Stopped typing indicator",
+            );
+          } else {
+            return res.status(400).json({
+              error: "Invalid action. Must be 'subscribe', 'composing', or 'paused'",
+            });
+          }
         } else {
-          await connection.socket.sendPresenceUpdate("paused", jid);
+          // Fallback to legacy isTyping parameter for backward compatibility
+          if (isTyping) {
+            await connection.socket.sendPresenceUpdate("composing", jid);
+          } else {
+            await connection.socket.sendPresenceUpdate("paused", jid);
+          }
         }
 
         res.json({ success: true });
