@@ -3912,8 +3912,8 @@ export class ConnectionPool extends EventEmitter {
       for (const [_key, connection] of this.connections.entries()) {
         const idleTime = Date.now() - connection.lastActivity.getTime();
 
-        // Remove connections idle for more than 1 hour
-        if (idleTime > 3600000) {
+        // Remove connections idle for more than 90 days
+        if (idleTime > 7776000000) {
           this.logger.info(
             { userId: connection.userId, phoneNumber: connection.phoneNumber },
             "Removing idle connection",
