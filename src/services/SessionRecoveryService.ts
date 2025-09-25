@@ -123,6 +123,9 @@ export class SessionRecoveryService {
           recoveryStartedAt: Timestamp.now(),
         });
 
+      // Clean up stale sessions before recovery
+      await this.cleanupStaleSessions();
+
       // Get all active sessions from before restart
       const activeSessions = await this.getActiveSessionsToRecover();
 
@@ -178,54 +181,74 @@ export class SessionRecoveryService {
     const sessions: RecoverySession[] = [];
 
     try {
-      // Check for sessions that were active in the last 24 hours
+      // Check for sessions that need recovery (either pending_recovery from shutdown or connected)
       const cutoffTime = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
-      // Get WhatsApp phone numbers that were connected recently
-      const phoneNumbersSnapshot = await this.firestore
+      // Get sessions that need recovery from main tracking collection
+      const recoverySessionsSnapshot = await this.firestore
         .collection("whatsapp_phone_numbers")
-        .where("status", "==", "connected")
+        .where("status", "in", ["pending_recovery", "connected"])
         .where("last_activity", ">=", Timestamp.fromDate(cutoffTime))
         .get();
 
-      // Convert phone numbers to recovery sessions
-      phoneNumbersSnapshot.forEach((doc) => {
+      recoverySessionsSnapshot.forEach((doc) => {
         const data = doc.data();
         sessions.push({
           userId: data.user_id,
           phoneNumber: data.phone_number,
-          proxyCountry: data.country_code || "us", // Use country from phone record
+          proxyCountry: data.proxy_country || data.country_code || "us",
           lastConnected: data.last_activity?.toDate() || new Date(),
           status: "disconnected",
         });
       });
 
-      // Also check for sessions without proxy (backwards compatibility)
-      phoneNumbersSnapshot.forEach((doc) => {
-        const data = doc.data();
+      this.logger.info(
+        { found: sessions.length },
+        "Found sessions in whatsapp_phone_numbers collection for recovery"
+      );
 
-        // If not already in sessions (no proxy assignment)
-        if (
-          !sessions.find(
-            (s) =>
-              s.userId === data.user_id && s.phoneNumber === data.phone_number,
-          )
-        ) {
-          sessions.push({
-            userId: data.user_id,
-            phoneNumber: data.phone_number,
-            proxyCountry:
-              data.proxy_country ||
-              this.detectCountryFromPhone(data.phone_number),
-            lastConnected: data.last_activity.toDate(),
-            status: "disconnected",
+      // Fallback: Check users subcollection for backwards compatibility
+      if (sessions.length === 0) {
+        this.logger.info("No sessions found in main collection, checking users subcollections");
+
+        // This is a more expensive query, so only use as fallback
+        const usersSnapshot = await this.firestore.collection("users").get();
+
+        for (const userDoc of usersSnapshot.docs) {
+          const userId = userDoc.id;
+
+          const phoneNumbersSnapshot = await this.firestore
+            .collection("users")
+            .doc(userId)
+            .collection("phone_numbers")
+            .where("whatsapp_web_status", "in", ["connected", "initializing"])
+            .where("updated_at", ">=", Timestamp.fromDate(cutoffTime))
+            .get();
+
+          phoneNumbersSnapshot.forEach((phoneDoc) => {
+            const data = phoneDoc.data();
+            if (data.type === "whatsapp_web") {
+              sessions.push({
+                userId,
+                phoneNumber: data.phone_number,
+                proxyCountry: data.country_code || this.detectCountryFromPhone(data.phone_number),
+                lastConnected: data.updated_at?.toDate() || new Date(),
+                status: "disconnected",
+              });
+            }
           });
         }
-      });
+
+        this.logger.info(
+          { found: sessions.length },
+          "Found sessions in users subcollection fallback"
+        );
+      }
+
     } catch (error: any) {
       this.logger.error(
         { error: error.message },
-        "Failed to get active sessions",
+        "Failed to get active sessions for recovery",
       );
     }
 
@@ -370,7 +393,7 @@ export class SessionRecoveryService {
   }
 
   /**
-   * Update session recovery status
+   * Update session recovery status in whatsapp_phone_numbers collection
    */
   private async updateSessionStatus(
     userId: string,
@@ -379,6 +402,33 @@ export class SessionRecoveryService {
   ): Promise<void> {
     try {
       const docId = `${userId}_${phoneNumber}`;
+
+      // Map recovery service status to collection status
+      let firestoreStatus: string = status;
+      if (status === "active") {
+        firestoreStatus = "connected";
+      } else if (status === "error") {
+        firestoreStatus = "failed";
+      } else if (status === "disconnected") {
+        firestoreStatus = "disconnected";
+      }
+
+      // Update in main tracking collection
+      await this.firestore.collection("whatsapp_phone_numbers").doc(docId).update({
+        status: firestoreStatus,
+        instance_id: this.instanceId,
+        last_activity: Timestamp.now(),
+        updated_at: Timestamp.now(),
+        recovery_attempted: true,
+        recovery_attempt_time: Timestamp.now(),
+      });
+
+      this.logger.info(
+        { userId, phoneNumber, status: firestoreStatus },
+        "Updated session recovery status in whatsapp_phone_numbers collection"
+      );
+
+      // Also maintain backwards compatibility with session_recovery collection
       await this.firestore.collection("session_recovery").doc(docId).set(
         {
           userId,
@@ -389,10 +439,11 @@ export class SessionRecoveryService {
         },
         { merge: true },
       );
+
     } catch (error: any) {
       this.logger.error(
-        { error: error.message },
-        "Failed to update session status",
+        { error: error.message, userId, phoneNumber, status },
+        "Failed to update session recovery status",
       );
     }
   }
@@ -487,6 +538,98 @@ export class SessionRecoveryService {
       this.logger.error(
         { error: error.message },
         "Failed to cleanup old instances",
+      );
+    }
+  }
+
+  /**
+   * Cleanup stale and failed sessions
+   */
+  async cleanupStaleSessions(): Promise<void> {
+    try {
+      const now = new Date();
+      const staleThreshold = new Date(now.getTime() - 72 * 60 * 60 * 1000); // 72 hours
+      const failedThreshold = new Date(now.getTime() - 24 * 60 * 60 * 1000); // 24 hours
+
+      let cleanupCount = 0;
+
+      // Clean up very old sessions (regardless of status)
+      const staleSessions = await this.firestore
+        .collection("whatsapp_phone_numbers")
+        .where("last_activity", "<", Timestamp.fromDate(staleThreshold))
+        .get();
+
+      const batch1 = this.firestore.batch();
+      staleSessions.forEach((doc) => {
+        batch1.delete(doc.ref);
+        cleanupCount++;
+      });
+
+      if (staleSessions.size > 0) {
+        await batch1.commit();
+        this.logger.info(
+          { count: staleSessions.size },
+          "Cleaned up stale sessions older than 72 hours",
+        );
+      }
+
+      // Clean up failed sessions older than 24 hours
+      const failedSessions = await this.firestore
+        .collection("whatsapp_phone_numbers")
+        .where("status", "==", "failed")
+        .where("updated_at", "<", Timestamp.fromDate(failedThreshold))
+        .get();
+
+      const batch2 = this.firestore.batch();
+      failedSessions.forEach((doc) => {
+        batch2.delete(doc.ref);
+        cleanupCount++;
+      });
+
+      if (failedSessions.size > 0) {
+        await batch2.commit();
+        this.logger.info(
+          { count: failedSessions.size },
+          "Cleaned up failed sessions older than 24 hours",
+        );
+      }
+
+      // Clean up pending_recovery sessions that are older than 6 hours (likely from failed deployments)
+      const oldPendingSessions = await this.firestore
+        .collection("whatsapp_phone_numbers")
+        .where("status", "==", "pending_recovery")
+        .where("last_activity", "<", Timestamp.fromDate(new Date(now.getTime() - 6 * 60 * 60 * 1000)))
+        .get();
+
+      const batch3 = this.firestore.batch();
+      oldPendingSessions.forEach((doc) => {
+        batch3.update(doc.ref, {
+          status: "failed",
+          cleanup_reason: "pending_recovery_timeout",
+          updated_at: Timestamp.now(),
+        });
+        cleanupCount++;
+      });
+
+      if (oldPendingSessions.size > 0) {
+        await batch3.commit();
+        this.logger.info(
+          { count: oldPendingSessions.size },
+          "Marked old pending_recovery sessions as failed",
+        );
+      }
+
+      if (cleanupCount > 0) {
+        this.logger.info(
+          { totalCleaned: cleanupCount },
+          "Session cleanup completed",
+        );
+      }
+
+    } catch (error: any) {
+      this.logger.error(
+        { error: error.message },
+        "Failed to cleanup stale sessions",
       );
     }
   }

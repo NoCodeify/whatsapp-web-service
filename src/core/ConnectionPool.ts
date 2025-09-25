@@ -745,10 +745,19 @@ export class ConnectionPool extends EventEmitter {
       // Update Firestore - preserve status for recovery when preserving session
       if (!skipLogout) {
         await this.updateConnectionStatus(userId, phoneNumber, "disconnected");
+        // Remove from recovery tracking since it's a normal disconnect
+        await this.removeSessionFromRecovery(userId, phoneNumber);
       } else {
+        // Mark session as pending recovery for graceful shutdown
+        await this.updateSessionForRecovery(
+          userId,
+          phoneNumber,
+          "pending_recovery",
+          connection.proxyCountry,
+        );
         this.logger.info(
           { userId, phoneNumber },
-          "Preserving connection status for session recovery",
+          "Session preserved for recovery in whatsapp_phone_numbers collection",
         );
       }
 
@@ -1082,6 +1091,14 @@ export class ConnectionPool extends EventEmitter {
 
         // Update phone number status for UI immediately
         await this.updatePhoneNumberStatus(userId, phoneNumber, "connected");
+
+        // Track session for recovery
+        await this.updateSessionForRecovery(
+          userId,
+          phoneNumber,
+          "connected",
+          connection.proxyCountry,
+        );
 
         // Emit connection established event
         this.emit("connection-update", {
@@ -4245,5 +4262,123 @@ export class ConnectionPool extends EventEmitter {
     await this.sessionManager.shutdown();
 
     this.logger.info("Connection pool shutdown complete");
+  }
+
+  /**
+   * Update session state in whatsapp_phone_numbers collection for recovery
+   */
+  private async updateSessionForRecovery(
+    userId: string,
+    phoneNumber: string,
+    status: "connected" | "pending_recovery" | "failed",
+    proxyCountry?: string,
+  ): Promise<void> {
+    try {
+      const sessionRef = this.firestore
+        .collection("whatsapp_phone_numbers")
+        .doc(`${userId}_${phoneNumber}`);
+
+      const sessionData: any = {
+        user_id: userId,
+        phone_number: phoneNumber,
+        status,
+        last_activity: admin.firestore.Timestamp.now(),
+        instance_id: this.config.instanceUrl,
+        updated_at: admin.firestore.Timestamp.now(),
+      };
+
+      // Add proxy country if available
+      if (proxyCountry) {
+        sessionData.country_code = proxyCountry;
+        sessionData.proxy_country = proxyCountry;
+      }
+
+      await sessionRef.set(sessionData, { merge: true });
+
+      this.logger.info(
+        { userId, phoneNumber, status, proxyCountry },
+        "Updated session for recovery in whatsapp_phone_numbers collection",
+      );
+    } catch (error) {
+      this.logger.error(
+        { userId, phoneNumber, status, error },
+        "Failed to update session for recovery",
+      );
+    }
+  }
+
+  /**
+   * Remove session from recovery tracking
+   */
+  private async removeSessionFromRecovery(
+    userId: string,
+    phoneNumber: string,
+  ): Promise<void> {
+    try {
+      const sessionRef = this.firestore
+        .collection("whatsapp_phone_numbers")
+        .doc(`${userId}_${phoneNumber}`);
+
+      await sessionRef.delete();
+
+      this.logger.info(
+        { userId, phoneNumber },
+        "Removed session from recovery tracking",
+      );
+    } catch (error) {
+      this.logger.error(
+        { userId, phoneNumber, error },
+        "Failed to remove session from recovery tracking",
+      );
+    }
+  }
+
+  /**
+   * Get active sessions from recovery collection
+   */
+  async getActiveSessionsForRecovery(): Promise<Array<{
+    userId: string;
+    phoneNumber: string;
+    proxyCountry?: string;
+    lastActivity: Date;
+  }>> {
+    try {
+      const cutoffTime = new Date(Date.now() - 24 * 60 * 60 * 1000); // 24 hours
+
+      const activeSessionsSnapshot = await this.firestore
+        .collection("whatsapp_phone_numbers")
+        .where("status", "in", ["connected", "pending_recovery"])
+        .where("last_activity", ">=", admin.firestore.Timestamp.fromDate(cutoffTime))
+        .get();
+
+      const sessions: Array<{
+        userId: string;
+        phoneNumber: string;
+        proxyCountry?: string;
+        lastActivity: Date;
+      }> = [];
+      activeSessionsSnapshot.forEach((doc) => {
+        const data = doc.data();
+        sessions.push({
+          userId: data.user_id,
+          phoneNumber: data.phone_number,
+          proxyCountry: data.proxy_country || data.country_code,
+          lastActivity: data.last_activity?.toDate() || new Date(),
+        });
+      });
+
+      this.logger.info(
+        { count: sessions.length },
+        "Retrieved active sessions for recovery",
+      );
+
+      return sessions;
+    } catch (error) {
+      this.logger.error(
+        { error },
+        "Failed to get active sessions for recovery",
+      );
+      return [];
+    }
   }
 }
