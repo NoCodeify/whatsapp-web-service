@@ -1957,18 +1957,38 @@ export class ConnectionPool extends EventEmitter {
         first_message_of_the_day: false,
       };
 
-      // Add message to contact's messages subcollection
-      await contactRef.collection("messages").add(messageData);
+      // Check for duplicate message before adding
+      const existingMessage = await contactRef
+        .collection("messages")
+        .where("message_sid", "==", message.key.id)
+        .limit(1)
+        .get();
 
-      this.logger.info(
-        {
-          userId,
-          phoneNumber,
-          messageId: message.key.id,
-          fromNumber,
-        },
-        "Incoming message stored in Firestore",
-      );
+      if (existingMessage.empty) {
+        // Add message to contact's messages subcollection
+        await contactRef.collection("messages").add(messageData);
+
+        this.logger.info(
+          {
+            userId,
+            phoneNumber,
+            messageId: message.key.id,
+            fromNumber,
+          },
+          "Incoming message stored in Firestore",
+        );
+      } else {
+        this.logger.debug(
+          {
+            userId,
+            phoneNumber,
+            messageId: message.key.id,
+            fromNumber,
+          },
+          "Skipped duplicate incoming message",
+        );
+        return; // Exit early for duplicates
+      }
 
       // Emit event for real-time updates
       this.emit("message-stored", {
@@ -2201,35 +2221,55 @@ export class ConnectionPool extends EventEmitter {
         first_message_of_the_day: false,
       };
 
-      // Add message to contact's messages subcollection
-      const messageRef = await contactRef
+      // Check for duplicate message before adding
+      const existingMessage = await contactRef
         .collection("messages")
-        .add(messageData);
+        .where("message_sid", "==", message.key.id)
+        .limit(1)
+        .get();
 
-      // Update last_message
-      await contactRef.update({
-        last_message: {
-          direction: "outbound",
-          body: messageText,
-          status: "sent",
-          timestamp: currentTimestamp,
-          messageRef: messageRef,
-          manual: true, // Flag as manual
-        },
-        last_message_timestamp: currentTimestamp,
-      });
+      if (existingMessage.empty) {
+        // Add message to contact's messages subcollection
+        const messageRef = await contactRef
+          .collection("messages")
+          .add(messageData);
 
-      this.logger.info(
-        {
-          userId,
-          phoneNumber,
-          toNumber: formattedToPhone,
-          messageId: message.key.id,
-          aiPaused: true,
-          creditsUsed: 0,
-        },
-        "Manual message stored, AI paused, no credits deducted",
-      );
+        // Update last_message
+        await contactRef.update({
+          last_message: {
+            direction: "outbound",
+            body: messageText,
+            status: "sent",
+            timestamp: currentTimestamp,
+            messageRef: messageRef,
+            manual: true, // Flag as manual
+          },
+          last_message_timestamp: currentTimestamp,
+        });
+
+        this.logger.info(
+          {
+            userId,
+            phoneNumber,
+            toNumber: formattedToPhone,
+            messageId: message.key.id,
+            aiPaused: true,
+            creditsUsed: 0,
+          },
+          "Manual message stored, AI paused, no credits deducted",
+        );
+      } else {
+        this.logger.debug(
+          {
+            userId,
+            phoneNumber,
+            messageId: message.key.id,
+            toNumber: formattedToPhone,
+          },
+          "Skipped duplicate manual outgoing message",
+        );
+        return; // Exit early for duplicates
+      }
 
       // Emit event for UI updates
       this.emit("manual-message-stored", {
@@ -3483,9 +3523,46 @@ export class ConnectionPool extends EventEmitter {
           });
         }
 
-        // Process all messages for this contact
-        let messagesAddedForContact = 0;
+        // Process all messages for this contact with bulk deduplication
+        // Get all existing message IDs for this contact in ONE query
+        const existingMessagesSnapshot = await contactRef
+          .collection("messages")
+          .select("message_sid")
+          .get();
+
+        const existingMessageIds = new Set(
+          existingMessagesSnapshot.docs.map(doc => doc.data().message_sid)
+        );
+
+        // Filter out duplicates
+        const newMessages = [];
+        let skippedCount = 0;
+
         for (const msg of contactMessages) {
+          if (!existingMessageIds.has(msg.key.id)) {
+            newMessages.push(msg);
+          } else {
+            skippedCount++;
+          }
+        }
+
+        if (skippedCount > 0) {
+          this.logger.info({
+            userId,
+            phoneNumber,
+            contactPhone: formattedContactPhone,
+            skippedCount,
+            newCount: newMessages.length,
+            totalAttempted: contactMessages.length,
+          }, "Skipped duplicate messages during bulk import");
+        }
+
+        // Use batch writes for better performance
+        let batch = this.firestore.batch();
+        let batchCount = 0;
+        let messagesAddedForContact = 0;
+
+        for (const msg of newMessages) {
           // Extract message text with better labels
           const messageText = this.extractMessageText(msg);
 
@@ -3552,10 +3629,10 @@ export class ConnectionPool extends EventEmitter {
             first_message_of_the_day: false,
           };
 
-          // Add message to contact's messages subcollection
-          const messageDocRef = await contactRef
-            .collection("messages")
-            .add(messageData);
+          // Add to batch instead of individual add
+          const messageDocRef = contactRef.collection("messages").doc();
+          batch.set(messageDocRef, messageData);
+          batchCount++;
 
           // Track the last message for this contact
           if (
@@ -3567,6 +3644,18 @@ export class ConnectionPool extends EventEmitter {
           }
 
           messagesAddedForContact++;
+
+          // Commit batch at Firestore limit (500 operations)
+          if (batchCount >= 500) {
+            await batch.commit();
+            batch = this.firestore.batch();
+            batchCount = 0;
+          }
+        }
+
+        // Commit any remaining batch operations
+        if (batchCount > 0) {
+          await batch.commit();
         }
 
         // Increment syncedCount once per contact that had messages synced
