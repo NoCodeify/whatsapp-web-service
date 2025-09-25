@@ -546,5 +546,5 @@ server.listen(PORT, async () => {
     } catch (error) {
       logger.error({ error }, "Failed to recover connections on startup");
     }
-  }, 3000); // 3 second delay
+  }, 20000); // 20 second delay to allow old instance shutdown
 });
