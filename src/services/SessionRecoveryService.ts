@@ -8,6 +8,7 @@ export interface RecoverySession {
   phoneNumber: string;
   proxyIp?: string;
   proxyCountry?: string;
+  phoneCountry?: string;
   lastConnected: Date;
   status: "active" | "disconnected" | "error";
   instanceId?: string;
@@ -196,7 +197,8 @@ export class SessionRecoveryService {
         sessions.push({
           userId: data.user_id,
           phoneNumber: data.phone_number,
-          proxyCountry: data.proxy_country || data.country_code || "us",
+          phoneCountry: data.country_code || "us", // Phone's actual country
+          proxyCountry: data.proxy_country, // Proxy location (if stored)
           lastConnected: data.last_activity?.toDate() || new Date(),
           status: "disconnected",
         });
@@ -204,12 +206,14 @@ export class SessionRecoveryService {
 
       this.logger.info(
         { found: sessions.length },
-        "Found sessions in whatsapp_phone_numbers collection for recovery"
+        "Found sessions in whatsapp_phone_numbers collection for recovery",
       );
 
       // Fallback: Check users subcollection for backwards compatibility
       if (sessions.length === 0) {
-        this.logger.info("No sessions found in main collection, checking users subcollections");
+        this.logger.info(
+          "No sessions found in main collection, checking users subcollections",
+        );
 
         // This is a more expensive query, so only use as fallback
         const usersSnapshot = await this.firestore.collection("users").get();
@@ -231,7 +235,10 @@ export class SessionRecoveryService {
               sessions.push({
                 userId,
                 phoneNumber: data.phone_number,
-                proxyCountry: data.country_code || this.detectCountryFromPhone(data.phone_number),
+                phoneCountry:
+                  data.country_code ||
+                  this.detectCountryFromPhone(data.phone_number),
+                proxyCountry: data.proxy_country, // Proxy location (if stored)
                 lastConnected: data.updated_at?.toDate() || new Date(),
                 status: "disconnected",
               });
@@ -241,10 +248,9 @@ export class SessionRecoveryService {
 
         this.logger.info(
           { found: sessions.length },
-          "Found sessions in users subcollection fallback"
+          "Found sessions in users subcollection fallback",
         );
       }
-
     } catch (error: any) {
       this.logger.error(
         { error: error.message },
@@ -260,11 +266,11 @@ export class SessionRecoveryService {
    */
   private prioritizeSessions(sessions: RecoverySession[]): RecoverySession[] {
     return sessions.sort((a, b) => {
-      // Priority countries first
+      // Priority countries first (based on phone's country)
       const aPriority =
-        this.options.priorityCountries?.indexOf(a.proxyCountry || "") ?? -1;
+        this.options.priorityCountries?.indexOf(a.phoneCountry || "") ?? -1;
       const bPriority =
-        this.options.priorityCountries?.indexOf(b.proxyCountry || "") ?? -1;
+        this.options.priorityCountries?.indexOf(b.phoneCountry || "") ?? -1;
 
       if (aPriority !== -1 && bPriority === -1) return -1;
       if (aPriority === -1 && bPriority !== -1) return 1;
@@ -281,10 +287,11 @@ export class SessionRecoveryService {
    * Recover a single session
    */
   private async recoverSession(session: RecoverySession): Promise<void> {
-    const { userId, phoneNumber, proxyIp, proxyCountry } = session;
+    const { userId, phoneNumber, proxyIp, phoneCountry, proxyCountry } =
+      session;
 
     this.logger.info(
-      { userId, phoneNumber, proxyIp, proxyCountry },
+      { userId, phoneNumber, proxyIp, phoneCountry, proxyCountry },
       "Recovering session",
     );
 
@@ -303,25 +310,25 @@ export class SessionRecoveryService {
           proxy = await this.reactivateProxy(proxyIp, userId, phoneNumber);
 
           if (!proxy) {
-            // Proxy no longer available, get new one for same country
+            // Proxy no longer available, get new one for phone's country
             this.logger.info(
-              { proxyIp, country: proxyCountry },
-              "Original proxy unavailable, purchasing new one",
+              { proxyIp, phoneCountry },
+              "Original proxy unavailable, purchasing new one for phone's country",
             );
 
             const result = await this.dynamicProxyService.assignProxy(
               userId,
               phoneNumber,
-              proxyCountry || "us",
+              phoneCountry || "us",
             );
             proxy = result.proxy;
           }
         } else {
-          // No previous proxy, assign new one
+          // No previous proxy, assign new one for phone's country
           const result = await this.dynamicProxyService.assignProxy(
             userId,
             phoneNumber,
-            proxyCountry || "us",
+            phoneCountry || "us",
           );
           proxy = result.proxy;
         }
@@ -330,7 +337,7 @@ export class SessionRecoveryService {
         const connected = await this.connectionPool!.addConnection(
           userId,
           phoneNumber,
-          proxy.country,
+          undefined, // Don't override existing country during recovery
           undefined, // countryCode
           true, // isRecovery flag
         );
@@ -414,18 +421,21 @@ export class SessionRecoveryService {
       }
 
       // Update in main tracking collection
-      await this.firestore.collection("whatsapp_phone_numbers").doc(docId).update({
-        status: firestoreStatus,
-        instance_id: this.instanceId,
-        last_activity: Timestamp.now(),
-        updated_at: Timestamp.now(),
-        recovery_attempted: true,
-        recovery_attempt_time: Timestamp.now(),
-      });
+      await this.firestore
+        .collection("whatsapp_phone_numbers")
+        .doc(docId)
+        .update({
+          status: firestoreStatus,
+          instance_id: this.instanceId,
+          last_activity: Timestamp.now(),
+          updated_at: Timestamp.now(),
+          recovery_attempted: true,
+          recovery_attempt_time: Timestamp.now(),
+        });
 
       this.logger.info(
         { userId, phoneNumber, status: firestoreStatus },
-        "Updated session recovery status in whatsapp_phone_numbers collection"
+        "Updated session recovery status in whatsapp_phone_numbers collection",
       );
 
       // Also maintain backwards compatibility with session_recovery collection
@@ -439,7 +449,6 @@ export class SessionRecoveryService {
         },
         { merge: true },
       );
-
     } catch (error: any) {
       this.logger.error(
         { error: error.message, userId, phoneNumber, status },
@@ -598,7 +607,11 @@ export class SessionRecoveryService {
       const oldPendingSessions = await this.firestore
         .collection("whatsapp_phone_numbers")
         .where("status", "==", "pending_recovery")
-        .where("last_activity", "<", Timestamp.fromDate(new Date(now.getTime() - 6 * 60 * 60 * 1000)))
+        .where(
+          "last_activity",
+          "<",
+          Timestamp.fromDate(new Date(now.getTime() - 6 * 60 * 60 * 1000)),
+        )
         .get();
 
       const batch3 = this.firestore.batch();
@@ -625,7 +638,6 @@ export class SessionRecoveryService {
           "Session cleanup completed",
         );
       }
-
     } catch (error: any) {
       this.logger.error(
         { error: error.message },

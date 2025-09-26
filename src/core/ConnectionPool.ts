@@ -3548,7 +3548,7 @@ export class ConnectionPool extends EventEmitter {
           .get();
 
         const existingMessageIds = new Set(
-          existingMessagesSnapshot.docs.map(doc => doc.data().message_sid)
+          existingMessagesSnapshot.docs.map((doc) => doc.data().message_sid),
         );
 
         // Filter out duplicates
@@ -3564,14 +3564,17 @@ export class ConnectionPool extends EventEmitter {
         }
 
         if (skippedCount > 0) {
-          this.logger.info({
-            userId,
-            phoneNumber,
-            contactPhone: formattedContactPhone,
-            skippedCount,
-            newCount: newMessages.length,
-            totalAttempted: contactMessages.length,
-          }, "Skipped duplicate messages during bulk import");
+          this.logger.info(
+            {
+              userId,
+              phoneNumber,
+              contactPhone: formattedContactPhone,
+              skippedCount,
+              newCount: newMessages.length,
+              totalAttempted: contactMessages.length,
+            },
+            "Skipped duplicate messages during bulk import",
+          );
         }
 
         // Use batch writes for better performance
@@ -4278,6 +4281,10 @@ export class ConnectionPool extends EventEmitter {
         .collection("whatsapp_phone_numbers")
         .doc(`${userId}_${phoneNumber}`);
 
+      // Check if document already exists to preserve country_code
+      const existingDoc = await sessionRef.get();
+      const existingData = existingDoc.exists ? existingDoc.data() : {};
+
       const sessionData: any = {
         user_id: userId,
         phone_number: phoneNumber,
@@ -4287,10 +4294,28 @@ export class ConnectionPool extends EventEmitter {
         updated_at: admin.firestore.Timestamp.now(),
       };
 
-      // Add proxy country if available
+      // Update proxy country if available
       if (proxyCountry) {
-        sessionData.country_code = proxyCountry;
         sessionData.proxy_country = proxyCountry;
+      }
+
+      // Only set country_code if it doesn't already exist (preserve phone's country)
+      if (!existingData?.country_code && proxyCountry) {
+        sessionData.country_code = proxyCountry;
+        this.logger.info(
+          { userId, phoneNumber, country_code: proxyCountry },
+          "Setting initial country_code for new session",
+        );
+      } else if (existingData?.country_code) {
+        this.logger.debug(
+          {
+            userId,
+            phoneNumber,
+            existing_country: existingData.country_code,
+            proxy_country: proxyCountry,
+          },
+          "Preserving existing country_code during session update",
+        );
       }
 
       await sessionRef.set(sessionData, { merge: true });
@@ -4336,19 +4361,25 @@ export class ConnectionPool extends EventEmitter {
   /**
    * Get active sessions from recovery collection
    */
-  async getActiveSessionsForRecovery(): Promise<Array<{
-    userId: string;
-    phoneNumber: string;
-    proxyCountry?: string;
-    lastActivity: Date;
-  }>> {
+  async getActiveSessionsForRecovery(): Promise<
+    Array<{
+      userId: string;
+      phoneNumber: string;
+      proxyCountry?: string;
+      lastActivity: Date;
+    }>
+  > {
     try {
       const cutoffTime = new Date(Date.now() - 24 * 60 * 60 * 1000); // 24 hours
 
       const activeSessionsSnapshot = await this.firestore
         .collection("whatsapp_phone_numbers")
         .where("status", "in", ["connected", "pending_recovery"])
-        .where("last_activity", ">=", admin.firestore.Timestamp.fromDate(cutoffTime))
+        .where(
+          "last_activity",
+          ">=",
+          admin.firestore.Timestamp.fromDate(cutoffTime),
+        )
         .get();
 
       const sessions: Array<{
