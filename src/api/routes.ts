@@ -934,7 +934,8 @@ export function createApiRoutes(
             );
           } else {
             return res.status(400).json({
-              error: "Invalid action. Must be 'subscribe', 'composing', or 'paused'",
+              error:
+                "Invalid action. Must be 'subscribe', 'composing', or 'paused'",
             });
           }
         } else {

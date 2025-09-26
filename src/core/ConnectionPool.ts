@@ -37,6 +37,7 @@ export interface WhatsAppConnection {
   messageCount: number;
   proxySessionId?: string;
   instanceUrl: string;
+  proxyReleased?: boolean; // Track if proxy was released after successful connection
 }
 
 export interface ConnectionPoolConfig {
@@ -1086,6 +1087,28 @@ export class ConnectionPool extends EventEmitter {
         if (this.connectionStateManager) {
           await this.connectionStateManager.markConnected(userId, phoneNumber);
         }
+
+        // Release proxy after successful connection - TCP tunnel persists
+        // Small delay to ensure connection is fully established
+        setTimeout(async () => {
+          try {
+            await this.proxyManager.releaseProxy(userId, phoneNumber);
+            connection.proxyReleased = true;
+            this.logger.info(
+              {
+                userId,
+                phoneNumber,
+                proxySessionId: connection.proxySessionId,
+              },
+              "Proxy released after successful connection - tunnel persists for cost optimization",
+            );
+          } catch (error) {
+            this.logger.warn(
+              { userId, phoneNumber, error: (error as any).message },
+              "Failed to release proxy after connection, but connection continues",
+            );
+          }
+        }, 2000);
 
         await this.updateConnectionStatus(userId, phoneNumber, "connected");
 

@@ -91,6 +91,7 @@ const connectionPool = new ConnectionPool(
 // Set connection pool reference for recovery service
 if (sessionRecoveryService) {
   sessionRecoveryService.setConnectionPool(connectionPool);
+  sessionRecoveryService.setInstanceCoordinator(instanceCoordinator);
 }
 
 // Set connection pool reference for reconnection service
@@ -506,6 +507,9 @@ const gracefulShutdown = async (signal: string) => {
     await sessionRecoveryService.shutdown();
   }
 
+  // Shutdown instance coordinator to release session ownership
+  await instanceCoordinator.shutdown();
+
   // Shutdown connection pool with session preservation for deployments
   await connectionPool.shutdown(true); // preserveSessions = true
 
@@ -533,6 +537,9 @@ server.listen(PORT, async () => {
   setTimeout(async () => {
     logger.info("Initiating connection recovery after server restart");
     try {
+      // Start instance coordinator first for session ownership management
+      await instanceCoordinator.start();
+
       if (sessionRecoveryService) {
         // Use new comprehensive recovery service
         await sessionRecoveryService.cleanupOldInstances();

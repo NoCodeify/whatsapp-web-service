@@ -26,6 +26,7 @@ export class SessionRecoveryService {
   private firestore: Firestore;
   private dynamicProxyService: DynamicProxyService;
   private connectionPool?: ConnectionPool;
+  private instanceCoordinator?: any; // InstanceCoordinator - avoiding circular imports
   private isRecovering = false;
   private instanceId: string;
 
@@ -60,6 +61,13 @@ export class SessionRecoveryService {
    */
   setConnectionPool(connectionPool: ConnectionPool): void {
     this.connectionPool = connectionPool;
+  }
+
+  /**
+   * Set the instance coordinator reference
+   */
+  setInstanceCoordinator(instanceCoordinator: any): void {
+    this.instanceCoordinator = instanceCoordinator;
   }
 
   /**
@@ -290,6 +298,22 @@ export class SessionRecoveryService {
     const { userId, phoneNumber, proxyIp, phoneCountry, proxyCountry } =
       session;
 
+    // Check with instance coordinator to prevent duplicate recovery
+    if (this.instanceCoordinator) {
+      const shouldHandle = await this.instanceCoordinator.shouldHandleSession(
+        userId,
+        phoneNumber,
+      );
+
+      if (!shouldHandle) {
+        this.logger.info(
+          { userId, phoneNumber, instanceId: this.instanceId },
+          "Session is being handled by another instance, skipping recovery",
+        );
+        return;
+      }
+    }
+
     this.logger.info(
       { userId, phoneNumber, proxyIp, phoneCountry, proxyCountry },
       "Recovering session",
@@ -348,6 +372,14 @@ export class SessionRecoveryService {
           // Update recovery status
           await this.updateSessionStatus(userId, phoneNumber, "active");
 
+          // Update session activity in instance coordinator
+          if (this.instanceCoordinator) {
+            await this.instanceCoordinator.updateSessionActivity(
+              userId,
+              phoneNumber,
+            );
+          }
+
           this.logger.info(
             { userId, phoneNumber, attempts, proxyIp: proxy.ip },
             "Session recovered successfully",
@@ -375,6 +407,14 @@ export class SessionRecoveryService {
     if (!recovered) {
       // Mark session as failed
       await this.updateSessionStatus(userId, phoneNumber, "error");
+
+      // Release session ownership since recovery failed
+      if (this.instanceCoordinator) {
+        await this.instanceCoordinator.releaseSessionOwnership(
+          userId,
+          phoneNumber,
+        );
+      }
 
       this.logger.error(
         { userId, phoneNumber, attempts },
