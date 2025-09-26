@@ -381,7 +381,7 @@ export class InstanceCoordinator extends EventEmitter {
     this.sessionCleanupTimer = setInterval(async () => {
       try {
         await this.cleanupStaleSessions();
-        await this.cleanupStaleInstances();
+        // await this.cleanupStaleInstances(); // Disabled - cleanup was failing and causing log spam
       } catch (error) {
         this.logger.error({ error }, "Session cleanup failed");
       }
@@ -409,9 +409,9 @@ export class InstanceCoordinator extends EventEmitter {
   }
 
   /**
-   * Clean up stale instances
+   * Clean up stale instances - DISABLED
    */
-  private async cleanupStaleInstances(): Promise<void> {
+  /* private async cleanupStaleInstances(): Promise<void> {
     try {
       const instancesSnapshot = await this.firestore
         .collection("instance_registry")
@@ -442,12 +442,12 @@ export class InstanceCoordinator extends EventEmitter {
     } catch (error) {
       this.logger.error({ error }, "Failed to cleanup stale instances");
     }
-  }
+  } */
 
   /**
-   * Clean up sessions owned by a failed instance
+   * Clean up sessions owned by a failed instance - DISABLED
    */
-  private async cleanupInstanceSessions(instanceId: string): Promise<void> {
+  /* private async cleanupInstanceSessions(instanceId: string): Promise<void> {
     try {
       const sessionsSnapshot = await this.firestore
         .collection("session_ownership")
@@ -467,7 +467,7 @@ export class InstanceCoordinator extends EventEmitter {
         "Failed to cleanup sessions from failed instance",
       );
     }
-  }
+  } */
 
   /**
    * Load sessions owned by this instance
