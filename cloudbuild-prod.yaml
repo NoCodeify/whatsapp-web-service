@@ -41,7 +41,7 @@ steps:
       - "--timeout"
       - "3600"
       - "--concurrency"
-      - "5"
+      - "50"
       - "--port"
       - "8080"
       - "--no-cpu-throttling"
