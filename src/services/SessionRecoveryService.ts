@@ -196,12 +196,22 @@ export class SessionRecoveryService {
       // Get sessions that need recovery from main tracking collection
       const recoverySessionsSnapshot = await this.firestore
         .collection("whatsapp_phone_numbers")
-        .where("status", "in", ["pending_recovery", "connected"])
+        .where("status", "in", ["pending_recovery", "connected", "disconnected", "failed", "initializing"])
         .where("last_activity", ">=", Timestamp.fromDate(cutoffTime))
         .get();
 
       recoverySessionsSnapshot.forEach((doc) => {
         const data = doc.data();
+
+        // Only recover sessions that have valid session data or completed QR scan
+        if (!data.session_exists && !data.qr_scanned) {
+          this.logger.debug(
+            { userId: data.user_id, phoneNumber: data.phone_number },
+            "Skipping session recovery - no valid session data or QR scan",
+          );
+          return;
+        }
+
         sessions.push({
           userId: data.user_id,
           phoneNumber: data.phone_number,
@@ -212,10 +222,14 @@ export class SessionRecoveryService {
         });
       });
 
-      this.logger.info(
-        { found: sessions.length },
-        "Found sessions in whatsapp_phone_numbers collection for recovery",
-      );
+      if (sessions.length > 0) {
+        this.logger.info(
+          { found: sessions.length },
+          "Found sessions in whatsapp_phone_numbers collection for recovery",
+        );
+      } else {
+        this.logger.info("No sessions found in whatsapp_phone_numbers collection");
+      }
 
       // Fallback: Check users subcollection for backwards compatibility
       if (sessions.length === 0) {
@@ -254,10 +268,14 @@ export class SessionRecoveryService {
           });
         }
 
-        this.logger.info(
-          { found: sessions.length },
-          "Found sessions in users subcollection fallback",
-        );
+        if (sessions.length > 0) {
+          this.logger.info(
+            { found: sessions.length },
+            "Found sessions in users subcollection fallback",
+          );
+        } else {
+          this.logger.info("No sessions found in users subcollection fallback");
+        }
       }
     } catch (error: any) {
       this.logger.error(
@@ -369,8 +387,8 @@ export class SessionRecoveryService {
         if (connected) {
           recovered = true;
 
-          // Update recovery status
-          await this.updateSessionStatus(userId, phoneNumber, "active");
+          // Update recovery status across all collections
+          await this.updateAllSessionStatuses(userId, phoneNumber, "active");
 
           // Update session activity in instance coordinator
           if (this.instanceCoordinator) {
@@ -405,8 +423,8 @@ export class SessionRecoveryService {
     }
 
     if (!recovered) {
-      // Mark session as failed
-      await this.updateSessionStatus(userId, phoneNumber, "error");
+      // Mark session as failed across all collections
+      await this.updateAllSessionStatuses(userId, phoneNumber, "error");
 
       // Release session ownership since recovery failed
       if (this.instanceCoordinator) {
@@ -437,6 +455,82 @@ export class SessionRecoveryService {
       "Proxy reactivation not supported in direct purchase/release model",
     );
     return null;
+  }
+
+  /**
+   * Update session status across all three collections for consistency
+   */
+  private async updateAllSessionStatuses(
+    userId: string,
+    phoneNumber: string,
+    status: string,
+  ): Promise<void> {
+    try {
+      const docId = `${userId}_${phoneNumber}`;
+      const batch = this.firestore.batch();
+
+      // Map recovery service status to collection status
+      let firestoreStatus: string = status;
+      if (status === "active") {
+        firestoreStatus = "connected";
+      } else if (status === "error") {
+        firestoreStatus = "failed";
+      } else if (status === "disconnected") {
+        firestoreStatus = "disconnected";
+      }
+
+      // Update whatsapp_phone_numbers collection
+      const phoneNumRef = this.firestore
+        .collection("whatsapp_phone_numbers")
+        .doc(docId);
+      batch.update(phoneNumRef, {
+        status: firestoreStatus,
+        instance_id: this.instanceId,
+        last_activity: Timestamp.now(),
+        updated_at: Timestamp.now(),
+        recovery_attempted: true,
+        recovery_attempt_time: Timestamp.now(),
+      });
+
+      // Update session_recovery collection
+      const sessionRecoveryRef = this.firestore
+        .collection("session_recovery")
+        .doc(docId);
+      batch.set(
+        sessionRecoveryRef,
+        {
+          userId,
+          phoneNumber,
+          status,
+          instanceId: this.instanceId,
+          lastUpdated: Timestamp.now(),
+        },
+        { merge: true },
+      );
+
+      // Update users subcollection
+      const userSessionRef = this.firestore
+        .collection("users")
+        .doc(userId)
+        .collection("whatsapp_web_sessions")
+        .doc(phoneNumber);
+      batch.update(userSessionRef, {
+        status: firestoreStatus,
+        updated_at: Timestamp.now(),
+      });
+
+      await batch.commit();
+
+      this.logger.info(
+        { userId, phoneNumber, status: firestoreStatus },
+        "Updated session status across all collections",
+      );
+    } catch (error: any) {
+      this.logger.error(
+        { error: error.message, userId, phoneNumber, status },
+        "Failed to update session status across collections",
+      );
+    }
   }
 
   /**
@@ -655,20 +749,45 @@ export class SessionRecoveryService {
         .get();
 
       const batch3 = this.firestore.batch();
+      let markedAsFailed = 0;
+      let preservedForRecovery = 0;
+
       oldPendingSessions.forEach((doc) => {
-        batch3.update(doc.ref, {
-          status: "failed",
-          cleanup_reason: "pending_recovery_timeout",
-          updated_at: Timestamp.now(),
-        });
+        const data = doc.data();
+
+        // Only mark as failed if session is truly unrecoverable
+        if (!data.session_exists && !data.qr_scanned) {
+          batch3.update(doc.ref, {
+            status: "failed",
+            cleanup_reason: "pending_recovery_timeout_no_session_data",
+            updated_at: Timestamp.now(),
+          });
+          markedAsFailed++;
+        } else {
+          // Keep as pending_recovery if session data exists and refresh activity
+          batch3.update(doc.ref, {
+            last_activity: Timestamp.now(), // Update activity to prevent future cleanup
+            cleanup_reason: "preserved_has_session_data",
+            updated_at: Timestamp.now(),
+          });
+          preservedForRecovery++;
+          this.logger.info(
+            { userId: data.user_id, phoneNumber: data.phone_number },
+            "Preserved pending_recovery session with valid data for recovery",
+          );
+        }
         cleanupCount++;
       });
 
       if (oldPendingSessions.size > 0) {
         await batch3.commit();
         this.logger.info(
-          { count: oldPendingSessions.size },
-          "Marked old pending_recovery sessions as failed",
+          {
+            total: oldPendingSessions.size,
+            markedAsFailed,
+            preservedForRecovery
+          },
+          "Processed old pending_recovery sessions",
         );
       }
 

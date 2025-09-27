@@ -88,6 +88,9 @@ export class ConnectionPool extends EventEmitter {
     firestore: Firestore,
     pubsub: PubSub,
     connectionStateManager?: ConnectionStateManager,
+    wsManager?: any,
+    errorHandler?: any,
+    instanceCoordinator?: any,
   ) {
     super();
     this.proxyManager = proxyManager;
@@ -96,9 +99,11 @@ export class ConnectionPool extends EventEmitter {
     this.pubsub = pubsub;
     this.connectionStateManager = connectionStateManager;
     this.mediaService = new MediaService();
-    this.wsManager = new CloudRunWebSocketManager();
-    this.errorHandler = new ErrorHandler();
-    this.instanceCoordinator = new InstanceCoordinator(firestore);
+
+    // Use provided services or create new ones (for backwards compatibility)
+    this.wsManager = wsManager || new CloudRunWebSocketManager();
+    this.errorHandler = errorHandler || new ErrorHandler();
+    this.instanceCoordinator = instanceCoordinator || new InstanceCoordinator(firestore);
 
     // Set up WebSocket manager event listeners
     this.setupWebSocketManagerListeners();

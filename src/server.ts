@@ -80,16 +80,21 @@ const reconnectionService = new ReconnectionService(
   firestore,
 );
 
+// Initialize Cloud Run optimization services BEFORE ConnectionPool
+const instanceCoordinator = new InstanceCoordinator(firestore);
+const webSocketManager = new CloudRunWebSocketManager();
+const errorHandler = new ErrorHandler();
+
 const connectionPool = new ConnectionPool(
   proxyManager,
   sessionManager,
   firestore,
   pubsub,
   connectionStateManager,
+  webSocketManager,
+  errorHandler,
+  instanceCoordinator,
 );
-
-// Initialize Cloud Run optimization services
-const instanceCoordinator = new InstanceCoordinator(firestore);
 
 // Set connection pool reference for recovery service
 if (sessionRecoveryService) {
@@ -99,9 +104,6 @@ if (sessionRecoveryService) {
 
 // Set connection pool reference for reconnection service
 (reconnectionService as any).connectionPool = connectionPool;
-
-const webSocketManager = new CloudRunWebSocketManager();
-const errorHandler = new ErrorHandler();
 // const sessionOptimizer = new CloudRunSessionOptimizer(storage, firestore); // Commented out - not currently used
 
 // Connect services to connection pool events
