@@ -533,63 +533,6 @@ export class SessionRecoveryService {
     }
   }
 
-  /**
-   * Update session recovery status in whatsapp_phone_numbers collection
-   */
-  private async updateSessionStatus(
-    userId: string,
-    phoneNumber: string,
-    status: "active" | "disconnected" | "error",
-  ): Promise<void> {
-    try {
-      const docId = `${userId}_${phoneNumber}`;
-
-      // Map recovery service status to collection status
-      let firestoreStatus: string = status;
-      if (status === "active") {
-        firestoreStatus = "connected";
-      } else if (status === "error") {
-        firestoreStatus = "failed";
-      } else if (status === "disconnected") {
-        firestoreStatus = "disconnected";
-      }
-
-      // Update in main tracking collection
-      await this.firestore
-        .collection("whatsapp_phone_numbers")
-        .doc(docId)
-        .update({
-          status: firestoreStatus,
-          instance_id: this.instanceId,
-          last_activity: Timestamp.now(),
-          updated_at: Timestamp.now(),
-          recovery_attempted: true,
-          recovery_attempt_time: Timestamp.now(),
-        });
-
-      this.logger.info(
-        { userId, phoneNumber, status: firestoreStatus },
-        "Updated session recovery status in whatsapp_phone_numbers collection",
-      );
-
-      // Also maintain backwards compatibility with session_recovery collection
-      await this.firestore.collection("session_recovery").doc(docId).set(
-        {
-          userId,
-          phoneNumber,
-          status,
-          instanceId: this.instanceId,
-          lastUpdated: Timestamp.now(),
-        },
-        { merge: true },
-      );
-    } catch (error: any) {
-      this.logger.error(
-        { error: error.message, userId, phoneNumber, status },
-        "Failed to update session recovery status",
-      );
-    }
-  }
 
   /**
    * Detect country from phone number
