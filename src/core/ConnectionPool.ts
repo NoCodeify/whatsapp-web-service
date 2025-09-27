@@ -763,7 +763,7 @@ export class ConnectionPool extends EventEmitter {
         );
         this.logger.info(
           { userId, phoneNumber },
-          "Session preserved for recovery in whatsapp_phone_numbers collection",
+          "Session preserved for recovery in phone_numbers collection",
         );
       }
 
@@ -1780,7 +1780,7 @@ export class ConnectionPool extends EventEmitter {
       const sessionRef = this.firestore
         .collection("users")
         .doc(userId)
-        .collection("whatsapp_web_sessions")
+        .collection("phone_numbers")
         .doc(phoneNumber);
 
       sessionRef
@@ -3963,7 +3963,7 @@ export class ConnectionPool extends EventEmitter {
       const sessionRef = this.firestore
         .collection("users")
         .doc(userId)
-        .collection("whatsapp_web_sessions")
+        .collection("phone_numbers")
         .doc(phoneNumber);
 
       await sessionRef.set(
@@ -4296,7 +4296,7 @@ export class ConnectionPool extends EventEmitter {
   }
 
   /**
-   * Update session state in whatsapp_phone_numbers collection for recovery
+   * Update session state in phone_numbers collection for recovery
    */
   private async updateSessionForRecovery(
     userId: string,
@@ -4306,7 +4306,7 @@ export class ConnectionPool extends EventEmitter {
   ): Promise<void> {
     try {
       const sessionRef = this.firestore
-        .collection("whatsapp_phone_numbers")
+        .collection("phone_numbers")
         .doc(`${userId}_${phoneNumber}`);
 
       // Check if document already exists to preserve country_code
@@ -4350,7 +4350,7 @@ export class ConnectionPool extends EventEmitter {
 
       this.logger.info(
         { userId, phoneNumber, status, proxyCountry },
-        "Updated session for recovery in whatsapp_phone_numbers collection",
+        "Updated session for recovery in phone_numbers collection",
       );
     } catch (error) {
       this.logger.error(
@@ -4369,7 +4369,7 @@ export class ConnectionPool extends EventEmitter {
   ): Promise<void> {
     try {
       const sessionRef = this.firestore
-        .collection("whatsapp_phone_numbers")
+        .collection("phone_numbers")
         .doc(`${userId}_${phoneNumber}`);
 
       await sessionRef.delete();
@@ -4401,7 +4401,7 @@ export class ConnectionPool extends EventEmitter {
       const cutoffTime = new Date(Date.now() - 24 * 60 * 60 * 1000); // 24 hours
 
       const activeSessionsSnapshot = await this.firestore
-        .collection("whatsapp_phone_numbers")
+        .collection("phone_numbers")
         .where("status", "in", ["connected", "pending_recovery"])
         .where(
           "last_activity",

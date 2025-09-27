@@ -163,33 +163,37 @@ export class ConnectionStateManager extends EventEmitter {
       for (const userDoc of usersSnapshot.docs) {
         const userId = userDoc.id;
 
-        // Get connected sessions for this user
+        // Get connected sessions for this user from unified phone_numbers collection
         const sessionsSnapshot = await userDoc.ref
-          .collection("whatsapp_web_sessions")
-          .where("status", "==", "connected")
+          .collection("phone_numbers")
+          .where("type", "==", "whatsapp_web")
+          .where("whatsapp_web.status", "==", "connected")
           .get();
 
         for (const sessionDoc of sessionsSnapshot.docs) {
-          const phoneNumber = sessionDoc.id;
           const data = sessionDoc.data();
+          const phoneNumber = data.phone_number;
+          const whatsappData = data.whatsapp_web || {};
+
+          if (!phoneNumber) continue;
 
           states.push({
             userId,
             phoneNumber,
-            status: data.status,
-            instanceUrl: data.instance_url || "",
+            status: whatsappData.status || "disconnected",
+            instanceUrl: whatsappData.instance_url || "",
             createdAt: data.created_at?.toDate() || new Date(),
             lastActivity: data.updated_at?.toDate() || new Date(),
             lastHeartbeat:
-              data.last_heartbeat?.toDate() ||
+              whatsappData.last_heartbeat?.toDate() ||
               data.updated_at?.toDate() ||
               new Date(),
-            messageCount: data.message_count || 0,
-            sessionExists: data.session_exists !== false,
-            qrScanned: data.qr_scanned || false,
-            syncCompleted: data.sync_completed || false,
-            errorCount: data.error_count || 0,
-            lastError: data.last_error,
+            messageCount: whatsappData.message_count || 0,
+            sessionExists: whatsappData.session_exists !== false,
+            qrScanned: whatsappData.qr_scanned || false,
+            syncCompleted: whatsappData.sync_completed || false,
+            errorCount: whatsappData.error_count || 0,
+            lastError: whatsappData.last_error,
           } as ConnectionState);
         }
       }
@@ -216,22 +220,26 @@ export class ConnectionStateManager extends EventEmitter {
       for (const userDoc of usersSnapshot.docs) {
         const userId = userDoc.id;
 
-        // Get all whatsapp_web_sessions for this user
+        // Get all WhatsApp sessions for this user from unified phone_numbers collection
         const sessionsSnapshot = await userDoc.ref
-          .collection("whatsapp_web_sessions")
+          .collection("phone_numbers")
+          .where("type", "==", "whatsapp_web")
           .get();
 
         for (const sessionDoc of sessionsSnapshot.docs) {
-          const phoneNumber = sessionDoc.id;
           const data = sessionDoc.data();
+          const phoneNumber = data.phone_number;
+          const whatsappData = data.whatsapp_web || {};
+
+          if (!phoneNumber) continue;
 
           // Skip if explicitly logged out
-          if (data.status === "logged_out") {
+          if (whatsappData.status === "logged_out") {
             this.logger.debug(
               {
                 userId,
                 phoneNumber,
-                status: data.status,
+                status: whatsappData.status,
               },
               "Skipping logged out session",
             );
@@ -243,13 +251,13 @@ export class ConnectionStateManager extends EventEmitter {
             userId,
             phoneNumber,
             status: "connecting", // Mark as recovering
-            instanceUrl: data.instance_url || "",
+            instanceUrl: whatsappData.instance_url || "",
             createdAt: data.created_at?.toDate() || new Date(),
             lastActivity: data.updated_at?.toDate() || new Date(),
             lastHeartbeat: data.updated_at?.toDate() || new Date(),
             messageCount: 0,
             sessionExists: true, // Assume true since we're recovering
-            qrScanned: data.status !== "qr_pending",
+            qrScanned: whatsappData.status !== "qr_pending",
             syncCompleted: false,
             errorCount: 0,
           };
@@ -266,7 +274,7 @@ export class ConnectionStateManager extends EventEmitter {
               phoneNumber,
               previousStatus: data.status,
             },
-            "Recovered connection state from whatsapp_web_sessions",
+            "Recovered connection state from phone_numbers collection",
           );
         }
       }
@@ -417,52 +425,85 @@ export class ConnectionStateManager extends EventEmitter {
    */
   private async persistState(state: ConnectionState) {
     try {
-      // Use the existing whatsapp_web_sessions subcollection
-      const ref = this.firestore
+      // Use the unified phone_numbers collection
+      const phoneNumbersSnapshot = await this.firestore
         .collection("users")
         .doc(state.userId)
-        .collection("whatsapp_web_sessions")
-        .doc(state.phoneNumber);
+        .collection("phone_numbers")
+        .where("phone_number", "==", state.phoneNumber)
+        .where("type", "==", "whatsapp_web")
+        .limit(1)
+        .get();
 
-      const firestoreData: any = {
+      let ref;
+      if (!phoneNumbersSnapshot.empty) {
+        // Update existing phone number document
+        ref = phoneNumbersSnapshot.docs[0].ref;
+      } else {
+        // Create new phone number document
+        ref = this.firestore
+          .collection("users")
+          .doc(state.userId)
+          .collection("phone_numbers")
+          .doc();
+      }
+
+      const whatsappData: any = {
         status: state.status,
         instance_url: state.instanceUrl,
-        updated_at: admin.firestore.Timestamp.now(),
         session_exists: state.sessionExists,
         qr_scanned: state.qrScanned,
         sync_completed: state.syncCompleted,
         message_count: state.messageCount,
         error_count: state.errorCount,
         last_error: state.lastError,
+        last_seen: admin.firestore.Timestamp.now(),
       };
+
+      const firestoreData: any = {
+        phone_number: state.phoneNumber,
+        type: "whatsapp_web",
+        status: "active",
+        updated_at: admin.firestore.Timestamp.now(),
+        last_activity: admin.firestore.Timestamp.now(),
+        whatsapp_web: whatsappData,
+      };
+
+      // Only set created_at if this is a new document
+      if (phoneNumbersSnapshot.empty) {
+        firestoreData.created_at = admin.firestore.Timestamp.now();
+      }
 
       // Add sync progress fields if available
       if (state.syncProgress) {
-        firestoreData.sync_contacts_count = state.syncProgress.contacts;
-        firestoreData.sync_messages_count = state.syncProgress.messages;
-        firestoreData.sync_started_at = admin.firestore.Timestamp.fromDate(
+        whatsappData.sync_contacts_count = state.syncProgress.contacts;
+        whatsappData.sync_messages_count = state.syncProgress.messages;
+        whatsappData.sync_started_at = admin.firestore.Timestamp.fromDate(
           state.syncProgress.startedAt,
         );
 
         if (state.syncProgress.completedAt) {
-          firestoreData.sync_completed_at = admin.firestore.Timestamp.fromDate(
+          whatsappData.sync_completed_at = admin.firestore.Timestamp.fromDate(
             state.syncProgress.completedAt,
           );
         }
 
         // Add sync status based on progress
         if (state.syncCompleted) {
-          firestoreData.sync_status = "completed";
+          whatsappData.sync_status = "completed";
         } else if (state.syncProgress.messages > 0) {
-          firestoreData.sync_status = "importing_messages";
+          whatsappData.sync_status = "importing_messages";
         } else if (state.syncProgress.contacts > 0) {
-          firestoreData.sync_status = "importing_contacts";
+          whatsappData.sync_status = "importing_contacts";
         } else {
-          firestoreData.sync_status = "started";
+          whatsappData.sync_status = "started";
         }
 
-        firestoreData.sync_last_update = admin.firestore.Timestamp.now();
+        whatsappData.sync_last_update = admin.firestore.Timestamp.now();
       }
+
+      // Update the whatsapp_web nested object
+      firestoreData.whatsapp_web = whatsappData;
 
       await ref.set(firestoreData, { merge: true });
     } catch (error) {
@@ -475,16 +516,25 @@ export class ConnectionStateManager extends EventEmitter {
    */
   private async persistHeartbeat(userId: string, phoneNumber: string) {
     try {
-      const ref = this.firestore
+      // Find the phone number document
+      const phoneNumbersSnapshot = await this.firestore
         .collection("users")
         .doc(userId)
-        .collection("whatsapp_web_sessions")
-        .doc(phoneNumber);
+        .collection("phone_numbers")
+        .where("phone_number", "==", phoneNumber)
+        .where("type", "==", "whatsapp_web")
+        .limit(1)
+        .get();
 
-      await ref.update({
-        last_heartbeat: admin.firestore.Timestamp.now(),
-        updated_at: admin.firestore.Timestamp.now(),
-      });
+      if (!phoneNumbersSnapshot.empty) {
+        const ref = phoneNumbersSnapshot.docs[0].ref;
+        await ref.update({
+          "whatsapp_web.last_heartbeat": admin.firestore.Timestamp.now(),
+          "whatsapp_web.last_seen": admin.firestore.Timestamp.now(),
+          updated_at: admin.firestore.Timestamp.now(),
+          last_activity: admin.firestore.Timestamp.now(),
+        });
+      }
     } catch (error) {
       this.logger.error(
         { error, userId, phoneNumber },
@@ -501,36 +551,40 @@ export class ConnectionStateManager extends EventEmitter {
     phoneNumber: string,
   ): Promise<ConnectionState | null> {
     try {
-      const doc = await this.firestore
+      const phoneNumbersSnapshot = await this.firestore
         .collection("users")
         .doc(userId)
-        .collection("whatsapp_web_sessions")
-        .doc(phoneNumber)
+        .collection("phone_numbers")
+        .where("phone_number", "==", phoneNumber)
+        .where("type", "==", "whatsapp_web")
+        .limit(1)
         .get();
 
-      if (!doc.exists) {
+      if (phoneNumbersSnapshot.empty) {
         return null;
       }
 
-      const data = doc.data()!;
+      const data = phoneNumbersSnapshot.docs[0].data();
+      const whatsappData = data.whatsapp_web || {};
 
       return {
         userId,
         phoneNumber,
-        status: data.status || "disconnected",
-        instanceUrl: data.instance_url || "",
+        status: whatsappData.status || "disconnected",
+        instanceUrl: whatsappData.instance_url || "",
         createdAt: data.created_at?.toDate() || new Date(),
         lastActivity: data.updated_at?.toDate() || new Date(),
         lastHeartbeat:
-          data.last_heartbeat?.toDate() ||
+          whatsappData.last_heartbeat?.toDate() ||
+          whatsappData.last_seen?.toDate() ||
           data.updated_at?.toDate() ||
           new Date(),
-        messageCount: data.message_count || 0,
-        sessionExists: data.session_exists !== false,
-        qrScanned: data.qr_scanned || data.status !== "qr_pending",
-        syncCompleted: data.sync_completed || false,
-        errorCount: data.error_count || 0,
-        lastError: data.last_error,
+        messageCount: whatsappData.message_count || 0,
+        sessionExists: whatsappData.session_exists !== false,
+        qrScanned: whatsappData.qr_scanned || whatsappData.status !== "qr_pending",
+        syncCompleted: whatsappData.sync_completed || false,
+        errorCount: whatsappData.error_count || 0,
+        lastError: whatsappData.last_error,
         syncProgress: undefined,
       } as ConnectionState;
     } catch (error) {

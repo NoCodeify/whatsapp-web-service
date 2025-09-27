@@ -385,23 +385,52 @@ export class SessionManager {
             await this.backupToCloudStorage(userId, phoneNumber);
           }
 
-          // Update Firestore with backup status
-          const sessionRef = this.firestore
+          // Update Firestore with backup status in unified phone_numbers collection
+          const phoneNumbersSnapshot = await this.firestore
             .collection("users")
             .doc(userId)
-            .collection("whatsapp_web_sessions")
-            .doc(phoneNumber);
+            .collection("phone_numbers")
+            .where("phone_number", "==", phoneNumber)
+            .where("type", "==", "whatsapp_web")
+            .limit(1)
+            .get();
 
-          await sessionRef.set(
-            {
-              session_backed_up: true,
-              last_backup: new Date(),
-              storage_type: this.storageType,
-              bucket_name: this.bucketName,
+          if (!phoneNumbersSnapshot.empty) {
+            const sessionRef = phoneNumbersSnapshot.docs[0].ref;
+            await sessionRef.update({
+              "whatsapp_web.session_backed_up": true,
+              "whatsapp_web.last_backup": new Date(),
+              "whatsapp_web.storage_type": this.storageType,
+              "whatsapp_web.bucket_name": this.bucketName,
               updated_at: new Date(),
-            },
-            { merge: true },
-          );
+              last_activity: new Date(),
+            });
+          } else {
+            // Create new phone number document if it doesn't exist
+            const sessionRef = this.firestore
+              .collection("users")
+              .doc(userId)
+              .collection("phone_numbers")
+              .doc();
+
+            await sessionRef.set({
+              phone_number: phoneNumber,
+              type: "whatsapp_web",
+              status: "active",
+              created_at: new Date(),
+              updated_at: new Date(),
+              last_activity: new Date(),
+              whatsapp_web: {
+                session_backed_up: true,
+                last_backup: new Date(),
+                storage_type: this.storageType,
+                bucket_name: this.bucketName,
+                status: "initializing",
+                session_exists: false,
+                qr_scanned: false,
+              },
+            });
+          }
 
           this.logger.debug(
             {
@@ -676,14 +705,20 @@ export class SessionManager {
         }
       }
 
-      // Update Firestore
-      const sessionRef = this.firestore
+      // Update Firestore - delete from unified phone_numbers collection
+      const phoneNumbersSnapshot = await this.firestore
         .collection("users")
         .doc(userId)
-        .collection("whatsapp_web_sessions")
-        .doc(phoneNumber);
+        .collection("phone_numbers")
+        .where("phone_number", "==", phoneNumber)
+        .where("type", "==", "whatsapp_web")
+        .limit(1)
+        .get();
 
-      await sessionRef.delete();
+      if (!phoneNumbersSnapshot.empty) {
+        const sessionRef = phoneNumbersSnapshot.docs[0].ref;
+        await sessionRef.delete();
+      }
 
       this.logger.info({ userId, phoneNumber }, "Session deleted");
     } catch (error) {

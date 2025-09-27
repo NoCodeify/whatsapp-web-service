@@ -317,21 +317,30 @@ export class CloudRunSessionOptimizer {
       const sessionKey = this.getSessionKey(userId, phoneNumber);
       this.sessionCache.delete(sessionKey);
 
-      // Delete session metadata from Firestore
+      // Delete backup metadata from unified phone_numbers collection
       try {
-        await this.firestore
-          .collection("session_metadata")
-          .doc(`${userId}-${phoneNumber}`)
-          .delete();
+        const phoneNumbersSnapshot = await this.firestore
+          .collection("users")
+          .doc(userId)
+          .collection("phone_numbers")
+          .where("phone_number", "==", phoneNumber)
+          .where("type", "==", "whatsapp_web")
+          .limit(1)
+          .get();
 
-        this.logger.info(
-          { userId, phoneNumber },
-          "Deleted session metadata from Firestore",
-        );
+        if (!phoneNumbersSnapshot.empty) {
+          await phoneNumbersSnapshot.docs[0].ref.update({
+            "whatsapp_web.backup_metadata": null,
+          });
+          this.logger.info(
+            { userId, phoneNumber },
+            "Deleted backup metadata from phone_numbers collection",
+          );
+        }
       } catch (error) {
         this.logger.warn(
           { userId, phoneNumber, error },
-          "Failed to delete session metadata from Firestore",
+          "Failed to delete backup metadata from phone_numbers collection",
         );
       }
 
@@ -393,22 +402,54 @@ export class CloudRunSessionOptimizer {
     metadata: any,
   ): Promise<void> {
     try {
-      await this.firestore
-        .collection("session_metadata")
-        .doc(`${userId}-${phoneNumber}`)
-        .set(
-          {
-            userId,
-            phoneNumber,
+      // Find the phone number document in unified collection
+      const phoneNumbersSnapshot = await this.firestore
+        .collection("users")
+        .doc(userId)
+        .collection("phone_numbers")
+        .where("phone_number", "==", phoneNumber)
+        .where("type", "==", "whatsapp_web")
+        .limit(1)
+        .get();
+
+      if (!phoneNumbersSnapshot.empty) {
+        // Update backup metadata in existing phone number document
+        await phoneNumbersSnapshot.docs[0].ref.update({
+          "whatsapp_web.backup_metadata": {
             ...metadata,
             updatedAt: new Date(),
           },
-          { merge: true },
-        );
+          updated_at: new Date(),
+          last_activity: new Date(),
+        });
+      } else {
+        // Create new phone number document with backup metadata
+        await this.firestore
+          .collection("users")
+          .doc(userId)
+          .collection("phone_numbers")
+          .add({
+            phone_number: phoneNumber,
+            type: "whatsapp_web",
+            status: "active",
+            created_at: new Date(),
+            updated_at: new Date(),
+            last_activity: new Date(),
+            whatsapp_web: {
+              status: "initializing",
+              session_exists: false,
+              qr_scanned: false,
+              backup_metadata: {
+                ...metadata,
+                updatedAt: new Date(),
+              },
+            },
+          });
+      }
     } catch (error) {
       this.logger.error(
         { userId, phoneNumber, error },
-        "Failed to update session metadata",
+        "Failed to update backup metadata in phone_numbers collection",
       );
     }
   }
