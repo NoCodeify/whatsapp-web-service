@@ -103,7 +103,8 @@ export class ConnectionPool extends EventEmitter {
     // Use provided services or create new ones (for backwards compatibility)
     this.wsManager = wsManager || new CloudRunWebSocketManager();
     this.errorHandler = errorHandler || new ErrorHandler();
-    this.instanceCoordinator = instanceCoordinator || new InstanceCoordinator(firestore);
+    this.instanceCoordinator =
+      instanceCoordinator || new InstanceCoordinator(firestore);
 
     // Set up WebSocket manager event listeners
     this.setupWebSocketManagerListeners();
@@ -616,11 +617,13 @@ export class ConnectionPool extends EventEmitter {
       );
 
       // Create connection with proxy and custom browser name
+      // Skip proxy creation during recovery since SessionRecoveryService already has one
       const socket = await this.sessionManager.createConnection(
         userId,
         phoneNumber,
         proxyCountry,
         browserName,
+        isRecovery, // Skip proxy creation if this is a recovery
       );
 
       const connection: WhatsAppConnection = {
@@ -1094,26 +1097,51 @@ export class ConnectionPool extends EventEmitter {
         }
 
         // Release proxy after successful connection - TCP tunnel persists
-        // Small delay to ensure connection is fully established
+        // 30 second delay to ensure connection is truly stable (past any pairing restarts)
         setTimeout(async () => {
           try {
-            await this.proxyManager.releaseProxy(userId, phoneNumber);
-            connection.proxyReleased = true;
-            this.logger.info(
-              {
-                userId,
-                phoneNumber,
-                proxySessionId: connection.proxySessionId,
-              },
-              "Proxy released after successful connection - tunnel persists for cost optimization",
-            );
+            // Verify connection is still active and stable before releasing proxy
+            const connectionKey = `${userId}:${phoneNumber}`;
+            const currentConnection = this.connections.get(connectionKey);
+
+            if (
+              currentConnection &&
+              currentConnection.state?.connection === "open" &&
+              !currentConnection.proxyReleased &&
+              currentConnection.hasConnectedSuccessfully
+            ) {
+              await this.proxyManager.releaseProxy(userId, phoneNumber);
+              currentConnection.proxyReleased = true;
+
+              this.logger.info(
+                {
+                  userId,
+                  phoneNumber,
+                  proxySessionId: currentConnection.proxySessionId,
+                  delaySeconds: 30,
+                },
+                "Proxy released after stable connection - tunnel persists for cost optimization",
+              );
+            } else {
+              this.logger.debug(
+                {
+                  userId,
+                  phoneNumber,
+                  connectionExists: !!currentConnection,
+                  connectionState: currentConnection?.state?.connection,
+                  alreadyReleased: currentConnection?.proxyReleased,
+                  hasConnected: currentConnection?.hasConnectedSuccessfully,
+                },
+                "Skipping proxy release - connection not stable or already released",
+              );
+            }
           } catch (error) {
             this.logger.warn(
               { userId, phoneNumber, error: (error as any).message },
-              "Failed to release proxy after connection, but connection continues",
+              "Failed to release proxy after stable connection, but connection continues",
             );
           }
-        }, 2000);
+        }, 30000); // 30 seconds to avoid pairing restart issues
 
         await this.updateConnectionStatus(userId, phoneNumber, "connected");
 

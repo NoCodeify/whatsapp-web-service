@@ -108,6 +108,7 @@ export class SessionManager {
     phoneNumber: string,
     proxyCountry?: string,
     browserName?: string,
+    skipProxy?: boolean, // Skip proxy creation during recovery
   ): Promise<WASocket> {
     // Format phone number to ensure consistency
     const formattedPhone = formatPhoneNumberSafe(phoneNumber);
@@ -133,12 +134,14 @@ export class SessionManager {
       // Get or create auth state
       const { state, saveCreds } = await this.getAuthState(userId, phoneNumber);
 
-      // Get proxy agent if configured with country
-      const proxyAgent = await this.proxyManager.createProxyAgent(
-        userId,
-        phoneNumber,
-        proxyCountry,
-      );
+      // Get proxy agent if configured with country (skip during recovery)
+      const proxyAgent = skipProxy
+        ? null
+        : await this.proxyManager.createProxyAgent(
+            userId,
+            phoneNumber,
+            proxyCountry,
+          );
 
       // Get latest Baileys version
       const { version } = await fetchLatestBaileysVersion();

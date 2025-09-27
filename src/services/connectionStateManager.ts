@@ -581,7 +581,8 @@ export class ConnectionStateManager extends EventEmitter {
           new Date(),
         messageCount: whatsappData.message_count || 0,
         sessionExists: whatsappData.session_exists !== false,
-        qrScanned: whatsappData.qr_scanned || whatsappData.status !== "qr_pending",
+        qrScanned:
+          whatsappData.qr_scanned || whatsappData.status !== "qr_pending",
         syncCompleted: whatsappData.sync_completed || false,
         errorCount: whatsappData.error_count || 0,
         lastError: whatsappData.last_error,

@@ -193,7 +193,9 @@ export class SessionRecoveryService {
       // Check for sessions that need recovery from the unified phone_numbers collection
       const cutoffTime = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
-      this.logger.info("Searching for WhatsApp Web sessions to recover from unified phone_numbers collection");
+      this.logger.info(
+        "Searching for WhatsApp Web sessions to recover from unified phone_numbers collection",
+      );
 
       // Get all users to search their phone_numbers subcollection
       const usersSnapshot = await this.firestore.collection("users").get();
@@ -220,13 +222,17 @@ export class SessionRecoveryService {
                 userId,
                 phoneNumber,
                 whatsapp_web_status: data.whatsapp_web_status,
-                whatsapp_web: data.whatsapp_web ? Object.keys(data.whatsapp_web) : 'undefined'
+                whatsapp_web: data.whatsapp_web
+                  ? Object.keys(data.whatsapp_web)
+                  : "undefined",
               },
-              "Found WhatsApp Web phone number record"
+              "Found WhatsApp Web phone number record",
             );
 
             // Check if session has valid data for recovery
-            const hasSessionData = data.whatsapp_web?.session_exists || data.whatsapp_web?.qr_scanned;
+            const hasSessionData =
+              data.whatsapp_web?.session_exists ||
+              data.whatsapp_web?.qr_scanned;
 
             if (!hasSessionData) {
               this.logger.debug(
@@ -237,32 +243,39 @@ export class SessionRecoveryService {
             }
 
             // Include sessions that might need recovery based on status
-            const recoveryStatuses = ["connected", "disconnected", "failed", "initializing"];
+            const recoveryStatuses = [
+              "connected",
+              "disconnected",
+              "failed",
+              "initializing",
+            ];
             if (recoveryStatuses.includes(data.whatsapp_web_status)) {
               sessions.push({
                 userId,
                 phoneNumber,
-                phoneCountry: data.country_code || this.detectCountryFromPhone(phoneNumber),
-                proxyCountry: data.whatsapp_web?.proxy_country || data.proxy_country,
+                phoneCountry:
+                  data.country_code || this.detectCountryFromPhone(phoneNumber),
+                proxyCountry:
+                  data.whatsapp_web?.proxy_country || data.proxy_country,
                 lastConnected: data.updated_at?.toDate() || new Date(),
                 status: "disconnected",
               });
 
               this.logger.debug(
                 { userId, phoneNumber, status: data.whatsapp_web_status },
-                "Added session for recovery"
+                "Added session for recovery",
               );
             } else {
               this.logger.debug(
                 { userId, phoneNumber, status: data.whatsapp_web_status },
-                "Skipping session - status not eligible for recovery"
+                "Skipping session - status not eligible for recovery",
               );
             }
           });
         } catch (userError: any) {
           this.logger.warn(
             { userId, error: userError.message },
-            "Failed to query phone_numbers for user"
+            "Failed to query phone_numbers for user",
           );
         }
       }
@@ -273,9 +286,10 @@ export class SessionRecoveryService {
           "Found sessions in unified phone_numbers collection for recovery",
         );
       } else {
-        this.logger.info("No sessions found in unified phone_numbers collection");
+        this.logger.info(
+          "No sessions found in unified phone_numbers collection",
+        );
       }
-
     } catch (error: any) {
       this.logger.error(
         { error: error.message },
@@ -360,7 +374,7 @@ export class SessionRecoveryService {
             const result = await this.dynamicProxyService.assignProxy(
               userId,
               phoneNumber,
-              phoneCountry || "us",
+              phoneCountry || this.detectCountryFromPhone(phoneNumber),
             );
             proxy = result.proxy;
           }
@@ -369,17 +383,20 @@ export class SessionRecoveryService {
           const result = await this.dynamicProxyService.assignProxy(
             userId,
             phoneNumber,
-            phoneCountry || "us",
+            phoneCountry || this.detectCountryFromPhone(phoneNumber),
           );
           proxy = result.proxy;
         }
 
         // Step 2: Reconnect WhatsApp session
+        // Extract country code from phone number (e.g., "31" from "+31...")
+        const countryCode = phoneNumber.match(/^\+(\d{1,3})/)?.[1];
+
         const connected = await this.connectionPool!.addConnection(
           userId,
           phoneNumber,
-          undefined, // Don't override existing country during recovery
-          undefined, // countryCode
+          phoneCountry, // Pass the actual detected country (e.g., "nl" for Dutch numbers)
+          countryCode, // Pass the country code (e.g., "31" for Netherlands)
           true, // isRecovery flag
         );
 
@@ -487,24 +504,26 @@ export class SessionRecoveryService {
       const currentData = phoneDoc.data() || {};
 
       // Update with new status and recovery information
-      await phoneNumberRef.set({
-        ...currentData,
-        whatsapp_web_status: firestoreStatus,
-        whatsapp_web: {
-          ...(currentData.whatsapp_web || {}),
-          last_activity: Timestamp.now(),
-          instance_id: this.instanceId,
-          recovery_attempted: true,
-          recovery_attempt_time: Timestamp.now(),
+      await phoneNumberRef.set(
+        {
+          ...currentData,
+          whatsapp_web_status: firestoreStatus,
+          whatsapp_web: {
+            ...(currentData.whatsapp_web || {}),
+            last_activity: Timestamp.now(),
+            instance_id: this.instanceId,
+            recovery_attempted: true,
+            recovery_attempt_time: Timestamp.now(),
+          },
+          updated_at: Timestamp.now(),
         },
-        updated_at: Timestamp.now(),
-      }, { merge: true });
+        { merge: true },
+      );
 
       this.logger.info(
         { userId, phoneNumber, status: firestoreStatus },
         "Updated session status in unified phone_numbers collection",
       );
-
     } catch (error: any) {
       this.logger.error(
         { error: error.message, userId, phoneNumber, status },
@@ -512,7 +531,6 @@ export class SessionRecoveryService {
       );
     }
   }
-
 
   /**
    * Detect country from phone number
@@ -708,7 +726,7 @@ export class SessionRecoveryService {
           {
             total: oldPendingSessions.size,
             markedAsFailed,
-            preservedForRecovery
+            preservedForRecovery,
           },
           "Processed old pending_recovery sessions",
         );
