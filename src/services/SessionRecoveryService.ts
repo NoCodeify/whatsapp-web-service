@@ -1,6 +1,5 @@
 import { Firestore, Timestamp } from "@google-cloud/firestore";
 import pino from "pino";
-import { DynamicProxyService } from "./DynamicProxyService";
 import { ConnectionPool } from "../core/ConnectionPool";
 
 export interface RecoverySession {
@@ -24,7 +23,6 @@ export interface RecoveryOptions {
 export class SessionRecoveryService {
   private logger = pino({ name: "SessionRecoveryService" });
   private firestore: Firestore;
-  private dynamicProxyService: DynamicProxyService;
   private connectionPool?: ConnectionPool;
   private instanceCoordinator?: any; // InstanceCoordinator - avoiding circular imports
   private isRecovering = false;
@@ -41,13 +39,8 @@ export class SessionRecoveryService {
     ],
   };
 
-  constructor(
-    firestore: Firestore,
-    dynamicProxyService: DynamicProxyService,
-    instanceId?: string,
-  ) {
+  constructor(firestore: Firestore, instanceId?: string) {
     this.firestore = firestore;
-    this.dynamicProxyService = dynamicProxyService;
     this.instanceId =
       instanceId ||
       `instance_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -357,38 +350,8 @@ export class SessionRecoveryService {
       attempts++;
 
       try {
-        // Step 1: Reactivate or get new proxy
-        let proxy;
-
-        if (proxyIp) {
-          // Try to reactivate existing proxy
-          proxy = await this.reactivateProxy(proxyIp, userId, phoneNumber);
-
-          if (!proxy) {
-            // Proxy no longer available, get new one for phone's country
-            this.logger.info(
-              { proxyIp, phoneCountry },
-              "Original proxy unavailable, purchasing new one for phone's country",
-            );
-
-            const result = await this.dynamicProxyService.assignProxy(
-              userId,
-              phoneNumber,
-              phoneCountry || this.detectCountryFromPhone(phoneNumber),
-            );
-            proxy = result.proxy;
-          }
-        } else {
-          // No previous proxy, assign new one for phone's country
-          const result = await this.dynamicProxyService.assignProxy(
-            userId,
-            phoneNumber,
-            phoneCountry || this.detectCountryFromPhone(phoneNumber),
-          );
-          proxy = result.proxy;
-        }
-
-        // Step 2: Reconnect WhatsApp session
+        // ProxyManager will handle proxy assignment through getProxyConfig
+        // This ensures activeProxies Map is populated for proper cleanup
         // Extract country code from phone number (e.g., "31" from "+31...")
         const countryCode = phoneNumber.match(/^\+(\d{1,3})/)?.[1];
 
@@ -397,7 +360,7 @@ export class SessionRecoveryService {
           phoneNumber,
           phoneCountry, // Pass the actual detected country (e.g., "nl" for Dutch numbers)
           countryCode, // Pass the country code (e.g., "31" for Netherlands)
-          true, // isRecovery flag
+          false, // Let ProxyManager handle proxy purchase to populate activeProxies
         );
 
         if (connected) {
@@ -415,7 +378,7 @@ export class SessionRecoveryService {
           }
 
           this.logger.info(
-            { userId, phoneNumber, attempts, proxyIp: proxy.ip },
+            { userId, phoneNumber, attempts },
             "Session recovered successfully",
           );
         } else {
@@ -455,22 +418,6 @@ export class SessionRecoveryService {
         "Failed to recover session after all attempts",
       );
     }
-  }
-
-  /**
-   * Reactivate an existing proxy (no longer supported - always purchase new)
-   */
-  private async reactivateProxy(
-    _proxyIp: string,
-    userId: string,
-    phoneNumber: string,
-  ): Promise<any | null> {
-    // No proxy tracking - always purchase new proxies
-    this.logger.debug(
-      { userId, phoneNumber },
-      "Proxy reactivation not supported in direct purchase/release model",
-    );
-    return null;
   }
 
   /**

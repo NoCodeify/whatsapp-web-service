@@ -64,7 +64,6 @@ let sessionRecoveryService: SessionRecoveryService | undefined;
 dynamicProxyService = new DynamicProxyService();
 sessionRecoveryService = new SessionRecoveryService(
   firestore,
-  dynamicProxyService,
   `instance_${process.env.HOSTNAME || "unknown"}_${Date.now()}`,
 );
 
