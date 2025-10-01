@@ -440,12 +440,12 @@ export class ConnectionStateManager extends EventEmitter {
         // Update existing phone number document
         ref = phoneNumbersSnapshot.docs[0].ref;
       } else {
-        // Create new phone number document
+        // Create new phone number document using phone number as ID (consistent with Cloud Function)
         ref = this.firestore
           .collection("users")
           .doc(state.userId)
           .collection("phone_numbers")
-          .doc();
+          .doc(state.phoneNumber);
       }
 
       const whatsappData: any = {
