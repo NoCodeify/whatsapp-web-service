@@ -2175,7 +2175,7 @@ export class ConnectionPool extends EventEmitter {
         // Create new contact for manual conversation
         const newContactData = {
           created_at: currentTimestamp,
-          email: "",
+          email: "unknown@unknown.com",
           first_name: "Unknown",
           last_name: "Unknown",
           phone_number: formattedToPhone,
@@ -2191,6 +2191,7 @@ export class ConnectionPool extends EventEmitter {
 
           has_had_activity: true,
           bot_message_count: 0,
+          chat_window_closes_at: currentTimestamp,
           is_chat_window_open: true,
           mark_chat_closed: false,
           follow_up_exhausted: false,
@@ -3540,7 +3541,7 @@ export class ConnectionPool extends EventEmitter {
 
           const newContactData = {
             created_at: currentTimestamp,
-            email: "",
+            email: "unknown@unknown.com",
             first_name: firstName && firstName !== "" ? firstName : "Unknown",
             last_name: lastName && lastName !== "" ? lastName : "Unknown",
             phone_number: formattedContactPhone,
@@ -3550,6 +3551,7 @@ export class ConnectionPool extends EventEmitter {
             is_bot_active: false,
             has_had_activity: true,
             bot_message_count: 0,
+            chat_window_closes_at: currentTimestamp,
             is_chat_window_open: true,
             mark_chat_closed: false,
             bot_currently_responding: false,
