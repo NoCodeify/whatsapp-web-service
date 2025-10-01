@@ -609,12 +609,8 @@ export class ConnectionPool extends EventEmitter {
         }
       }
 
-      // Create or update phone number record
-      await this.createPhoneNumberRecord(
-        userId,
-        phoneNumber,
-        countryCode || proxyCountry,
-      );
+      // Phone number record should already be created by Cloud Function
+      // before calling the WhatsApp Web Service
 
       // Create connection with proxy and custom browser name
       // Skip proxy creation during recovery since SessionRecoveryService already has one
@@ -3918,65 +3914,6 @@ export class ConnectionPool extends EventEmitter {
 
     // Reconnect with new proxy
     await this.reconnect(userId, phoneNumber);
-  }
-
-  /**
-   * Create or update phone number record
-   */
-  private async createPhoneNumberRecord(
-    userId: string,
-    phoneNumber: string,
-    countryCode?: string,
-  ) {
-    try {
-      const phoneNumberRef = this.firestore
-        .collection("users")
-        .doc(userId)
-        .collection("phone_numbers")
-        .doc(phoneNumber);
-
-      const phoneDoc = await phoneNumberRef.get();
-
-      if (!phoneDoc.exists) {
-        // Create new phone number record for WhatsApp Web
-        await phoneNumberRef.set({
-          phone_number: phoneNumber,
-          country_code: countryCode || "",
-          is_active: true,
-          purchase_date: new Date(),
-          type: "whatsapp_web",
-          whatsapp_web_status: "initializing",
-          messaging_limit: 25, // Default limit for WhatsApp Web
-          messages_sent: 0,
-          credits_used: 0,
-          created_at: new Date(),
-          updated_at: new Date(),
-        });
-
-        this.logger.info(
-          { userId, phoneNumber, countryCode },
-          "Created phone number record for WhatsApp Web",
-        );
-      } else {
-        // Update existing record
-        await phoneNumberRef.update({
-          whatsapp_web_status: "initializing",
-          country_code: countryCode || phoneDoc.data()?.country_code || "",
-          updated_at: new Date(),
-        });
-
-        this.logger.info(
-          { userId, phoneNumber },
-          "Updated existing phone number record",
-        );
-      }
-    } catch (error) {
-      this.logger.error(
-        { userId, phoneNumber, error },
-        "Failed to create/update phone number record",
-      );
-      // Don't throw - allow connection to proceed even if record creation fails
-    }
   }
 
   /**
