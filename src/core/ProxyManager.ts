@@ -454,6 +454,39 @@ export class ProxyManager {
       // Try DynamicProxyService first (direct purchase/release)
       if (this.dynamicProxyService) {
         try {
+          // Check if proxy already assigned in this process (e.g., during expected restart)
+          const connectionKey = `${userId}:${phoneNumber}`;
+          const existingProxy = this.activeProxies.get(connectionKey);
+
+          if (existingProxy) {
+            // Reuse existing proxy from same process
+            const sessionId = `${userId}_${phoneNumber}_${existingProxy.ip}`;
+
+            this.logger.info(
+              {
+                userId,
+                phoneNumber,
+                ip: existingProxy.ip,
+                country: existingProxy.country,
+              },
+              "Reusing existing proxy from activeProxies (same process)",
+            );
+
+            // Return config using existing proxy
+            return {
+              host: this.brightDataConfig.host,
+              port: this.brightDataConfig.port,
+              username: `brd-customer-${this.brightDataConfig.customerID}-zone-${this.brightDataConfig.zone}-session-${sessionId}`,
+              password: this.brightDataConfig.zonePassword,
+              sessionId: sessionId,
+              type: "isp" as const,
+              country: existingProxy.country,
+              ip: existingProxy.ip,
+              proxyPort: this.brightDataConfig.port,
+            };
+          }
+
+          // No existing proxy found, purchase new one
           const requestedCountry = country || "us"; // Default to US if no country specified
           const dynamicResult = await this.dynamicProxyService.assignProxy(
             userId,
