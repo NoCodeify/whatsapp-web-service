@@ -472,8 +472,8 @@ export class ProxyManager {
               "Reusing existing proxy from activeProxies (same process)",
             );
 
-            // Return config using existing proxy
-            return {
+            // Return config using existing proxy (matches format from line 502)
+            const reusedConfig: any = {
               host: this.brightDataConfig.host,
               port: this.brightDataConfig.port,
               username: `brd-customer-${this.brightDataConfig.customerID}-zone-${this.brightDataConfig.zone}-session-${sessionId}`,
@@ -484,6 +484,7 @@ export class ProxyManager {
               ip: existingProxy.ip,
               proxyPort: this.brightDataConfig.port,
             };
+            return reusedConfig;
           }
 
           // No existing proxy found, purchase new one
