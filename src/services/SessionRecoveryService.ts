@@ -241,6 +241,7 @@ export class SessionRecoveryService {
               "disconnected",
               "failed",
               "initializing",
+              "pending_recovery", // Sessions marked for recovery during graceful shutdown
             ];
             if (recoveryStatuses.includes(data.whatsapp_web_status)) {
               sessions.push({

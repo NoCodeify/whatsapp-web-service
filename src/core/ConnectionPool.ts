@@ -797,7 +797,7 @@ export class ConnectionPool extends EventEmitter {
         );
         this.logger.info(
           { userId, phoneNumber },
-          "Session preserved for recovery in phone_numbers collection",
+          "Session preserved for recovery in users subcollection",
         );
       }
 
@@ -4355,6 +4355,7 @@ export class ConnectionPool extends EventEmitter {
           last_activity: admin.firestore.Timestamp.now(),
           instance_id: this.config.instanceUrl,
           updated_at: admin.firestore.Timestamp.now(),
+          session_exists: true, // Required by SessionRecoveryService to identify recoverable sessions
         },
         type: "whatsapp_web",
         updated_at: admin.firestore.Timestamp.now(),
