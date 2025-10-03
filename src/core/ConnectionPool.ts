@@ -3985,7 +3985,7 @@ export class ConnectionPool extends EventEmitter {
   }
 
   /**
-   * Update phone number status for UI - updates the whatsapp_web_status field that UI checks
+   * Update phone number status - writes to nested whatsapp_web.status field
    */
   private async updatePhoneNumberStatus(
     userId: string,
@@ -4001,15 +4001,18 @@ export class ConnectionPool extends EventEmitter {
 
       await phoneNumberRef.set(
         {
-          whatsapp_web_status: status,
-          updated_at: new Date(),
+          whatsapp_web: {
+            status,
+            last_updated: admin.firestore.Timestamp.now(),
+          },
+          updated_at: admin.firestore.Timestamp.now(),
         },
         { merge: true },
       );
 
       this.logger.info(
         { userId, phoneNumber, status },
-        "Updated phone number status for UI",
+        "Updated phone number status in nested structure",
       );
     } catch (error) {
       this.logger.error(
@@ -4348,32 +4351,47 @@ export class ConnectionPool extends EventEmitter {
       const existingDoc = await sessionRef.get();
       const existingData = existingDoc.exists ? existingDoc.data() : {};
 
+      // Determine if instance is localhost
+      const isLocalhost =
+        this.config.instanceUrl.includes("localhost") ||
+        this.config.instanceUrl.includes("127.0.0.1");
+
+      // Build session data with nested whatsapp_web structure
+      const whatsappWebData: any = {
+        status,
+        last_activity: admin.firestore.Timestamp.now(),
+        last_updated: admin.firestore.Timestamp.now(),
+        instance_url: this.config.instanceUrl,
+        is_localhost: isLocalhost,
+        session_id: `${userId}-${phoneNumber}`,
+        session_exists: true, // Required by SessionRecoveryService to identify recoverable sessions
+      };
+
+      // Add proxy country if available
+      if (proxyCountry) {
+        whatsappWebData.proxy_country = proxyCountry;
+      }
+
+      // Detect phone's country from number
+      const phoneCountry =
+        existingData?.whatsapp_web?.phone_country ||
+        existingData?.country_code ||
+        this.detectCountryFromPhone(phoneNumber);
+
+      if (phoneCountry) {
+        whatsappWebData.phone_country = phoneCountry;
+      }
+
       const sessionData: any = {
         phone_number: phoneNumber,
-        whatsapp_web: {
-          status,
-          last_activity: admin.firestore.Timestamp.now(),
-          instance_id: this.config.instanceUrl,
-          updated_at: admin.firestore.Timestamp.now(),
-          session_exists: true, // Required by SessionRecoveryService to identify recoverable sessions
-        },
+        whatsapp_web: whatsappWebData,
         type: "whatsapp_web",
         updated_at: admin.firestore.Timestamp.now(),
       };
 
-      // Update proxy country if available
-      if (proxyCountry) {
-        sessionData.proxy_country = proxyCountry;
-      }
-
-      // Only set country_code if it doesn't already exist (preserve phone's country)
-      if (!existingData?.country_code && proxyCountry) {
-        sessionData.country_code = proxyCountry;
-        this.logger.info(
-          { userId, phoneNumber, country_code: proxyCountry },
-          "Setting initial country_code for new session",
-        );
-      } else if (existingData?.country_code) {
+      // Preserve country_code at root level for backward compatibility
+      if (existingData?.country_code) {
+        sessionData.country_code = existingData.country_code;
         this.logger.debug(
           {
             userId,
@@ -4382,6 +4400,12 @@ export class ConnectionPool extends EventEmitter {
             proxy_country: proxyCountry,
           },
           "Preserving existing country_code during session update",
+        );
+      } else if (phoneCountry) {
+        sessionData.country_code = phoneCountry;
+        this.logger.info(
+          { userId, phoneNumber, country_code: phoneCountry },
+          "Setting initial country_code for new session",
         );
       }
 
@@ -4487,5 +4511,38 @@ export class ConnectionPool extends EventEmitter {
       );
       return [];
     }
+  }
+
+  /**
+   * Detect country from phone number
+   */
+  private detectCountryFromPhone(phoneNumber: string): string {
+    // Simple country detection based on prefix
+    const countryPrefixes: Record<string, string> = {
+      "1": "us", // USA/Canada
+      "44": "gb", // UK
+      "49": "de", // Germany
+      "33": "fr", // France
+      "31": "nl", // Netherlands
+      "32": "be", // Belgium
+      "91": "in", // India
+      "86": "cn", // China
+      "81": "jp", // Japan
+      "82": "kr", // South Korea
+      "61": "au", // Australia
+      "64": "nz", // New Zealand
+      "55": "br", // Brazil
+      "52": "mx", // Mexico
+    };
+
+    const cleaned = phoneNumber.replace(/\D/g, "");
+
+    for (const [prefix, country] of Object.entries(countryPrefixes)) {
+      if (cleaned.startsWith(prefix)) {
+        return country;
+      }
+    }
+
+    return "us"; // Default fallback
   }
 }

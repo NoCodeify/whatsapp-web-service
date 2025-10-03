@@ -183,96 +183,95 @@ export class SessionRecoveryService {
     const sessions: RecoverySession[] = [];
 
     try {
-      // Check for sessions that need recovery from the unified phone_numbers collection
-      const cutoffTime = new Date(Date.now() - 24 * 60 * 60 * 1000);
-
       this.logger.info(
-        "Searching for WhatsApp Web sessions to recover from unified phone_numbers collection",
+        "Searching for WhatsApp Web sessions to recover using collectionGroup query",
       );
 
-      // Get all users to search their phone_numbers subcollection
-      const usersSnapshot = await this.firestore.collection("users").get();
+      // Use collectionGroup to query ALL phone_numbers subcollections at once
+      // This is dramatically more efficient than looping through users (1 read vs N reads)
+      const phoneNumbersSnapshot = await this.firestore
+        .collectionGroup("phone_numbers")
+        .where("type", "==", "whatsapp_web")
+        .get();
 
-      for (const userDoc of usersSnapshot.docs) {
-        const userId = userDoc.id;
+      phoneNumbersSnapshot.forEach((phoneDoc) => {
+        const data = phoneDoc.data();
+        const phoneNumber = phoneDoc.id;
+        // Extract userId from document path: users/{userId}/phone_numbers/{phoneNumber}
+        const userId = phoneDoc.ref.parent.parent?.id;
 
-        try {
-          // Query phone_numbers subcollection for WhatsApp Web sessions
-          const phoneNumbersSnapshot = await this.firestore
-            .collection("users")
-            .doc(userId)
-            .collection("phone_numbers")
-            .where("type", "==", "whatsapp_web")
-            .where("updated_at", ">=", Timestamp.fromDate(cutoffTime))
-            .get();
-
-          phoneNumbersSnapshot.forEach((phoneDoc) => {
-            const data = phoneDoc.data();
-            const phoneNumber = phoneDoc.id;
-
-            this.logger.debug(
-              {
-                userId,
-                phoneNumber,
-                whatsapp_web_status: data.whatsapp_web_status,
-                whatsapp_web: data.whatsapp_web
-                  ? Object.keys(data.whatsapp_web)
-                  : "undefined",
-              },
-              "Found WhatsApp Web phone number record",
-            );
-
-            // Check if session has valid data for recovery
-            const hasSessionData =
-              data.whatsapp_web?.session_exists ||
-              data.whatsapp_web?.qr_scanned;
-
-            if (!hasSessionData) {
-              this.logger.debug(
-                { userId, phoneNumber },
-                "Skipping session recovery - no valid session data or QR scan",
-              );
-              return;
-            }
-
-            // Include sessions that might need recovery based on status
-            const recoveryStatuses = [
-              "connected",
-              "disconnected",
-              "failed",
-              "initializing",
-              "pending_recovery", // Sessions marked for recovery during graceful shutdown
-            ];
-            if (recoveryStatuses.includes(data.whatsapp_web_status)) {
-              sessions.push({
-                userId,
-                phoneNumber,
-                phoneCountry:
-                  data.country_code || this.detectCountryFromPhone(phoneNumber),
-                proxyCountry:
-                  data.whatsapp_web?.proxy_country || data.proxy_country,
-                lastConnected: data.updated_at?.toDate() || new Date(),
-                status: "disconnected",
-              });
-
-              this.logger.debug(
-                { userId, phoneNumber, status: data.whatsapp_web_status },
-                "Added session for recovery",
-              );
-            } else {
-              this.logger.debug(
-                { userId, phoneNumber, status: data.whatsapp_web_status },
-                "Skipping session - status not eligible for recovery",
-              );
-            }
-          });
-        } catch (userError: any) {
+        if (!userId) {
           this.logger.warn(
-            { userId, error: userError.message },
-            "Failed to query phone_numbers for user",
+            { phoneNumber },
+            "Could not extract userId from document path",
+          );
+          return;
+        }
+
+        this.logger.debug(
+          {
+            userId,
+            phoneNumber,
+            status: data.whatsapp_web?.status,
+            whatsapp_web: data.whatsapp_web
+              ? Object.keys(data.whatsapp_web)
+              : "undefined",
+          },
+          "Found WhatsApp Web phone number record",
+        );
+
+        // Check if session has valid data for recovery
+        const hasSessionData =
+          data.whatsapp_web?.session_exists ||
+          data.whatsapp_web?.qr_scanned;
+
+        if (!hasSessionData) {
+          this.logger.debug(
+            { userId, phoneNumber },
+            "Skipping session recovery - no valid session data or QR scan",
+          );
+          return;
+        }
+
+        // Include sessions that might need recovery based on status
+        const recoveryStatuses = [
+          "connected",
+          "disconnected",
+          "failed",
+          "initializing",
+          "pending_recovery", // Sessions marked for recovery during graceful shutdown
+        ];
+
+        // Read from nested whatsapp_web.status (single source of truth)
+        const sessionStatus = data.whatsapp_web?.status;
+
+        if (recoveryStatuses.includes(sessionStatus)) {
+          sessions.push({
+            userId,
+            phoneNumber,
+            phoneCountry:
+              data.whatsapp_web?.phone_country ||
+              data.country_code ||
+              this.detectCountryFromPhone(phoneNumber),
+            proxyCountry: data.whatsapp_web?.proxy_country,
+            lastConnected:
+              data.whatsapp_web?.last_updated?.toDate() ||
+              data.updated_at?.toDate() ||
+              new Date(),
+            status: "disconnected",
+          });
+
+          this.logger.debug(
+            { userId, phoneNumber, status: sessionStatus },
+            "Added session for recovery",
+          );
+        } else {
+          this.logger.debug(
+            { userId, phoneNumber, status: sessionStatus },
+            "Skipping session - status not eligible for recovery",
           );
         }
-      }
+      });
 
       if (sessions.length > 0) {
         this.logger.info(
@@ -451,14 +450,15 @@ export class SessionRecoveryService {
       const phoneDoc = await phoneNumberRef.get();
       const currentData = phoneDoc.data() || {};
 
-      // Update with new status and recovery information
+      // Update with new status and recovery information in nested structure
       await phoneNumberRef.set(
         {
           ...currentData,
-          whatsapp_web_status: firestoreStatus,
           whatsapp_web: {
             ...(currentData.whatsapp_web || {}),
+            status: firestoreStatus, // Single source of truth for status
             last_activity: Timestamp.now(),
+            last_updated: Timestamp.now(),
             instance_id: this.instanceId,
             recovery_attempted: true,
             recovery_attempt_time: Timestamp.now(),
