@@ -151,7 +151,16 @@ export class ConnectionPool extends EventEmitter {
           // Attempt reconnection after a short delay
           setTimeout(async () => {
             try {
-              await this.addConnection(userId, phoneNumber);
+              // Get stored country from database
+              const storedCountry = await this.getStoredCountry(
+                userId,
+                phoneNumber,
+              );
+              await this.addConnection(
+                userId,
+                phoneNumber,
+                storedCountry, // Use stored country from DB
+              );
             } catch (reconnectError) {
               this.logger.error(
                 { userId, phoneNumber, error: reconnectError },
@@ -179,9 +188,20 @@ export class ConnectionPool extends EventEmitter {
 
         if (userId && phoneNumber) {
           try {
+            // Get stored country from database
+            const storedCountry = await this.getStoredCountry(
+              userId,
+              phoneNumber,
+            );
+
             // Attempt to reconnect with retry logic
             await this.errorHandler.executeWithRetry(
-              () => this.addConnection(userId, phoneNumber),
+              () =>
+                this.addConnection(
+                  userId,
+                  phoneNumber,
+                  storedCountry, // Use stored country from DB
+                ),
               {
                 userId,
                 phoneNumber,
@@ -215,8 +235,19 @@ export class ConnectionPool extends EventEmitter {
             await this.removeConnection(userId, phoneNumber);
             await this.sleep(5000); // Wait before reconnecting
 
+            // Get stored country from database
+            const storedCountry = await this.getStoredCountry(
+              userId,
+              phoneNumber,
+            );
+
             await this.errorHandler.executeWithRetry(
-              () => this.addConnection(userId, phoneNumber),
+              () =>
+                this.addConnection(
+                  userId,
+                  phoneNumber,
+                  storedCountry, // Use stored country from DB
+                ),
               {
                 userId,
                 phoneNumber,
@@ -438,11 +469,15 @@ export class ConnectionPool extends EventEmitter {
         );
 
         try {
+          // Use stored country from Firestore if available, otherwise undefined
+          const storedCountry =
+            firestoreState?.proxy_country || firestoreState?.country_code;
+
           // Attempt recovery using session files
           const success = await this.addConnection(
             userId,
             phoneNumber,
-            undefined, // No proxy country for recovery
+            storedCountry, // Use stored country from DB (e.g., "nl" for Dutch numbers)
             undefined, // No country code needed
             true, // Mark as recovery
           );
@@ -4078,6 +4113,37 @@ export class ConnectionPool extends EventEmitter {
     return this.connections.size < this.config.maxConnections;
   }
 
+  /**
+   * Get stored country for a phone number from Firestore
+   * Reads from users/{userId}/phone_numbers subcollection
+   */
+  private async getStoredCountry(
+    userId: string,
+    phoneNumber: string,
+  ): Promise<string | undefined> {
+    try {
+      const phoneDoc = await this.firestore
+        .collection("users")
+        .doc(userId)
+        .collection("phone_numbers")
+        .doc(phoneNumber)
+        .get();
+
+      if (!phoneDoc.exists) {
+        return undefined;
+      }
+
+      const data = phoneDoc.data();
+      return data?.proxy_country || data?.country_code;
+    } catch (error) {
+      this.logger.debug(
+        { error, userId, phoneNumber },
+        "Failed to get stored country from Firestore",
+      );
+      return undefined;
+    }
+  }
+
   private getMemoryUsage(): number {
     const memUsage = process.memoryUsage();
 
@@ -4263,7 +4329,7 @@ export class ConnectionPool extends EventEmitter {
   }
 
   /**
-   * Update session state in phone_numbers collection for recovery
+   * Update session state in users/{userId}/phone_numbers subcollection for recovery
    */
   private async updateSessionForRecovery(
     userId: string,
@@ -4273,19 +4339,24 @@ export class ConnectionPool extends EventEmitter {
   ): Promise<void> {
     try {
       const sessionRef = this.firestore
+        .collection("users")
+        .doc(userId)
         .collection("phone_numbers")
-        .doc(`${userId}_${phoneNumber}`);
+        .doc(phoneNumber);
 
       // Check if document already exists to preserve country_code
       const existingDoc = await sessionRef.get();
       const existingData = existingDoc.exists ? existingDoc.data() : {};
 
       const sessionData: any = {
-        user_id: userId,
         phone_number: phoneNumber,
-        status,
-        last_activity: admin.firestore.Timestamp.now(),
-        instance_id: this.config.instanceUrl,
+        whatsapp_web: {
+          status,
+          last_activity: admin.firestore.Timestamp.now(),
+          instance_id: this.config.instanceUrl,
+          updated_at: admin.firestore.Timestamp.now(),
+        },
+        type: "whatsapp_web",
         updated_at: admin.firestore.Timestamp.now(),
       };
 
@@ -4317,7 +4388,7 @@ export class ConnectionPool extends EventEmitter {
 
       this.logger.info(
         { userId, phoneNumber, status, proxyCountry },
-        "Updated session for recovery in phone_numbers collection",
+        "Updated session for recovery in users subcollection",
       );
     } catch (error) {
       this.logger.error(
@@ -4336,8 +4407,10 @@ export class ConnectionPool extends EventEmitter {
   ): Promise<void> {
     try {
       const sessionRef = this.firestore
+        .collection("users")
+        .doc(userId)
         .collection("phone_numbers")
-        .doc(`${userId}_${phoneNumber}`);
+        .doc(phoneNumber);
 
       await sessionRef.delete();
 
@@ -4354,7 +4427,7 @@ export class ConnectionPool extends EventEmitter {
   }
 
   /**
-   * Get active sessions from recovery collection
+   * Get active sessions from users/{userId}/phone_numbers subcollection using collection group
    */
   async getActiveSessionsForRecovery(): Promise<
     Array<{
@@ -4367,11 +4440,13 @@ export class ConnectionPool extends EventEmitter {
     try {
       const cutoffTime = new Date(Date.now() - 24 * 60 * 60 * 1000); // 24 hours
 
+      // Use collection group to query across all users' phone_numbers subcollections
       const activeSessionsSnapshot = await this.firestore
-        .collection("phone_numbers")
-        .where("status", "in", ["connected", "pending_recovery"])
+        .collectionGroup("phone_numbers")
+        .where("type", "==", "whatsapp_web")
+        .where("whatsapp_web.status", "in", ["connected", "pending_recovery"])
         .where(
-          "last_activity",
+          "whatsapp_web.last_activity",
           ">=",
           admin.firestore.Timestamp.fromDate(cutoffTime),
         )
@@ -4385,12 +4460,17 @@ export class ConnectionPool extends EventEmitter {
       }> = [];
       activeSessionsSnapshot.forEach((doc) => {
         const data = doc.data();
-        sessions.push({
-          userId: data.user_id,
-          phoneNumber: data.phone_number,
-          proxyCountry: data.proxy_country || data.country_code,
-          lastActivity: data.last_activity?.toDate() || new Date(),
-        });
+        // Extract userId from parent document path: users/{userId}/phone_numbers/{phoneNumber}
+        const userId = doc.ref.parent.parent?.id;
+        if (userId) {
+          sessions.push({
+            userId,
+            phoneNumber: data.phone_number,
+            proxyCountry: data.proxy_country || data.country_code,
+            lastActivity:
+              data.whatsapp_web?.last_activity?.toDate() || new Date(),
+          });
+        }
       });
 
       this.logger.info(

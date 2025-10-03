@@ -584,10 +584,15 @@ export class SessionRecoveryService {
 
       let cleanupCount = 0;
 
-      // Clean up very old sessions (regardless of status)
+      // Clean up very old sessions (regardless of status) from users subcollection
       const staleSessions = await this.firestore
-        .collection("phone_numbers")
-        .where("last_activity", "<", Timestamp.fromDate(staleThreshold))
+        .collectionGroup("phone_numbers")
+        .where("type", "==", "whatsapp_web")
+        .where(
+          "whatsapp_web.last_activity",
+          "<",
+          Timestamp.fromDate(staleThreshold),
+        )
         .get();
 
       const batch1 = this.firestore.batch();
@@ -604,10 +609,11 @@ export class SessionRecoveryService {
         );
       }
 
-      // Clean up failed sessions older than 24 hours
+      // Clean up failed sessions older than 24 hours from users subcollection
       const failedSessions = await this.firestore
-        .collection("phone_numbers")
-        .where("status", "==", "failed")
+        .collectionGroup("phone_numbers")
+        .where("type", "==", "whatsapp_web")
+        .where("whatsapp_web.status", "==", "failed")
         .where("updated_at", "<", Timestamp.fromDate(failedThreshold))
         .get();
 
@@ -627,10 +633,11 @@ export class SessionRecoveryService {
 
       // Clean up pending_recovery sessions that are older than 6 hours (likely from failed deployments)
       const oldPendingSessions = await this.firestore
-        .collection("phone_numbers")
-        .where("status", "==", "pending_recovery")
+        .collectionGroup("phone_numbers")
+        .where("type", "==", "whatsapp_web")
+        .where("whatsapp_web.status", "==", "pending_recovery")
         .where(
-          "last_activity",
+          "whatsapp_web.last_activity",
           "<",
           Timestamp.fromDate(new Date(now.getTime() - 6 * 60 * 60 * 1000)),
         )
@@ -646,7 +653,7 @@ export class SessionRecoveryService {
         // Only mark as failed if session is truly unrecoverable
         if (!data.session_exists && !data.qr_scanned) {
           batch3.update(doc.ref, {
-            status: "failed",
+            "whatsapp_web.status": "failed",
             cleanup_reason: "pending_recovery_timeout_no_session_data",
             updated_at: Timestamp.now(),
           });
@@ -654,13 +661,15 @@ export class SessionRecoveryService {
         } else {
           // Keep as pending_recovery if session data exists and refresh activity
           batch3.update(doc.ref, {
-            last_activity: Timestamp.now(), // Update activity to prevent future cleanup
+            "whatsapp_web.last_activity": Timestamp.now(), // Update activity to prevent future cleanup
             cleanup_reason: "preserved_has_session_data",
             updated_at: Timestamp.now(),
           });
           preservedForRecovery++;
+          // Extract userId from parent document path
+          const userId = doc.ref.parent.parent?.id;
           this.logger.info(
-            { userId: data.user_id, phoneNumber: data.phone_number },
+            { userId, phoneNumber: data.phone_number },
             "Preserved pending_recovery session with valid data for recovery",
           );
         }

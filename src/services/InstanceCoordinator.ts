@@ -380,7 +380,7 @@ export class InstanceCoordinator extends EventEmitter {
   private startSessionCleanup(): void {
     this.sessionCleanupTimer = setInterval(async () => {
       try {
-        await this.cleanupStaleSessions();
+        // await this.cleanupStaleSessions(); // Disabled - time-based cleanup causes false positives for idle but healthy connections. ConnectionPool handles connection lifecycle.
         // await this.cleanupStaleInstances(); // Disabled - cleanup was failing and causing log spam
       } catch (error) {
         this.logger.error({ error }, "Session cleanup failed");
@@ -389,9 +389,16 @@ export class InstanceCoordinator extends EventEmitter {
   }
 
   /**
-   * Clean up stale sessions
+   * Clean up stale sessions - DISABLED
+   *
+   * This method was causing false positives by disconnecting healthy connections
+   * that were idle but still open. Sessions are now cleaned up through:
+   * - ConnectionPool when connections actually close
+   * - Instance heartbeat failures (60s timeout)
+   * - Manual logout by users
+   * - Graceful instance shutdown
    */
-  private async cleanupStaleSessions(): Promise<void> {
+  /* private async cleanupStaleSessions(): Promise<void> {
     const staleThreshold = new Date(Date.now() - this.config.sessionTimeout);
 
     for (const [sessionKey, ownership] of this.ownedSessions.entries()) {
@@ -406,7 +413,7 @@ export class InstanceCoordinator extends EventEmitter {
         );
       }
     }
-  }
+  } */
 
   /**
    * Clean up stale instances - DISABLED
