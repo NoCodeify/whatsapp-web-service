@@ -283,9 +283,21 @@ export class SessionRecoveryService {
       }
     } catch (error: any) {
       this.logger.error(
-        { error: error.message },
-        "Failed to get active sessions for recovery",
+        {
+          error: error.message,
+          code: error.code,
+          details: error.details,
+          // Firestore includes index creation URL in the full error
+          fullError: error.toString(),
+        },
+        "Failed to get active sessions for recovery - may need Firestore composite index",
       );
+
+      // Log the full error to console to see the index creation link
+      console.error("=== Firestore Index Error ===");
+      console.error("Full error object:", error);
+      console.error("If this is a missing index error, check the error above for the index creation URL");
+      console.error("=============================");
     }
 
     return sessions;
