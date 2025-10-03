@@ -20,10 +20,11 @@ interface WhatsAppWebSettings {
 interface WhatsAppWebUsage {
   today_date: string;
   new_contacts_today: number;
-  total_contacts_today: number;
+  total_contacts_today: number; // Actually tracks total messages sent
   last_reset: admin.firestore.Timestamp;
   monthly_new_contacts: number;
   last_message_timestamp?: admin.firestore.Timestamp;
+  limit_email_sent_today?: boolean; // Prevents duplicate limit emails
 }
 
 export interface LimitCheckResult {
@@ -36,9 +37,20 @@ export interface LimitCheckResult {
     remaining: number;
     percentage: number;
   };
+  totalMessagesUsage: {
+    used: number;
+    limit: number;
+    remaining: number;
+    percentage: number;
+  };
+  totalMessageLimitReached: boolean;
+  shouldSendLimitEmail: boolean;
   unlimited?: boolean;
   error?: string;
 }
+
+// Constants
+const DAILY_MESSAGE_LIMIT = 250;
 
 export class LimitChecker {
   private db: admin.firestore.Firestore;
@@ -96,6 +108,7 @@ export class LimitChecker {
         today_date: today,
         new_contacts_today: 0,
         total_contacts_today: 0,
+        limit_email_sent_today: false,
         last_reset: admin.firestore.Timestamp.now(),
       };
     }
@@ -128,6 +141,14 @@ export class LimitChecker {
             remaining: 0,
             percentage: 0,
           },
+          totalMessagesUsage: {
+            used: 0,
+            limit: DAILY_MESSAGE_LIMIT,
+            remaining: DAILY_MESSAGE_LIMIT,
+            percentage: 0,
+          },
+          totalMessageLimitReached: false,
+          shouldSendLimitEmail: false,
         };
       }
 
@@ -153,6 +174,14 @@ export class LimitChecker {
             remaining: 25,
             percentage: 0,
           },
+          totalMessagesUsage: {
+            used: 0,
+            limit: DAILY_MESSAGE_LIMIT,
+            remaining: DAILY_MESSAGE_LIMIT,
+            percentage: 0,
+          },
+          totalMessageLimitReached: false,
+          shouldSendLimitEmail: false,
         };
       }
 
@@ -177,6 +206,14 @@ export class LimitChecker {
             remaining: 0,
             percentage: 0,
           },
+          totalMessagesUsage: {
+            used: 0,
+            limit: DAILY_MESSAGE_LIMIT,
+            remaining: DAILY_MESSAGE_LIMIT,
+            percentage: 0,
+          },
+          totalMessageLimitReached: false,
+          shouldSendLimitEmail: false,
         };
       }
 
@@ -216,6 +253,11 @@ export class LimitChecker {
             "Daily limit reached",
           );
 
+          // Calculate total message usage even when new contact limit reached
+          const totalMessagesUsed = usage.total_contacts_today || 0;
+          const totalMessageLimitReached =
+            totalMessagesUsed >= DAILY_MESSAGE_LIMIT;
+
           return {
             allowed: false,
             isNewContact: true,
@@ -227,6 +269,17 @@ export class LimitChecker {
               remaining: 0,
               percentage: 100,
             },
+            totalMessagesUsage: {
+              used: totalMessagesUsed,
+              limit: DAILY_MESSAGE_LIMIT,
+              remaining: Math.max(0, DAILY_MESSAGE_LIMIT - totalMessagesUsed),
+              percentage: Math.min(
+                100,
+                (totalMessagesUsed / DAILY_MESSAGE_LIMIT) * 100,
+              ),
+            },
+            totalMessageLimitReached,
+            shouldSendLimitEmail: false, // Don't send email for new contact limit
           };
         }
 
@@ -242,6 +295,11 @@ export class LimitChecker {
             "Monthly limit reached",
           );
 
+          // Calculate total message usage even when monthly limit reached
+          const totalMessagesUsed = usage.total_contacts_today || 0;
+          const totalMessageLimitReached =
+            totalMessagesUsed >= DAILY_MESSAGE_LIMIT;
+
           return {
             allowed: false,
             isNewContact: true,
@@ -253,6 +311,17 @@ export class LimitChecker {
               remaining: 0,
               percentage: 100,
             },
+            totalMessagesUsage: {
+              used: totalMessagesUsed,
+              limit: DAILY_MESSAGE_LIMIT,
+              remaining: Math.max(0, DAILY_MESSAGE_LIMIT - totalMessagesUsed),
+              percentage: Math.min(
+                100,
+                (totalMessagesUsed / DAILY_MESSAGE_LIMIT) * 100,
+              ),
+            },
+            totalMessageLimitReached,
+            shouldSendLimitEmail: false, // Don't send email for monthly limit
           };
         }
 
@@ -273,9 +342,23 @@ export class LimitChecker {
       // No delay applied - send messages immediately
       let delayMs = 0;
 
-      // Calculate usage stats
+      // Calculate usage stats for new contacts
       const remaining = dailyLimit - usage.new_contacts_today;
       const percentage = (usage.new_contacts_today / dailyLimit) * 100;
+
+      // Calculate total message usage stats
+      const totalMessagesUsed = usage.total_contacts_today;
+      const totalMessageLimitReached = totalMessagesUsed >= DAILY_MESSAGE_LIMIT;
+      const shouldSendEmail =
+        totalMessageLimitReached && !usage.limit_email_sent_today;
+      const totalMessagesRemaining = Math.max(
+        0,
+        DAILY_MESSAGE_LIMIT - totalMessagesUsed,
+      );
+      const totalMessagesPercentage = Math.min(
+        100,
+        (totalMessagesUsed / DAILY_MESSAGE_LIMIT) * 100,
+      );
 
       logger.info(
         {
@@ -283,9 +366,9 @@ export class LimitChecker {
           phoneNumber,
           recipientNumber,
           isNewContact,
-          used: usage.new_contacts_today,
-          limit: dailyLimit,
-          remaining,
+          newContactsUsed: usage.new_contacts_today,
+          totalMessagesUsed,
+          totalMessageLimitReached,
         },
         "Limit check passed",
       );
@@ -300,6 +383,14 @@ export class LimitChecker {
           remaining: Math.max(0, remaining),
           percentage: Math.min(100, percentage),
         },
+        totalMessagesUsage: {
+          used: totalMessagesUsed,
+          limit: DAILY_MESSAGE_LIMIT,
+          remaining: totalMessagesRemaining,
+          percentage: totalMessagesPercentage,
+        },
+        totalMessageLimitReached,
+        shouldSendLimitEmail: shouldSendEmail,
       };
     } catch (error) {
       logger.error({ error, userId, phoneNumber }, "Error checking limits");
@@ -316,6 +407,14 @@ export class LimitChecker {
           remaining: 25,
           percentage: 0,
         },
+        totalMessagesUsage: {
+          used: 0,
+          limit: DAILY_MESSAGE_LIMIT,
+          remaining: DAILY_MESSAGE_LIMIT,
+          percentage: 0,
+        },
+        totalMessageLimitReached: false,
+        shouldSendLimitEmail: false,
       };
     }
   }
