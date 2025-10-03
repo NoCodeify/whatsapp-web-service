@@ -4372,11 +4372,10 @@ export class ConnectionPool extends EventEmitter {
         whatsappWebData.proxy_country = proxyCountry;
       }
 
-      // Detect phone's country from number
+      // Use phone's country from existing data (user-selected from frontend)
       const phoneCountry =
         existingData?.whatsapp_web?.phone_country ||
-        existingData?.country_code ||
-        this.detectCountryFromPhone(phoneNumber);
+        existingData?.country_code;
 
       if (phoneCountry) {
         whatsappWebData.phone_country = phoneCountry;
@@ -4511,38 +4510,5 @@ export class ConnectionPool extends EventEmitter {
       );
       return [];
     }
-  }
-
-  /**
-   * Detect country from phone number
-   */
-  private detectCountryFromPhone(phoneNumber: string): string {
-    // Simple country detection based on prefix
-    const countryPrefixes: Record<string, string> = {
-      "1": "us", // USA/Canada
-      "44": "gb", // UK
-      "49": "de", // Germany
-      "33": "fr", // France
-      "31": "nl", // Netherlands
-      "32": "be", // Belgium
-      "91": "in", // India
-      "86": "cn", // China
-      "81": "jp", // Japan
-      "82": "kr", // South Korea
-      "61": "au", // Australia
-      "64": "nz", // New Zealand
-      "55": "br", // Brazil
-      "52": "mx", // Mexico
-    };
-
-    const cleaned = phoneNumber.replace(/\D/g, "");
-
-    for (const [prefix, country] of Object.entries(countryPrefixes)) {
-      if (cleaned.startsWith(prefix)) {
-        return country;
-      }
-    }
-
-    return "us"; // Default fallback
   }
 }
