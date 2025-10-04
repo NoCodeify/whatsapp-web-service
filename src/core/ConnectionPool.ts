@@ -2027,6 +2027,7 @@ export class ConnectionPool extends EventEmitter {
 
       // Build normalized message payload for Cloud Function
       const messagePayload = {
+        userId: userId,
         messageSid: message.key.id,
         toPhoneNumber: formattedToPhone,
         fromPhoneNumber: formattedFromPhone,
