@@ -1229,7 +1229,7 @@ export class ConnectionPool extends EventEmitter {
 
         // Set a longer timeout for sync completion
         // Give more time for messages to sync in background
-        setTimeout(() => {
+        setTimeout(async () => {
           // Only emit if sync hasn't completed yet
           if (!syncCompleted) {
             syncCompleted = true;
@@ -1237,6 +1237,20 @@ export class ConnectionPool extends EventEmitter {
               { userId, phoneNumber },
               "Sync timeout reached, completing sync",
             );
+
+            // Mark sync as completed in database
+            if (this.connectionStateManager) {
+              await this.connectionStateManager.updateSyncProgress(
+                userId,
+                phoneNumber,
+                totalContactsSynced,
+                totalMessagesSynced,
+                true, // sync completed
+              );
+            }
+
+            // Update phone number status for UI - sync completed
+            await this.updatePhoneNumberStatus(userId, phoneNumber, "connected");
 
             // Emit sync completion event with cumulative totals
             this.emit("history-synced", {
@@ -1999,7 +2013,7 @@ export class ConnectionPool extends EventEmitter {
         // These are manual conversation contacts that should not trigger bot interactions or analytics
         const newContactData = {
           created_at: currentTimestamp,
-          email: "",
+          email: "unknown@unknown.com",
           first_name: firstName || "Unknown",
           last_name: lastName || "Unknown",
           phone_number: formattedFromPhone,
@@ -2013,6 +2027,7 @@ export class ConnectionPool extends EventEmitter {
           has_had_activity: true,
           bot_message_count: 0,
           is_chat_window_open: true,
+          chat_window_closes_at: currentTimestamp,
           mark_chat_closed: false,
           bot_currently_responding: false,
           bot_waiting_for_contact_to_finish_responding: false,
@@ -2023,7 +2038,9 @@ export class ConnectionPool extends EventEmitter {
           do_not_disturb: false,
           do_not_disturb_reason: null,
           process_incoming_message_cloud_task_name: null,
-          // Note: current_campaign is intentionally not set - these contacts are for manual conversations
+          // NOTE: WhatsApp Web contacts are created WITHOUT campaigns by design
+          // These are personal/imported contacts for manual conversations only
+          // If AI responses are needed, users must manually assign campaigns in the UI
           credits_used: 0,
           last_updated_by: "whatsapp_web_incoming",
           lists: [],
@@ -2124,7 +2141,7 @@ export class ConnectionPool extends EventEmitter {
 
       if (existingMessage.empty) {
         // Add message to contact's messages subcollection
-        await contactRef.collection("messages").add(messageData);
+        const newMessageRef = await contactRef.collection("messages").add(messageData);
 
         this.logger.info(
           {
@@ -2134,6 +2151,28 @@ export class ConnectionPool extends EventEmitter {
             fromNumber,
           },
           "Incoming message stored in Firestore",
+        );
+
+        // Update contact's last_message field for UI display
+        await contactRef.update({
+          last_message: {
+            direction: "inbound",
+            body: messageText,
+            status: "received",
+            timestamp: admin.firestore.Timestamp.fromMillis(
+              message.messageTimestamp * 1000,
+            ),
+            messageRef: newMessageRef,
+          },
+        });
+
+        this.logger.debug(
+          {
+            userId,
+            phoneNumber,
+            messageId: message.key.id,
+          },
+          "Updated contact with last_message",
         );
       } else {
         this.logger.debug(

@@ -506,8 +506,19 @@ export class ConnectionStateManager extends EventEmitter {
       firestoreData.whatsapp_web = whatsappData;
 
       await ref.set(firestoreData, { merge: true });
-    } catch (error) {
-      this.logger.error({ error, state }, "Failed to persist state");
+    } catch (error: any) {
+      this.logger.error(
+        {
+          error,
+          errorMessage: error?.message,
+          errorStack: error?.stack,
+          errorCode: error?.code,
+          state,
+          userId: state.userId,
+          phoneNumber: state.phoneNumber,
+        },
+        "Failed to persist state",
+      );
     }
   }
 
@@ -535,9 +546,16 @@ export class ConnectionStateManager extends EventEmitter {
           last_activity: admin.firestore.Timestamp.now(),
         });
       }
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(
-        { error, userId, phoneNumber },
+        {
+          error,
+          errorMessage: error?.message,
+          errorStack: error?.stack,
+          errorCode: error?.code,
+          userId,
+          phoneNumber,
+        },
         "Failed to persist heartbeat",
       );
     }

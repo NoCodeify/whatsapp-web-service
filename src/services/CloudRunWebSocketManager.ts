@@ -55,6 +55,7 @@ export class CloudRunWebSocketManager extends EventEmitter {
     this.healthChecks.set(connectionId, {
       isConnected: true,
       consecutiveFailures: 0,
+      lastPongTime: new Date(), // Initialize with current time to prevent false stale detection
     });
 
     // Set up keep-alive monitoring
