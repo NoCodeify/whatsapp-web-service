@@ -1975,26 +1975,24 @@ export class ConnectionPool extends EventEmitter {
         .replace("@g.us", "");
       const isGroup = fromJid.includes("@g.us");
 
-      // Extract message text early for logging
+      // Extract message text
       const messageText = this.extractMessageText(message);
 
-      // Log incoming message with full details
+      // Log incoming message
       this.logger.info(
         {
           userId,
-          phoneNumber: phoneNumber,
-          fromNumber: fromNumber,
-          fromJid,
+          phoneNumber,
+          fromNumber,
           messageId: message.key.id,
           body: messageText,
           isGroup,
-          pushName: message.pushName,
           timestamp: message.messageTimestamp,
         },
-        "Incoming WhatsApp message received",
+        "Incoming WhatsApp Web message received",
       );
 
-      // Skip group messages for now
+      // Skip group messages
       if (isGroup) {
         this.logger.debug(
           { userId, phoneNumber, fromJid },
@@ -2012,332 +2010,68 @@ export class ConnectionPool extends EventEmitter {
         return;
       }
 
-      // Format phone numbers with + prefix
+      // Format phone numbers
       const formattedFromPhone = fromNumber.startsWith("+")
         ? fromNumber
         : `+${fromNumber}`;
-      const formattedUserPhone = phoneNumber.startsWith("+")
+      const formattedToPhone = phoneNumber.startsWith("+")
         ? phoneNumber
         : `+${phoneNumber}`;
 
-      // Get or create contact in root collection
-      const userRef = this.firestore.collection("users").doc(userId);
-      const currentTimestamp = admin.firestore.Timestamp.now();
-
-      const existingContacts = await this.firestore
-        .collection("contacts")
-        .where("user", "==", userRef)
-        .where("phone_number", "==", formattedFromPhone)
-        .limit(1)
-        .get();
-
-      let contactRef;
-      if (existingContacts.empty) {
-        // Extract first and last name from WhatsApp push name
-        const { firstName, lastName } = this.extractNames(message.pushName);
-
-        // Fetch user document to get default campaign for unknown contacts
-        const userDoc = await userRef.get();
-        const userData = userDoc.data();
-
-        let campaignRef = null;
-        let campaignData = null;
-
-        // Try to get the user's default campaign for WhatsApp unknown contacts
-        if (userData?.unknown_incoming_contacts_campaign) {
-          const campaignConfig = userData.unknown_incoming_contacts_campaign;
-
-          // Modern format: { whatsapp: DocumentReference }
-          if (campaignConfig.whatsapp?.id) {
-            campaignRef = campaignConfig.whatsapp;
-          }
-          // Legacy format: { id: string }
-          else if (campaignConfig.id) {
-            campaignRef = this.firestore
-              .collection("campaigns")
-              .doc(campaignConfig.id);
-          }
-          // Direct DocumentReference (also legacy)
-          else if (typeof campaignConfig === "object" && campaignConfig.path) {
-            campaignRef = campaignConfig;
-          }
-        }
-
-        // If campaign reference was found, fetch the campaign document
-        if (campaignRef) {
-          try {
-            const campaignDoc = await campaignRef.get();
-            if (campaignDoc.exists) {
-              campaignData = campaignDoc.data();
-              this.logger.info(
-                {
-                  userId,
-                  phoneNumber,
-                  campaignId: campaignRef.id,
-                },
-                "Found default campaign for WhatsApp Web contact",
-              );
-            } else {
-              this.logger.warn(
-                {
-                  userId,
-                  phoneNumber,
-                  campaignId: campaignRef.id,
-                },
-                "Default campaign not found or was deleted",
-              );
-              campaignRef = null; // Campaign was deleted
-            }
-          } catch (error) {
-            this.logger.error(
-              {
-                userId,
-                phoneNumber,
-                error,
-              },
-              "Error fetching campaign document",
-            );
-            campaignRef = null;
-          }
-        }
-
-        // Create new contact in root collection
-        const newContactData = {
-          created_at: currentTimestamp,
-          email: "unknown@unknown.com",
-          first_name: firstName || "Unknown",
-          last_name: lastName || "Unknown",
-          phone_number: formattedFromPhone,
-          user: userRef,
-          last_modified_at: currentTimestamp,
-          last_activity_at: currentTimestamp,
-          last_incoming_message_at: currentTimestamp,
-          whatsapp_name: message.pushName || null,
-          channel: "whatsapp_web",
-          // Use campaign's AI mode if campaign exists, otherwise default to false
-          is_bot_active: campaignData?.ai_mode ?? false,
-          has_had_activity: true,
-          bot_message_count: 0,
-          is_chat_window_open: true,
-          chat_window_closes_at: currentTimestamp,
-          mark_chat_closed: false,
-          bot_currently_responding: false,
-          bot_waiting_for_contact_to_finish_responding: false,
-          follow_up_exhausted: false,
-          chat_concluded: false,
-          stop_and_respond: false,
-          interrupted: false,
-          do_not_disturb: false,
-          do_not_disturb_reason: null,
-          process_incoming_message_cloud_task_name: null,
-          // Assign campaign if one was found for unknown contacts
-          current_campaign: campaignRef,
-          credits_used: 0,
-          last_updated_by: "whatsapp_web_incoming",
-          lists: [],
-          campaigns: campaignRef ? [campaignRef] : [],
-          tags: [],
-        };
-
-        const newContactRef = await this.firestore
-          .collection("contacts")
-          .add(newContactData);
-        contactRef = newContactRef;
-
-        this.logger.info(
-          { userId, phoneNumber, fromNumber: formattedFromPhone },
-          "Created new contact from incoming message",
-        );
-
-        // If campaign was assigned, update campaign's contacts array
-        if (campaignRef) {
-          try {
-            await campaignRef.update({
-              contacts: admin.firestore.FieldValue.arrayUnion(contactRef),
-            });
-            this.logger.info(
-              {
-                userId,
-                phoneNumber,
-                campaignId: campaignRef.id,
-                contactId: contactRef.id,
-              },
-              "Added contact to campaign's contacts array",
-            );
-          } catch (error) {
-            this.logger.error(
-              {
-                userId,
-                phoneNumber,
-                campaignId: campaignRef.id,
-                error,
-              },
-              "Error updating campaign's contacts array",
-            );
-          }
-        }
-      } else {
-        // Update existing contact
-        contactRef = existingContacts.docs[0].ref;
-        await contactRef.update({
-          last_activity_at: currentTimestamp,
-          last_incoming_message_at: currentTimestamp,
-          last_modified_at: currentTimestamp,
-          has_had_activity: true,
-          whatsapp_name:
-            message.pushName ||
-            existingContacts.docs[0].data().whatsapp_name ||
-            null,
-        });
-      }
-
-      // Store message as subcollection of contact
-      // messageText already extracted at the beginning for logging
-
-      // Handle media if present
+      // Handle media if present (downloads from WhatsApp, uploads to Cloud Storage)
       const mediaInfo = await this.handleMediaMessage(
         message,
         userId,
         phoneNumber,
       );
 
-      const messageData = {
-        // Core message fields
-        message_sid: message.key.id,
-        from_phone_number: formattedFromPhone,
-        to_phone_number: formattedUserPhone,
-        body: messageText,
-        direction: "inbound",
+      // Build normalized message payload for Cloud Function
+      const messagePayload = {
+        messageSid: message.key.id,
+        toPhoneNumber: formattedToPhone,
+        fromPhoneNumber: formattedFromPhone,
         status: "received",
-        channel: "whatsapp_web",
-        timestamp: admin.firestore.Timestamp.fromMillis(
-          message.messageTimestamp * 1000,
-        ),
-        created_at: currentTimestamp,
-
-        // Media fields
-        media_url: mediaInfo.media_url,
-        media_content_type: mediaInfo.media_content_type,
-
-        // Bot/AI fields
-        bot_reply: false,
-        completion_tokens: 0,
-        prompt_tokens: 0,
-        total_tokens: 0,
-        role: "",
-        tool_call_id: "",
-
-        // Message metadata
-        type: mediaInfo.type,
-        content_sid: null,
-        content_variables: null,
-        error_code: null,
-        error_message: null,
-        price: null,
-        price_unit: null,
-        name: null,
-        args: null,
-        openai_chat_completion_id: null,
-        chunk_index: 0,
-        is_last_chunk: null,
-
-        // Channel-specific fields
-        from_instagram_id: "",
-        to_instagram_id: "",
-
-        // Response tracking
-        responded: false,
-        responding: false,
-        first_message_of_the_day: false,
+        mediaUrl: mediaInfo.media_url || undefined,
+        mediaContentType: mediaInfo.media_content_type || undefined,
+        body: messageText,
+        timestamp: message.messageTimestamp * 1000, // Convert to milliseconds
+        messageType: mediaInfo.type,
       };
 
-      // Check for duplicate message before adding
-      const existingMessage = await contactRef
-        .collection("messages")
-        .where("message_sid", "==", message.key.id)
-        .limit(1)
-        .get();
+      // Call HTTP Cloud Function endpoint
+      const functionUrl =
+        process.env.INCOMING_WHATSAPP_WEB_MESSAGE_URL ||
+        `https://${region}-${this.projectId}.cloudfunctions.net/incomingWhatsAppWebMessage`;
 
-      if (existingMessage.empty) {
-        // Add message to contact's messages subcollection
-        const newMessageRef = await contactRef
-          .collection("messages")
-          .add(messageData);
-
-        this.logger.info(
-          {
-            userId,
-            phoneNumber,
-            messageId: message.key.id,
-            fromNumber,
-          },
-          "Incoming message stored in Firestore",
-        );
-
-        // Update contact's last_message field for UI display
-        await contactRef.update({
-          last_message: {
-            direction: "inbound",
-            body: messageText,
-            status: "received",
-            timestamp: admin.firestore.Timestamp.fromMillis(
-              message.messageTimestamp * 1000,
-            ),
-            messageRef: newMessageRef,
-          },
-        });
-
-        this.logger.debug(
-          {
-            userId,
-            phoneNumber,
-            messageId: message.key.id,
-          },
-          "Updated contact with last_message",
-        );
-      } else {
-        this.logger.debug(
-          {
-            userId,
-            phoneNumber,
-            messageId: message.key.id,
-            fromNumber,
-          },
-          "Skipped duplicate incoming message",
-        );
-        return; // Exit early for duplicates
-      }
-
-      // Emit event for real-time updates
-      this.emit("message-stored", {
-        userId,
-        phoneNumber,
-        messageId: message.key.id,
-        fromNumber,
-        timestamp: new Date().toISOString(),
+      const response = await fetch(functionUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(messagePayload),
       });
 
-      // For production, also publish to Pub/Sub for additional processing
-      if (
-        process.env.NODE_ENV !== "development" &&
-        !process.env.FIRESTORE_EMULATOR_HOST
-      ) {
-        const topic = this.pubsub.topic("whatsapp-web-incoming");
-        await topic.publishMessage({
-          data: Buffer.from(
-            JSON.stringify({
-              userId,
-              phoneNumber,
-              message,
-              timestamp: new Date().toISOString(),
-            }),
-          ),
-        });
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
       }
+
+      const result = await response.json();
+
+      this.logger.info(
+        {
+          userId,
+          phoneNumber,
+          fromNumber: formattedFromPhone,
+          messageId: message.key.id,
+          pubsubMessageId: result.messageId,
+        },
+        "WhatsApp Web message sent to Cloud Function successfully",
+      );
     } catch (error) {
       this.logger.error(
         { userId, phoneNumber, error },
-        "Failed to handle incoming message",
+        "Failed to send message to Cloud Function",
       );
     }
   }
