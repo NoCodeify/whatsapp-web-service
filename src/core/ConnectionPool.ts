@@ -2041,7 +2041,7 @@ export class ConnectionPool extends EventEmitter {
       // Call HTTP Cloud Function endpoint
       const functionUrl =
         process.env.INCOMING_WHATSAPP_WEB_MESSAGE_URL ||
-        `https://${region}-${this.projectId}.cloudfunctions.net/incomingWhatsAppWebMessage`;
+        `https://${process.env.FIREBASE_REGION || "europe-central2"}-${process.env.GOOGLE_CLOUD_PROJECT || "whatzaidev"}.cloudfunctions.net/incomingWhatsAppWebMessage`;
 
       const response = await fetch(functionUrl, {
         method: "POST",
@@ -2056,7 +2056,11 @@ export class ConnectionPool extends EventEmitter {
         throw new Error(`HTTP ${response.status}: ${errorText}`);
       }
 
-      const result = await response.json();
+      const result = (await response.json()) as {
+        messageId: string;
+        success: boolean;
+        message: string;
+      };
 
       this.logger.info(
         {
