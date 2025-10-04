@@ -456,7 +456,7 @@ export class ConnectionStateManager extends EventEmitter {
         sync_completed: state.syncCompleted,
         message_count: state.messageCount,
         error_count: state.errorCount,
-        last_error: state.lastError,
+        last_error: state.lastError ?? null,
         last_seen: admin.firestore.Timestamp.now(),
       };
 
