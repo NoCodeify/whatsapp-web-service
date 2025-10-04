@@ -1250,7 +1250,11 @@ export class ConnectionPool extends EventEmitter {
             }
 
             // Update phone number status for UI - sync completed
-            await this.updatePhoneNumberStatus(userId, phoneNumber, "connected");
+            await this.updatePhoneNumberStatus(
+              userId,
+              phoneNumber,
+              "connected",
+            );
 
             // Emit sync completion event with cumulative totals
             this.emit("history-synced", {
@@ -1302,7 +1306,12 @@ export class ConnectionPool extends EventEmitter {
         // Handle connection replaced error (440) - session active elsewhere
         if (disconnectReason === DisconnectReason.connectionReplaced) {
           this.logger.warn(
-            { userId, phoneNumber, disconnectReason, hasConnectedSuccessfully: connection.hasConnectedSuccessfully },
+            {
+              userId,
+              phoneNumber,
+              disconnectReason,
+              hasConnectedSuccessfully: connection.hasConnectedSuccessfully,
+            },
             "Connection replaced - checking if this is during initial connection or session takeover",
           );
 
@@ -1321,7 +1330,10 @@ export class ConnectionPool extends EventEmitter {
               const currentConnection = this.connections.get(key);
 
               // Only delete if still not connected after 10 seconds
-              if (currentConnection && currentConnection.state.connection !== "open") {
+              if (
+                currentConnection &&
+                currentConnection.state.connection !== "open"
+              ) {
                 this.logger.warn(
                   { userId, phoneNumber },
                   "Connection did not recover after replacement, removing from pool",
@@ -1329,10 +1341,14 @@ export class ConnectionPool extends EventEmitter {
 
                 // Update state manager
                 if (this.connectionStateManager) {
-                  await this.connectionStateManager.updateState(userId, phoneNumber, {
-                    status: "disconnected",
-                    lastError: "Connection replaced and did not recover",
-                  });
+                  await this.connectionStateManager.updateState(
+                    userId,
+                    phoneNumber,
+                    {
+                      status: "disconnected",
+                      lastError: "Connection replaced and did not recover",
+                    },
+                  );
                 }
 
                 this.connections.delete(key);
@@ -1343,7 +1359,10 @@ export class ConnectionPool extends EventEmitter {
                   phoneNumber,
                   status: "disconnected",
                 });
-              } else if (currentConnection && currentConnection.state.connection === "open") {
+              } else if (
+                currentConnection &&
+                currentConnection.state.connection === "open"
+              ) {
                 this.logger.info(
                   { userId, phoneNumber },
                   "Connection recovered successfully after replacement",
@@ -1984,6 +2003,15 @@ export class ConnectionPool extends EventEmitter {
         return;
       }
 
+      // Skip special WhatsApp identifiers (status updates, broadcasts, etc.)
+      if (this.isSpecialWhatsAppIdentifier(fromJid)) {
+        this.logger.debug(
+          { userId, phoneNumber, fromJid, fromNumber },
+          "Skipping special WhatsApp identifier (status/broadcast/newsletter)",
+        );
+        return;
+      }
+
       // Format phone numbers with + prefix
       const formattedFromPhone = fromNumber.startsWith("+")
         ? fromNumber
@@ -2008,9 +2036,72 @@ export class ConnectionPool extends EventEmitter {
         // Extract first and last name from WhatsApp push name
         const { firstName, lastName } = this.extractNames(message.pushName);
 
+        // Fetch user document to get default campaign for unknown contacts
+        const userDoc = await userRef.get();
+        const userData = userDoc.data();
+
+        let campaignRef = null;
+        let campaignData = null;
+
+        // Try to get the user's default campaign for WhatsApp unknown contacts
+        if (userData?.unknown_incoming_contacts_campaign) {
+          const campaignConfig = userData.unknown_incoming_contacts_campaign;
+
+          // Modern format: { whatsapp: DocumentReference }
+          if (campaignConfig.whatsapp?.id) {
+            campaignRef = campaignConfig.whatsapp;
+          }
+          // Legacy format: { id: string }
+          else if (campaignConfig.id) {
+            campaignRef = this.firestore
+              .collection("campaigns")
+              .doc(campaignConfig.id);
+          }
+          // Direct DocumentReference (also legacy)
+          else if (typeof campaignConfig === "object" && campaignConfig.path) {
+            campaignRef = campaignConfig;
+          }
+        }
+
+        // If campaign reference was found, fetch the campaign document
+        if (campaignRef) {
+          try {
+            const campaignDoc = await campaignRef.get();
+            if (campaignDoc.exists) {
+              campaignData = campaignDoc.data();
+              this.logger.info(
+                {
+                  userId,
+                  phoneNumber,
+                  campaignId: campaignRef.id,
+                },
+                "Found default campaign for WhatsApp Web contact",
+              );
+            } else {
+              this.logger.warn(
+                {
+                  userId,
+                  phoneNumber,
+                  campaignId: campaignRef.id,
+                },
+                "Default campaign not found or was deleted",
+              );
+              campaignRef = null; // Campaign was deleted
+            }
+          } catch (error) {
+            this.logger.error(
+              {
+                userId,
+                phoneNumber,
+                error,
+              },
+              "Error fetching campaign document",
+            );
+            campaignRef = null;
+          }
+        }
+
         // Create new contact in root collection
-        // IMPORTANT: WhatsApp Web imported contacts are intentionally created WITHOUT campaigns
-        // These are manual conversation contacts that should not trigger bot interactions or analytics
         const newContactData = {
           created_at: currentTimestamp,
           email: "unknown@unknown.com",
@@ -2023,7 +2114,8 @@ export class ConnectionPool extends EventEmitter {
           last_incoming_message_at: currentTimestamp,
           whatsapp_name: message.pushName || null,
           channel: "whatsapp_web",
-          is_bot_active: false,
+          // Use campaign's AI mode if campaign exists, otherwise default to false
+          is_bot_active: campaignData?.ai_mode ?? false,
           has_had_activity: true,
           bot_message_count: 0,
           is_chat_window_open: true,
@@ -2038,13 +2130,12 @@ export class ConnectionPool extends EventEmitter {
           do_not_disturb: false,
           do_not_disturb_reason: null,
           process_incoming_message_cloud_task_name: null,
-          // NOTE: WhatsApp Web contacts are created WITHOUT campaigns by design
-          // These are personal/imported contacts for manual conversations only
-          // If AI responses are needed, users must manually assign campaigns in the UI
+          // Assign campaign if one was found for unknown contacts
+          current_campaign: campaignRef,
           credits_used: 0,
           last_updated_by: "whatsapp_web_incoming",
           lists: [],
-          campaigns: [],
+          campaigns: campaignRef ? [campaignRef] : [],
           tags: [],
         };
 
@@ -2057,6 +2148,34 @@ export class ConnectionPool extends EventEmitter {
           { userId, phoneNumber, fromNumber: formattedFromPhone },
           "Created new contact from incoming message",
         );
+
+        // If campaign was assigned, update campaign's contacts array
+        if (campaignRef) {
+          try {
+            await campaignRef.update({
+              contacts: admin.firestore.FieldValue.arrayUnion(contactRef),
+            });
+            this.logger.info(
+              {
+                userId,
+                phoneNumber,
+                campaignId: campaignRef.id,
+                contactId: contactRef.id,
+              },
+              "Added contact to campaign's contacts array",
+            );
+          } catch (error) {
+            this.logger.error(
+              {
+                userId,
+                phoneNumber,
+                campaignId: campaignRef.id,
+                error,
+              },
+              "Error updating campaign's contacts array",
+            );
+          }
+        }
       } else {
         // Update existing contact
         contactRef = existingContacts.docs[0].ref;
@@ -2141,7 +2260,9 @@ export class ConnectionPool extends EventEmitter {
 
       if (existingMessage.empty) {
         // Add message to contact's messages subcollection
-        const newMessageRef = await contactRef.collection("messages").add(messageData);
+        const newMessageRef = await contactRef
+          .collection("messages")
+          .add(messageData);
 
         this.logger.info(
           {
@@ -4205,6 +4326,34 @@ export class ConnectionPool extends EventEmitter {
     return jid;
   }
 
+  /**
+   * Check if a JID is a special WhatsApp identifier that should not be processed
+   * as a regular contact message (status updates, broadcasts, etc.)
+   */
+  private isSpecialWhatsAppIdentifier(jid: string): boolean {
+    // Status updates (WhatsApp Stories)
+    if (jid.includes("status@broadcast")) {
+      return true;
+    }
+
+    // Broadcast lists
+    if (jid.endsWith("@broadcast")) {
+      return true;
+    }
+
+    // Temporary/ephemeral chats
+    if (jid.includes("@lid")) {
+      return true;
+    }
+
+    // Newsletter/channel messages
+    if (jid.includes("@newsletter")) {
+      return true;
+    }
+
+    return false;
+  }
+
   private hasCapacity(): boolean {
     return this.connections.size < this.config.maxConnections;
   }
@@ -4467,8 +4616,7 @@ export class ConnectionPool extends EventEmitter {
 
       // Use phone's country from existing data (user-selected from frontend)
       const phoneCountry =
-        existingData?.whatsapp_web?.phone_country ||
-        existingData?.country_code;
+        existingData?.whatsapp_web?.phone_country || existingData?.country_code;
 
       if (phoneCountry) {
         whatsappWebData.phone_country = phoneCountry;
