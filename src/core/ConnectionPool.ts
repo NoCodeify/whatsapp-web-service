@@ -542,6 +542,15 @@ export class ConnectionPool extends EventEmitter {
     isRecovery: boolean = false,
     browserName?: string,
   ): Promise<boolean> {
+    // 🟢 BUG #4 FIX: Check if pool is shutting down before adding connection
+    if (this.isShuttingDown) {
+      this.logger.warn(
+        { userId, phoneNumber },
+        "Cannot add connection: pool is shutting down",
+      );
+      return false;
+    }
+
     // Format the phone number to ensure consistent E.164 format
     const formattedNumber = formatPhoneNumberSafe(
       phoneNumber,
@@ -728,6 +737,9 @@ export class ConnectionPool extends EventEmitter {
       return;
     }
 
+    // 🟢 Delete from map FIRST to prevent concurrent access during cleanup
+    this.connections.delete(connectionKey);
+
     try {
       // Clear QR timeout if exists
       if (connection.qrTimeout) {
@@ -759,8 +771,10 @@ export class ConnectionPool extends EventEmitter {
       // Close the socket
       connection.socket.end(undefined);
 
-      // Remove from pool
-      this.connections.delete(connectionKey);
+      // 🟢 CRITICAL FIX: Clean up all event listeners to prevent memory leak
+      // TypeScript types require an event parameter, but EventEmitter allows calling without args
+      // to remove ALL listeners across ALL events - this is what we want for cleanup
+      (connection.socket.ev.removeAllListeners as any)();
 
       // Unregister from WebSocket manager
       this.wsManager.unregisterConnection(connectionKey);
@@ -1470,7 +1484,7 @@ export class ConnectionPool extends EventEmitter {
       }
     });
 
-    // Message handling - process BOTH incoming and outgoing
+    // Unified message handling - processes both real-time and history messages
     socket.ev.on("messages.upsert", async (upsert) => {
       try {
         // Update session activity for any message activity
@@ -1479,28 +1493,102 @@ export class ConnectionPool extends EventEmitter {
           phoneNumber,
         );
 
+        // Determine if these are history messages or real-time messages
+        const isHistorySync =
+          upsert.type === "append" || upsert.type === "notify";
+        const hourAgo = Date.now() - 60 * 60 * 1000;
+
+        // Separate messages into history and real-time
+        const historyMessages: any[] = [];
+        const realtimeMessages: any[] = [];
+
         for (const msg of upsert.messages) {
           if (!msg.message) continue; // Skip empty messages
 
-          try {
-            if (!msg.key.fromMe) {
-              // Incoming message from contact
-              await this.handleIncomingMessage(userId, phoneNumber, msg);
-            } else {
-              // Outgoing message - could be manual or API-sent
-              await this.handleOutgoingMessage(userId, phoneNumber, msg);
-            }
-          } catch (messageError) {
-            // Handle individual message processing errors gracefully
-            await this.errorHandler.handleError(messageError as Error, {
-              userId,
-              phoneNumber,
-              connectionId,
-              operation: "message_processing",
-              timestamp: new Date(),
-            });
+          const msgTime = Number(msg.messageTimestamp || 0) * 1000;
+          const isOldMessage = msgTime < hourAgo;
+
+          if (isHistorySync || isOldMessage) {
+            // This is a history message from sync
+            historyMessages.push(msg);
+          } else {
+            // This is a real-time message
+            realtimeMessages.push(msg);
           }
         }
+
+        // Process history messages if any
+        if (historyMessages.length > 0) {
+          this.logger.info(
+            {
+              userId,
+              phoneNumber,
+              type: upsert.type,
+              count: historyMessages.length,
+              requestId: upsert.requestId,
+              firstMessage: historyMessages[0]
+                ? {
+                    id: historyMessages[0].key?.id,
+                    remoteJid: historyMessages[0].key?.remoteJid,
+                    timestamp: historyMessages[0].messageTimestamp,
+                  }
+                : null,
+            },
+            "Processing history messages from upsert",
+          );
+
+          const count = await this.processSyncedMessages(
+            userId,
+            phoneNumber,
+            historyMessages,
+          );
+          totalMessagesSynced += count;
+
+          // Update sync progress in database
+          if (this.connectionStateManager) {
+            await this.connectionStateManager.updateSyncProgress(
+              userId,
+              phoneNumber,
+              totalContactsSynced,
+              totalMessagesSynced,
+              false,
+            );
+          }
+
+          // Emit progress event
+          this.emit("sync:progress", {
+            userId,
+            phoneNumber,
+            type: "messages_from_upsert",
+            count: historyMessages.length,
+            timestamp: new Date().toISOString(),
+          });
+        }
+
+        // Process real-time messages if any
+        if (realtimeMessages.length > 0) {
+          for (const msg of realtimeMessages) {
+            try {
+              if (!msg.key.fromMe) {
+                // Incoming message from contact
+                await this.handleIncomingMessage(userId, phoneNumber, msg);
+              } else {
+                // Outgoing message - could be manual or API-sent
+                await this.handleOutgoingMessage(userId, phoneNumber, msg);
+              }
+            } catch (messageError) {
+              // Handle individual message processing errors gracefully
+              await this.errorHandler.handleError(messageError as Error, {
+                userId,
+                phoneNumber,
+                connectionId,
+                operation: "message_processing",
+                timestamp: new Date(),
+              });
+            }
+          }
+        }
+
         connection.lastActivity = new Date();
       } catch (error) {
         // Handle overall message upsert errors
@@ -1797,75 +1885,6 @@ export class ConnectionPool extends EventEmitter {
 
       if (chats && chats.length > 0) {
         await this.processSyncedChats(userId, phoneNumber, chats, socket);
-      }
-    });
-
-    // Handle messages.upsert to catch history messages
-    socket.ev.on("messages.upsert", async (upsert) => {
-      // Check if these are history messages (not real-time)
-      if (upsert.type === "append" || upsert.type === "notify") {
-        this.logger.info(
-          {
-            userId,
-            phoneNumber,
-            type: upsert.type,
-            count: upsert.messages?.length || 0,
-            requestId: upsert.requestId,
-            firstMessage: upsert.messages?.[0]
-              ? {
-                  id: upsert.messages[0].key?.id,
-                  remoteJid: upsert.messages[0].key?.remoteJid,
-                  timestamp: upsert.messages[0].messageTimestamp,
-                }
-              : null,
-          },
-          "Messages upsert event - checking for history",
-        );
-
-        // Process as history messages if they're old (more than 1 hour old)
-        const oldMessages = upsert.messages.filter((msg: any) => {
-          const msgTime = (msg.messageTimestamp || 0) * 1000;
-          const hourAgo = Date.now() - 60 * 60 * 1000;
-          return msgTime < hourAgo;
-        });
-
-        if (oldMessages.length > 0) {
-          this.logger.info(
-            {
-              userId,
-              phoneNumber,
-              count: oldMessages.length,
-            },
-            "Processing old messages from upsert as history",
-          );
-
-          const count = await this.processSyncedMessages(
-            userId,
-            phoneNumber,
-            oldMessages,
-          );
-          totalMessagesSynced += count;
-
-          // Update sync progress in database
-          if (this.connectionStateManager) {
-            await this.connectionStateManager.updateSyncProgress(
-              userId,
-              phoneNumber,
-              totalContactsSynced,
-              totalMessagesSynced,
-              false,
-            );
-          }
-
-          // Emit progress event
-          this.emit("sync:progress", {
-            userId,
-            phoneNumber,
-            type: "messages_from_upsert",
-            count: oldMessages.length,
-            timestamp: new Date().toISOString(),
-          });
-        }
       }
     });
 

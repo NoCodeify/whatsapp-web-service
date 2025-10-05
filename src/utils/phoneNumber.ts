@@ -245,6 +245,37 @@ export function formatPhoneNumberSafe(
   phoneNumber: string,
   defaultCountry?: CountryCode,
 ): string | null {
+  // BUG #1 FIX: Reject excessively long phone numbers (DoS prevention)
+  // E.164 format allows max 15 digits + country code + formatting characters
+  const MAX_PHONE_LENGTH = 20;
+  if (!phoneNumber || phoneNumber.length > MAX_PHONE_LENGTH) {
+    logger.warn(
+      { phoneNumber: phoneNumber?.substring(0, 50), length: phoneNumber?.length },
+      "Phone number exceeds maximum allowed length",
+    );
+    return null;
+  }
+
+  // BUG #3 FIX: Reject strings containing null bytes (filesystem security)
+  if (phoneNumber.includes("\x00")) {
+    logger.warn(
+      { phoneNumber: phoneNumber.substring(0, 50) },
+      "Phone number contains null byte",
+    );
+    return null;
+  }
+
+  // BUG #2 FIX: Only allow valid phone number characters (XSS/injection prevention)
+  // Valid characters: digits, +, -, (, ), and spaces
+  const validCharsRegex = /^[\d\s\+\-\(\)]+$/;
+  if (!validCharsRegex.test(phoneNumber)) {
+    logger.warn(
+      { phoneNumber: phoneNumber.substring(0, 50) },
+      "Phone number contains invalid characters",
+    );
+    return null;
+  }
+
   // First preprocess to fix common errors
   const preprocessed = preprocessPhoneNumber(phoneNumber);
 

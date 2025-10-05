@@ -13,16 +13,12 @@ import { Firestore } from "@google-cloud/firestore";
 import { Storage } from "@google-cloud/storage";
 import { CloudRunSessionOptimizer } from "../services/CloudRunSessionOptimizer";
 import * as fs from "fs";
+import { promises as fsPromises } from "fs";
 import * as path from "path";
-import { promisify } from "util";
 import crypto from "crypto";
 import { formatPhoneNumberSafe } from "../utils/phoneNumber";
 
-const writeFile = promisify(fs.writeFile);
-const readFile = promisify(fs.readFile);
-const mkdir = promisify(fs.mkdir);
-const unlink = promisify(fs.unlink);
-const readdir = promisify(fs.readdir);
+const { writeFile, readFile, mkdir, unlink, readdir } = fsPromises;
 
 export interface SessionData {
   userId: string;
@@ -110,6 +106,9 @@ export class SessionManager {
     browserName?: string,
     skipProxy?: boolean, // Skip proxy creation during recovery
   ): Promise<WASocket> {
+    // Validate userId to prevent directory traversal
+    this.validateUserId(userId);
+
     // Format phone number to ensure consistency
     const formattedPhone = formatPhoneNumberSafe(phoneNumber);
     if (!formattedPhone) {
@@ -237,7 +236,7 @@ export class SessionManager {
    * Get or create authentication state
    */
   private async getAuthState(userId: string, phoneNumber: string) {
-    const sessionPath = path.join(this.sessionsDir, `${userId}-${phoneNumber}`);
+    const sessionPath = this.getSessionPath(userId, phoneNumber);
 
     // Check if local session exists
     const localSessionExists = await this.localSessionExists(sessionPath);
@@ -374,10 +373,7 @@ export class SessionManager {
         try {
           // Use CloudRunSessionOptimizer for cloud mode (better performance with queuing)
           if (this.storageType === "cloud" && this.cloudOptimizer) {
-            const sessionPath = path.join(
-              this.sessionsDir,
-              `${userId}-${phoneNumber}`,
-            );
+            const sessionPath = this.getSessionPath(userId, phoneNumber);
             await this.cloudOptimizer.uploadSession(
               userId,
               phoneNumber,
@@ -472,7 +468,7 @@ export class SessionManager {
   }
 
   /**
-   * Backup session to Cloud Storage
+   * Backup session to Cloud Storage with atomic two-phase commit
    */
   private async backupToCloudStorage(userId: string, phoneNumber: string) {
     if (!this.storage) {
@@ -483,43 +479,83 @@ export class SessionManager {
       return;
     }
 
-    const sessionPath = path.join(this.sessionsDir, `${userId}-${phoneNumber}`);
+    const sessionPath = this.getSessionPath(userId, phoneNumber);
     const bucket = this.storage.bucket(this.bucketName);
 
     try {
-      // Read all session files
       const files = await readdir(sessionPath);
+      const timestamp = Date.now();
+      const tempPrefix = `sessions/${userId}/${phoneNumber}/.tmp-${timestamp}/`;
+      const finalPrefix = `sessions/${userId}/${phoneNumber}/`;
 
-      for (const file of files) {
+      this.logger.debug(
+        { userId, phoneNumber, fileCount: files.length },
+        "Starting atomic backup to Cloud Storage",
+      );
+
+      // PHASE 1: Upload all files to temporary location
+      // This ensures either ALL files upload or NONE (on failure, temp is discarded)
+      const uploadPromises = files.map(async (file) => {
         const filePath = path.join(sessionPath, file);
         const fileContent = await readFile(filePath);
-
-        // Encrypt before uploading
         const encrypted = this.encrypt(fileContent);
 
-        // Upload to Cloud Storage
-        const blob = bucket.file(`sessions/${userId}/${phoneNumber}/${file}`);
+        const blob = bucket.file(`${tempPrefix}${file}`);
         await blob.save(encrypted, {
           metadata: {
             contentType: "application/octet-stream",
             metadata: {
               userId,
               phoneNumber,
-              encrypted: "true",
+              uploadedAt: new Date().toISOString(),
             },
           },
         });
-      }
+      });
+
+      // Wait for ALL files to upload to temp location
+      await Promise.all(uploadPromises);
+
+      // PHASE 2: Atomic move - delete old backup, rename temp to final
+      // Delete old backup files (if any)
+      const [oldFiles] = await bucket.getFiles({ prefix: finalPrefix });
+      await Promise.all(
+        oldFiles.map((file) =>
+          file.delete().catch(() => {
+            // Ignore delete errors - old files may not exist
+          }),
+        ),
+      );
+
+      // Move temp files to final location (rename)
+      const [tempFiles] = await bucket.getFiles({ prefix: tempPrefix });
+      await Promise.all(
+        tempFiles.map(async (file) => {
+          const newName = file.name.replace(tempPrefix, finalPrefix);
+          await file.move(newName);
+        }),
+      );
 
       this.logger.debug(
         { userId, phoneNumber, files: files.length },
-        "Session backed up to Cloud Storage",
+        "Session backed up atomically to Cloud Storage",
       );
     } catch (error) {
       this.logger.error(
         { userId, phoneNumber, error },
-        "Failed to backup session",
+        "Failed to backup session to Cloud Storage",
       );
+
+      // CLEANUP: Delete any partial temp files on failure
+      try {
+        const [tempFiles] = await bucket.getFiles({
+          prefix: `sessions/${userId}/${phoneNumber}/.tmp-`,
+        });
+        await Promise.all(tempFiles.map((f) => f.delete().catch(() => {})));
+      } catch (cleanupError) {
+        this.logger.error({ cleanupError }, "Failed to cleanup temp files");
+      }
+
       throw error;
     }
   }
@@ -642,7 +678,7 @@ export class SessionManager {
     }
 
     const sessionKey = this.getSessionKey(userId, phoneNumber);
-    const sessionPath = path.join(this.sessionsDir, `${userId}-${phoneNumber}`);
+    const sessionPath = this.getSessionPath(userId, phoneNumber);
 
     try {
       // Clear backup timer if exists
@@ -743,7 +779,7 @@ export class SessionManager {
       phoneNumber = formattedPhone;
     }
 
-    const sessionPath = path.join(this.sessionsDir, `${userId}-${phoneNumber}`);
+    const sessionPath = this.getSessionPath(userId, phoneNumber);
 
     try {
       const files = await readdir(sessionPath);
@@ -982,13 +1018,66 @@ export class SessionManager {
   }
 
   /**
+   * Validate and sanitize user ID to prevent directory traversal
+   */
+  private validateUserId(userId: string): string {
+    // Remove path traversal sequences
+    const sanitized = userId.replace(/\.\./g, "").replace(/[\/\\]/g, "");
+
+    // Validate format (alphanumeric, dash, underscore only)
+    if (!/^[a-zA-Z0-9_-]+$/.test(sanitized)) {
+      throw new Error("Invalid user ID format");
+    }
+
+    if (sanitized.length === 0 || sanitized.length > 128) {
+      throw new Error("Invalid user ID length");
+    }
+
+    return sanitized;
+  }
+
+  /**
+   * Get sanitized session path with directory traversal protection
+   */
+  private getSessionPath(userId: string, phoneNumber: string): string {
+    // Sanitize inputs - remove directory traversal sequences
+    const sanitizedUserId = userId.replace(/\.\./g, "").replace(/[\/\\]/g, "");
+    const sanitizedPhone = phoneNumber.replace(/\.\./g, "").replace(/[\/\\]/g, "");
+
+    // Additional validation: if phone number contained traversal sequences, it's invalid
+    if (phoneNumber.includes("..") || phoneNumber.includes("/") || phoneNumber.includes("\\")) {
+      throw new Error("Invalid phone number: contains directory traversal sequences");
+    }
+
+    const sessionPath = path.join(
+      this.sessionsDir,
+      `${sanitizedUserId}-${sanitizedPhone}`,
+    );
+
+    // CRITICAL: Verify resolved path is within sessionsDir
+    const resolvedPath = path.resolve(sessionPath);
+    const resolvedSessionsDir = path.resolve(this.sessionsDir);
+
+    if (!resolvedPath.startsWith(resolvedSessionsDir)) {
+      throw new Error(
+        "Invalid session path: potential directory traversal attack",
+      );
+    }
+
+    return sessionPath;
+  }
+
+  /**
    * Helper method to get session key
    */
   private getSessionKey(userId: string, phoneNumber: string): string {
+    // Validate userId to prevent directory traversal
+    const validatedUserId = this.validateUserId(userId);
+
     // Phone number should already be formatted by this point
     // but ensure consistency just in case
     const formattedPhone = formatPhoneNumberSafe(phoneNumber) || phoneNumber;
-    return `${userId}:${formattedPhone}`;
+    return `${validatedUserId}:${formattedPhone}`;
   }
 
   /**
