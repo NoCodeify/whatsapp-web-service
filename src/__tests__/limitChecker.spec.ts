@@ -51,6 +51,14 @@ describe("LimitChecker", () => {
     mockContactsQuery = {
       empty: false,
       get: jest.fn(),
+      docs: [
+        {
+          data: jest.fn().mockReturnValue({
+            last_outgoing_message_at: admin.firestore.Timestamp.now(),
+            last_incoming_message_at: null,
+          }),
+        },
+      ],
     };
 
     mockUserDoc = {
@@ -290,8 +298,16 @@ describe("LimitChecker", () => {
         });
       });
 
-      it("should detect existing contact when contact found", async () => {
+      it("should detect existing contact when we've messaged them before", async () => {
         mockContactsQuery.empty = false;
+        mockContactsQuery.docs = [
+          {
+            data: jest.fn().mockReturnValue({
+              last_outgoing_message_at: admin.firestore.Timestamp.now(),
+              last_incoming_message_at: null,
+            }),
+          },
+        ];
 
         const result = await limitChecker.checkLimits(
           userId,
@@ -305,6 +321,62 @@ describe("LimitChecker", () => {
           whatsapp_web_usage: expect.objectContaining({
             new_contacts_today: 0, // Not incremented for existing contact
             total_contacts_today: 1, // Still counts as a message
+          }),
+        });
+      });
+
+      it("should NOT treat as new contact when they messaged us first (replying)", async () => {
+        mockContactsQuery.empty = false;
+        mockContactsQuery.docs = [
+          {
+            data: jest.fn().mockReturnValue({
+              last_outgoing_message_at: null, // We haven't messaged them
+              last_incoming_message_at: admin.firestore.Timestamp.now(), // They messaged us
+            }),
+          },
+        ];
+
+        const result = await limitChecker.checkLimits(
+          userId,
+          phoneNumber,
+          recipientNumber,
+        );
+
+        expect(result.isNewContact).toBe(false); // Not new - we're just replying
+        expect(result.allowed).toBe(true);
+        expect(mockFirestore.mockTransactionUpdate).toHaveBeenCalledWith(expect.anything(), {
+          whatsapp_web_usage: expect.objectContaining({
+            new_contacts_today: 0, // Not incremented - just replying
+            total_contacts_today: 1, // Still counts as a message
+          }),
+        });
+      });
+
+      it("should treat as new contact when contact exists but never messaged (imported)", async () => {
+        mockContactsQuery.empty = false;
+        mockContactsQuery.docs = [
+          {
+            data: jest.fn().mockReturnValue({
+              last_outgoing_message_at: null, // Never messaged them
+              last_incoming_message_at: null, // They never messaged us
+              // This is an imported contact that exists in DB but has no message history
+            }),
+          },
+        ];
+
+        const result = await limitChecker.checkLimits(
+          userId,
+          phoneNumber,
+          recipientNumber,
+        );
+
+        expect(result.isNewContact).toBe(true); // IS new - first time messaging
+        expect(result.allowed).toBe(true);
+        expect(mockFirestore.mockTransactionUpdate).toHaveBeenCalledWith(expect.anything(), {
+          whatsapp_web_usage: expect.objectContaining({
+            new_contacts_today: 1, // Incremented for new contact
+            total_contacts_today: 1,
+            monthly_new_contacts: 1,
           }),
         });
       });
@@ -324,7 +396,7 @@ describe("LimitChecker", () => {
         expect(result.isNewContact).toBe(false);
       });
 
-      it("should treat contact as new on error checking", async () => {
+      it("should treat contact as NOT new on error (to avoid over-counting)", async () => {
         // Force an error in the contacts query
         mockFirestore.collection = jest.fn((collectionName: string) => ({
           doc: jest.fn((_docId: string) => {
@@ -358,8 +430,8 @@ describe("LimitChecker", () => {
           recipientNumber,
         );
 
-        // Should treat as new contact for safety
-        expect(result.isNewContact).toBe(true);
+        // Should treat as NOT new contact for safety (to avoid over-counting)
+        expect(result.isNewContact).toBe(false);
       });
     });
 

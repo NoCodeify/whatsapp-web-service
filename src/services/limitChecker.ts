@@ -60,14 +60,22 @@ export class LimitChecker {
   }
 
   /**
-   * Check if a phone number is a new contact
+   * Check if a phone number is a new OUTBOUND-INITIATED contact
+   * A contact is considered "new" for limit purposes if:
+   * 1. No contact document exists (completely new), OR
+   * 2. Contact exists but we've never messaged them AND they've never messaged us (dormant contact)
+   *
+   * A contact is NOT "new" if:
+   * - We've sent them a message before (last_outgoing_message_at exists)
+   * - They messaged us first (last_incoming_message_at exists but no last_outgoing_message_at)
+   *   → In this case, we're just REPLYING, not initiating a new conversation
    */
   private async checkIfNewContact(
     userId: string,
     recipientNumber: string,
   ): Promise<boolean> {
     try {
-      // Check if contact exists (using phone_number field to match Firestore schema)
+      // Check if contact exists in user's contacts collection
       const contactsQuery = await this.db
         .collection("users")
         .doc(userId)
@@ -76,14 +84,36 @@ export class LimitChecker {
         .limit(1)
         .get();
 
-      return contactsQuery.empty;
+      // If no contact found, it's a new contact
+      if (contactsQuery.empty) {
+        return true;
+      }
+
+      // Contact exists - check message history
+      const contactData = contactsQuery.docs[0].data();
+      const hasOutgoingMessages = contactData.last_outgoing_message_at != null;
+      const hasIncomingMessages = contactData.last_incoming_message_at != null;
+
+      // If we've sent them messages before, not a new contact
+      if (hasOutgoingMessages) {
+        return false;
+      }
+
+      // If they've messaged us first but we haven't replied yet,
+      // this is NOT a new contact - we're just replying (not initiating)
+      if (hasIncomingMessages && !hasOutgoingMessages) {
+        return false;
+      }
+
+      // Contact exists but no message history - treat as new contact
+      return true;
     } catch (error) {
       logger.error(
         { error, userId, recipientNumber },
         "Error checking if new contact",
       );
-      // Default to treating as new contact for safety
-      return true;
+      // Default to treating as NOT new contact for safety (to avoid over-counting)
+      return false;
     }
   }
 
