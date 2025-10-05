@@ -983,6 +983,47 @@ export class ConnectionPool extends EventEmitter {
           "Message sent event published",
         );
 
+        // Update contact with outgoing message timestamp
+        try {
+          const contactsQuery = await admin
+            .firestore()
+            .collection("users")
+            .doc(userId)
+            .collection("contacts")
+            .where("phone_number", "==", toNumber)
+            .limit(1)
+            .get();
+
+          if (!contactsQuery.empty) {
+            await contactsQuery.docs[0].ref.update({
+              last_outgoing_message_at: admin.firestore.Timestamp.now(),
+              last_activity_at: admin.firestore.Timestamp.now(),
+              channel: "whatsapp_web",
+            });
+
+            this.logger.debug(
+              { userId, toNumber, messageId },
+              "Updated contact with outgoing message timestamp",
+            );
+          } else {
+            this.logger.warn(
+              { userId, toNumber, messageId },
+              "Contact not found for outgoing message timestamp update",
+            );
+          }
+        } catch (error) {
+          // Log but don't fail the send operation
+          this.logger.warn(
+            {
+              userId,
+              toNumber: toNumber?.substring(0, 6) + "***",
+              error,
+              messageId,
+            },
+            "Failed to update contact with outgoing timestamp",
+          );
+        }
+
         // Log successful completion with all metrics
         this.logger.info(
           {
