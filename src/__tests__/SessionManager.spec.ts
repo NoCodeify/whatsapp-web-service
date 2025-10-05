@@ -369,11 +369,25 @@ describe("SessionManager", () => {
       mockBucket.getFiles.mockClear();
       mockStorageFile.download.mockClear();
 
-      // Mock cloud files exist
+      // Create properly encrypted test data using the same encryption method
+      const testData = Buffer.from(JSON.stringify({ test: "data" }));
+      const encryptionKey = process.env.SESSION_ENCRYPTION_KEY || crypto.randomBytes(32).toString("hex");
+      const iv = crypto.randomBytes(16);
+      const cipher = crypto.createCipheriv(
+        "aes-256-cbc",
+        Buffer.from(encryptionKey.slice(0, 64), "hex"),
+        iv
+      );
+      const mockEncryptedData = Buffer.concat([
+        iv,
+        cipher.update(testData),
+        cipher.final()
+      ]);
+
       const testFile = {
         ...mockStorageFile,
         name: "sessions/user123/+1234567890/creds.json",
-        download: jest.fn().mockResolvedValue([Buffer.from("encrypted data")]),
+        download: jest.fn().mockResolvedValue([mockEncryptedData]),
       };
 
       mockBucket.getFiles.mockResolvedValueOnce([[testFile]]);
@@ -878,7 +892,9 @@ describe("SessionManager", () => {
       await sessionManager.createConnection(userId, "1234567890");
 
       const exists = await sessionManager.sessionExists(userId, "+1234567890");
-      expect(exists).toBe(false); // Different formats don't match exactly
+      // The sessionExists method uses formatPhoneNumberSafe which normalizes both numbers to the same format
+      // So "1234567890" becomes "+1234567890" and they match
+      expect(exists).toBe(true); // Phone numbers are formatted consistently
     });
   });
 
