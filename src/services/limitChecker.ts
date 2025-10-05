@@ -67,15 +67,12 @@ export class LimitChecker {
     recipientNumber: string,
   ): Promise<boolean> {
     try {
-      // Clean the phone number
-      const cleanNumber = recipientNumber.replace(/\D/g, "");
-
-      // Check if contact exists
+      // Check if contact exists (using phone_number field to match Firestore schema)
       const contactsQuery = await this.db
         .collection("users")
         .doc(userId)
         .collection("contacts")
-        .where("phone", "==", cleanNumber)
+        .where("phone_number", "==", recipientNumber)
         .limit(1)
         .get();
 

@@ -309,17 +309,17 @@ describe("LimitChecker", () => {
         });
       });
 
-      it("should clean phone number when checking contacts", async () => {
-        const dirtyNumber = "+1 (987) 654-3210";
+      it("should use exact phone number format when checking contacts", async () => {
+        const formattedNumber = "+1 (987) 654-3210";
         mockContactsQuery.empty = false;
 
         const result = await limitChecker.checkLimits(
           userId,
           phoneNumber,
-          dirtyNumber,
+          formattedNumber,
         );
 
-        // Phone number should be processed and message allowed
+        // Phone number format should be preserved and contact found
         expect(result.allowed).toBe(true);
         expect(result.isNewContact).toBe(false);
       });
