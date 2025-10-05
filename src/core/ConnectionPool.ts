@@ -1494,8 +1494,8 @@ export class ConnectionPool extends EventEmitter {
         );
 
         // Determine if these are history messages or real-time messages
-        const isHistorySync =
-          upsert.type === "append" || upsert.type === "notify";
+        // Only "append" type is for history sync, "notify" is for real-time incoming messages
+        const isHistorySync = upsert.type === "append";
         const hourAgo = Date.now() - 60 * 60 * 1000;
 
         // Separate messages into history and real-time

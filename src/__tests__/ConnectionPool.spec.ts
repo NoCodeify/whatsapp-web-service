@@ -974,6 +974,155 @@ describe("ConnectionPool", () => {
     });
   });
 
+  describe("Message Event Handling", () => {
+    let mockFetch: jest.Mock;
+    let messagesUpsertHandler: (upsert: any) => Promise<void>;
+
+    beforeEach(async () => {
+      // Clear all mocks first
+      jest.clearAllMocks();
+
+      // Mock global fetch
+      mockFetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ success: true, messageId: "pub-123" }),
+        text: async () => "",
+      });
+      global.fetch = mockFetch as any;
+
+      // Ensure mockErrorHandler has handleError method
+      mockErrorHandler = {
+        on: jest.fn(),
+        executeWithRetry: jest.fn().mockImplementation((fn) => fn()),
+        handleError: jest.fn().mockResolvedValue(true),
+        shutdown: jest.fn(),
+      } as any;
+
+      // Reset mockSocket
+      mockSocket = {
+        end: jest.fn(),
+        logout: jest.fn().mockResolvedValue(undefined),
+        ev: {
+          on: jest.fn(),
+          off: jest.fn(),
+          removeAllListeners: jest.fn(),
+        },
+        sendMessage: jest.fn().mockResolvedValue({
+          key: { id: "msg_123", remoteJid: "1234567890@s.whatsapp.net" },
+        }),
+      } as any;
+
+      connectionPool = new ConnectionPool(
+        mockProxyManager,
+        mockSessionManager,
+        mockFirestore,
+        mockPubsub,
+        mockConnectionStateManager,
+        mockWsManager,
+        mockErrorHandler,
+        mockInstanceCoordinator,
+      );
+
+      mockSessionManager.createConnection.mockResolvedValue(mockSocket);
+
+      // Capture the messages.upsert handler when connection is created
+      (mockSocket.ev.on as jest.Mock).mockImplementation((event: string, handler: any) => {
+        if (event === "messages.upsert") {
+          messagesUpsertHandler = handler;
+        }
+      });
+
+      // Add a connection to register the event handlers
+      await connectionPool.addConnection("user123", "+1234567890", "nl");
+    });
+
+    afterEach(() => {
+      delete (global as any).fetch;
+    });
+
+    it("should handle notify type messages as real-time incoming messages", async () => {
+      // Ensure handler was captured
+      expect(messagesUpsertHandler).toBeDefined();
+
+      const testMessage = {
+        key: {
+          id: "test-msg-123",
+          remoteJid: "31612345678@s.whatsapp.net",
+          fromMe: false,
+        },
+        message: {
+          conversation: "Hello from notify type",
+        },
+        messageTimestamp: Math.floor(Date.now() / 1000), // Current timestamp
+      };
+
+      const upsert = {
+        type: "notify",
+        messages: [testMessage],
+      };
+
+      await messagesUpsertHandler(upsert);
+
+      // Verify fetch was called to send message to Cloud Function
+      expect(mockFetch).toHaveBeenCalled();
+      const fetchCall = mockFetch.mock.calls[0];
+      expect(fetchCall[0]).toContain("incomingWhatsAppWebMessage");
+
+      const payload = JSON.parse(fetchCall[1].body);
+      expect(payload.body).toBe("Hello from notify type");
+      expect(payload.fromPhoneNumber).toBe("+31612345678");
+      expect(payload.userId).toBe("user123");
+    });
+
+    it("should handle append type messages as history sync", async () => {
+      const testMessage = {
+        key: {
+          id: "history-msg-123",
+          remoteJid: "31612345678@s.whatsapp.net",
+          fromMe: false,
+        },
+        message: {
+          conversation: "Old history message",
+        },
+        messageTimestamp: Math.floor((Date.now() - 2 * 60 * 60 * 1000) / 1000), // 2 hours ago
+      };
+
+      const upsert = {
+        type: "append",
+        messages: [testMessage],
+      };
+
+      await messagesUpsertHandler(upsert);
+
+      // Verify fetch was NOT called (history messages don't go to Cloud Function immediately)
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it("should skip group messages", async () => {
+      const groupMessage = {
+        key: {
+          id: "group-msg-123",
+          remoteJid: "123456789@g.us", // Group identifier
+          fromMe: false,
+        },
+        message: {
+          conversation: "Group message",
+        },
+        messageTimestamp: Math.floor(Date.now() / 1000),
+      };
+
+      const upsert = {
+        type: "notify",
+        messages: [groupMessage],
+      };
+
+      await messagesUpsertHandler(upsert);
+
+      // Group messages should be skipped
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+  });
+
   describe("Shutdown", () => {
     beforeEach(() => {
       connectionPool = new ConnectionPool(
