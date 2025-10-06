@@ -142,11 +142,26 @@ jobs:
       - name: 🛡️ Pre-deployment verification
         run: |
           echo "🔍 Verifying dev deployment is healthy before production deployment..."
-          DEV_URL="https://whatsapp-web-service-dev-123456-ew.a.run.app"  # Update with actual dev URL
+
+          # Dynamically get the dev service URL
+          DEV_URL=$(gcloud run services describe whatsapp-web-service-dev \
+            --region=${{ env.REGION }} \
+            --project=whatzaidev \
+            --format='value(status.url)')
+
+          if [ -z "$DEV_URL" ]; then
+            echo "❌ Failed to retrieve dev service URL"
+            exit 1
+          fi
+
+          echo "Dev service URL: ${DEV_URL}"
 
           # Verify dev is healthy
           echo "Checking dev health endpoint..."
-          DEV_HEALTH=$(curl -s "${DEV_URL}/health" | jq -r '.status')
+          HEALTH_RESPONSE=$(curl -s -f "${DEV_URL}/health" || echo "{\"status\":\"error\"}")
+          echo "Health response: ${HEALTH_RESPONSE}"
+
+          DEV_HEALTH=$(echo "${HEALTH_RESPONSE}" | jq -r '.status // "error"')
           if [[ "$DEV_HEALTH" != "healthy" ]]; then
             echo "❌ Dev deployment is not healthy. Status: $DEV_HEALTH"
             echo "Production deployment blocked for safety."
