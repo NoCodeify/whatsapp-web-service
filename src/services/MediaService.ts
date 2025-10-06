@@ -252,29 +252,47 @@ export class MediaService {
 
   /**
    * Get file extension from mimetype
+   * Handles mimetypes with parameters (e.g., "audio/ogg; codecs=opus")
    */
   private getFileExtension(mimetype: string): string {
+    // Strip parameters from mimetype (everything after semicolon)
+    const baseMimetype = mimetype.split(";")[0].trim();
+
     const extensions: Record<string, string> = {
+      // Images
       "image/jpeg": ".jpg",
       "image/jpg": ".jpg",
       "image/png": ".png",
       "image/gif": ".gif",
       "image/webp": ".webp",
+      // Videos
       "video/mp4": ".mp4",
       "video/quicktime": ".mov",
       "video/webm": ".webm",
+      "video/3gpp": ".3gp",
+      "video/x-msvideo": ".avi",
+      // Audio
       "audio/mpeg": ".mp3",
       "audio/mp4": ".m4a",
       "audio/ogg": ".ogg",
+      "audio/webm": ".webm",
+      "audio/aac": ".aac",
+      "audio/wav": ".wav",
+      "audio/x-wav": ".wav",
+      // Documents
       "application/pdf": ".pdf",
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
         ".docx",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
         ".xlsx",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation":
+        ".pptx",
+      "application/msword": ".doc",
+      "application/vnd.ms-excel": ".xls",
       "text/plain": ".txt",
     };
 
-    return extensions[mimetype] || ".bin";
+    return extensions[baseMimetype] || ".bin";
   }
 
   /**
