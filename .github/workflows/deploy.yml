@@ -143,16 +143,8 @@ jobs:
         run: |
           echo "🔍 Verifying dev deployment is healthy before production deployment..."
 
-          # Dynamically get the dev service URL
-          DEV_URL=$(gcloud run services describe whatsapp-web-service-dev \
-            --region=${{ env.REGION }} \
-            --project=whatzaidev \
-            --format='value(status.url)')
-
-          if [ -z "$DEV_URL" ]; then
-            echo "❌ Failed to retrieve dev service URL"
-            exit 1
-          fi
+          # Use hardcoded dev URL (cross-project gcloud access not available)
+          DEV_URL="https://whatsapp-web-service-dev-bsuangutsa-lm.a.run.app"
 
           echo "Dev service URL: ${DEV_URL}"
 
