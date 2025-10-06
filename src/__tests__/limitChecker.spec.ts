@@ -289,13 +289,16 @@ describe("LimitChecker", () => {
 
         expect(result.isNewContact).toBe(true);
         expect(result.allowed).toBe(true);
-        expect(mockFirestore.mockTransactionUpdate).toHaveBeenCalledWith(expect.anything(), {
-          whatsapp_web_usage: expect.objectContaining({
-            new_contacts_today: 1,
-            total_contacts_today: 1,
-            monthly_new_contacts: 1,
-          }),
-        });
+        expect(mockFirestore.mockTransactionUpdate).toHaveBeenCalledWith(
+          expect.anything(),
+          {
+            whatsapp_web_usage: expect.objectContaining({
+              new_contacts_today: 1,
+              total_contacts_today: 1,
+              monthly_new_contacts: 1,
+            }),
+          },
+        );
       });
 
       it("should detect existing contact when we've messaged them before", async () => {
@@ -317,12 +320,15 @@ describe("LimitChecker", () => {
 
         expect(result.isNewContact).toBe(false);
         expect(result.allowed).toBe(true);
-        expect(mockFirestore.mockTransactionUpdate).toHaveBeenCalledWith(expect.anything(), {
-          whatsapp_web_usage: expect.objectContaining({
-            new_contacts_today: 0, // Not incremented for existing contact
-            total_contacts_today: 1, // Still counts as a message
-          }),
-        });
+        expect(mockFirestore.mockTransactionUpdate).toHaveBeenCalledWith(
+          expect.anything(),
+          {
+            whatsapp_web_usage: expect.objectContaining({
+              new_contacts_today: 0, // Not incremented for existing contact
+              total_contacts_today: 1, // Still counts as a message
+            }),
+          },
+        );
       });
 
       it("should NOT treat as new contact when they messaged us first (replying)", async () => {
@@ -344,12 +350,15 @@ describe("LimitChecker", () => {
 
         expect(result.isNewContact).toBe(false); // Not new - we're just replying
         expect(result.allowed).toBe(true);
-        expect(mockFirestore.mockTransactionUpdate).toHaveBeenCalledWith(expect.anything(), {
-          whatsapp_web_usage: expect.objectContaining({
-            new_contacts_today: 0, // Not incremented - just replying
-            total_contacts_today: 1, // Still counts as a message
-          }),
-        });
+        expect(mockFirestore.mockTransactionUpdate).toHaveBeenCalledWith(
+          expect.anything(),
+          {
+            whatsapp_web_usage: expect.objectContaining({
+              new_contacts_today: 0, // Not incremented - just replying
+              total_contacts_today: 1, // Still counts as a message
+            }),
+          },
+        );
       });
 
       it("should treat as new contact when contact exists but never messaged (imported)", async () => {
@@ -372,13 +381,16 @@ describe("LimitChecker", () => {
 
         expect(result.isNewContact).toBe(true); // IS new - first time messaging
         expect(result.allowed).toBe(true);
-        expect(mockFirestore.mockTransactionUpdate).toHaveBeenCalledWith(expect.anything(), {
-          whatsapp_web_usage: expect.objectContaining({
-            new_contacts_today: 1, // Incremented for new contact
-            total_contacts_today: 1,
-            monthly_new_contacts: 1,
-          }),
-        });
+        expect(mockFirestore.mockTransactionUpdate).toHaveBeenCalledWith(
+          expect.anything(),
+          {
+            whatsapp_web_usage: expect.objectContaining({
+              new_contacts_today: 1, // Incremented for new contact
+              total_contacts_today: 1,
+              monthly_new_contacts: 1,
+            }),
+          },
+        );
       });
 
       it("should use exact phone number format when checking contacts", async () => {
@@ -731,15 +743,18 @@ describe("LimitChecker", () => {
         );
 
         expect(result.allowed).toBe(true);
-        expect(mockFirestore.mockTransactionUpdate).toHaveBeenCalledWith(expect.anything(), {
-          whatsapp_web_usage: expect.objectContaining({
-            today_date: "2025-01-15", // Updated to today
-            new_contacts_today: 1, // Reset and incremented
-            total_contacts_today: 1, // Reset and incremented
-            limit_email_sent_today: false, // Reset
-            monthly_new_contacts: 51, // Monthly counter persists
-          }),
-        });
+        expect(mockFirestore.mockTransactionUpdate).toHaveBeenCalledWith(
+          expect.anything(),
+          {
+            whatsapp_web_usage: expect.objectContaining({
+              today_date: "2025-01-15", // Updated to today
+              new_contacts_today: 1, // Reset and incremented
+              total_contacts_today: 1, // Reset and incremented
+              limit_email_sent_today: false, // Reset
+              monthly_new_contacts: 51, // Monthly counter persists
+            }),
+          },
+        );
       });
 
       it("should not reset counters when same day", async () => {
@@ -763,14 +778,17 @@ describe("LimitChecker", () => {
         );
 
         expect(result.allowed).toBe(true);
-        expect(mockFirestore.mockTransactionUpdate).toHaveBeenCalledWith(expect.anything(), {
-          whatsapp_web_usage: expect.objectContaining({
-            today_date: "2025-01-15",
-            new_contacts_today: 11, // Incremented, not reset
-            total_contacts_today: 51, // Incremented, not reset
-            monthly_new_contacts: 101,
-          }),
-        });
+        expect(mockFirestore.mockTransactionUpdate).toHaveBeenCalledWith(
+          expect.anything(),
+          {
+            whatsapp_web_usage: expect.objectContaining({
+              today_date: "2025-01-15",
+              new_contacts_today: 11, // Incremented, not reset
+              total_contacts_today: 51, // Incremented, not reset
+              monthly_new_contacts: 101,
+            }),
+          },
+        );
       });
     });
 
@@ -897,13 +915,16 @@ describe("LimitChecker", () => {
         );
 
         expect(result.allowed).toBe(true);
-        expect(mockFirestore.mockTransactionUpdate).toHaveBeenCalledWith(expect.anything(), {
-          whatsapp_web_usage: expect.objectContaining({
-            today_date: "2025-01-15",
-            new_contacts_today: 0,
-            total_contacts_today: 1,
-          }),
-        });
+        expect(mockFirestore.mockTransactionUpdate).toHaveBeenCalledWith(
+          expect.anything(),
+          {
+            whatsapp_web_usage: expect.objectContaining({
+              today_date: "2025-01-15",
+              new_contacts_today: 0,
+              total_contacts_today: 1,
+            }),
+          },
+        );
       });
 
       it("should use default messaging limit when not set", async () => {
@@ -994,11 +1015,14 @@ describe("LimitChecker", () => {
 
         await limitChecker.checkLimits(userId, phoneNumber, recipientNumber);
 
-        expect(mockFirestore.mockTransactionUpdate).toHaveBeenCalledWith(expect.anything(), {
-          whatsapp_web_usage: expect.objectContaining({
-            last_message_timestamp: expect.any(Object),
-          }),
-        });
+        expect(mockFirestore.mockTransactionUpdate).toHaveBeenCalledWith(
+          expect.anything(),
+          {
+            whatsapp_web_usage: expect.objectContaining({
+              last_message_timestamp: expect.any(Object),
+            }),
+          },
+        );
       });
     });
   });
@@ -1149,12 +1173,17 @@ describe("LimitChecker", () => {
         // Expected: One should be blocked, one allowed
         // Actual: Both probably allowed (no transaction/locking)
         const bothAllowed = result1.allowed && result2.allowed;
-        const updateCalls = mockFirestore.mockTransactionUpdate.mock.calls.length;
+        const updateCalls =
+          mockFirestore.mockTransactionUpdate.mock.calls.length;
 
         // Document potential bug
         if (bothAllowed && updateCalls === 2) {
-          console.log("POTENTIAL BUG: Race condition allows exceeding daily limit");
-          console.log(`Both requests allowed: ${bothAllowed}, Updates: ${updateCalls}`);
+          console.log(
+            "POTENTIAL BUG: Race condition allows exceeding daily limit",
+          );
+          console.log(
+            `Both requests allowed: ${bothAllowed}, Updates: ${updateCalls}`,
+          );
         }
       });
 
@@ -1420,11 +1449,7 @@ describe("LimitChecker", () => {
           },
         });
 
-        await limitChecker.checkLimits(
-          userId,
-          phoneNumber,
-          recipientNumber,
-        );
+        await limitChecker.checkLimits(userId, phoneNumber, recipientNumber);
 
         // Should reset counters
         expect(mockFirestore.mockTransactionUpdate).toHaveBeenCalled();
@@ -1661,28 +1686,32 @@ describe("LimitChecker", () => {
     describe("Update Failures", () => {
       it.skip("should handle failed database update gracefully", async () => {
         // Create a local mock that will fail for this test
-        const failingUpdate = jest.fn().mockRejectedValue(new Error("Database error"));
+        const failingUpdate = jest
+          .fn()
+          .mockRejectedValue(new Error("Database error"));
 
         // Override the runTransaction for this specific call
-        mockFirestore.runTransaction.mockImplementationOnce(async (callback: any) => {
-          const mockTransaction = {
-            get: jest.fn().mockResolvedValue({
-              exists: true,
-              data: () => ({
-                messaging_limit: 25,
-                whatsapp_web_usage: {
-                  today_date: "2025-01-15",
-                  new_contacts_today: 10,
-                  total_contacts_today: 50,
-                  last_reset: admin.firestore.Timestamp.now(),
-                  monthly_new_contacts: 100,
-                },
+        mockFirestore.runTransaction.mockImplementationOnce(
+          async (callback: any) => {
+            const mockTransaction = {
+              get: jest.fn().mockResolvedValue({
+                exists: true,
+                data: () => ({
+                  messaging_limit: 25,
+                  whatsapp_web_usage: {
+                    today_date: "2025-01-15",
+                    new_contacts_today: 10,
+                    total_contacts_today: 50,
+                    last_reset: admin.firestore.Timestamp.now(),
+                    monthly_new_contacts: 100,
+                  },
+                }),
               }),
-            }),
-            update: failingUpdate,
-          };
-          return callback(mockTransaction);
-        });
+              update: failingUpdate,
+            };
+            return callback(mockTransaction);
+          },
+        );
 
         await expect(
           limitChecker.checkLimits(userId, phoneNumber, recipientNumber),

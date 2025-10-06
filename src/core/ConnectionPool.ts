@@ -4464,6 +4464,7 @@ export class ConnectionPool extends EventEmitter {
 
   /**
    * Remove session from recovery tracking
+   * IMPORTANT: This should NOT delete the phone number document, only clear recovery metadata
    */
   private async removeSessionFromRecovery(
     userId: string,
@@ -4476,11 +4477,17 @@ export class ConnectionPool extends EventEmitter {
         .collection("phone_numbers")
         .doc(phoneNumber);
 
-      await sessionRef.delete();
+      // Don't delete the document! Just clear recovery-specific fields
+      await sessionRef.update({
+        recovery_instance_url: null,
+        recovery_status: null,
+        recovery_proxy_country: null,
+        updated_at: new Date(),
+      });
 
       this.logger.info(
         { userId, phoneNumber },
-        "Removed session from recovery tracking",
+        "Removed session from recovery tracking (phone number preserved)",
       );
     } catch (error) {
       this.logger.error(

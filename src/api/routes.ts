@@ -340,17 +340,33 @@ export function createApiRoutes(
           return res.status(403).json({ error: "Forbidden" });
         }
 
+        // Check reason to determine if this is permanent deletion or soft disconnect
+        const reason = req.query.reason as string;
+        const isPermanentDelete =
+          reason === "user_initiated" || reason === "deleted";
+
         logger.info(
-          { userId, original: phoneNumber, formatted: formattedPhone },
+          {
+            userId,
+            original: phoneNumber,
+            formatted: formattedPhone,
+            reason,
+            isPermanentDelete,
+          },
           "Processing session deletion request",
         );
 
         await connectionPool.removeConnection(userId, formattedPhone, false); // User-initiated disconnect = explicit logout
-        await sessionManager.deleteSession(userId, formattedPhone);
+        await sessionManager.deleteSession(
+          userId,
+          formattedPhone,
+          isPermanentDelete,
+        );
 
         res.json({
           status: "disconnected",
           phoneNumber: formattedPhone,
+          permanentDelete: isPermanentDelete,
         });
       } catch (error) {
         logger.error(

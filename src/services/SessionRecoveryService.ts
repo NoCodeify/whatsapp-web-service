@@ -222,8 +222,7 @@ export class SessionRecoveryService {
 
         // Check if session has valid data for recovery
         const hasSessionData =
-          data.whatsapp_web?.session_exists ||
-          data.whatsapp_web?.qr_scanned;
+          data.whatsapp_web?.session_exists || data.whatsapp_web?.qr_scanned;
 
         if (!hasSessionData) {
           this.logger.debug(
@@ -249,8 +248,7 @@ export class SessionRecoveryService {
           sessions.push({
             userId,
             phoneNumber,
-            phoneCountry:
-              data.whatsapp_web?.phone_country || data.country_code,
+            phoneCountry: data.whatsapp_web?.phone_country || data.country_code,
             proxyCountry: data.whatsapp_web?.proxy_country,
             lastConnected:
               data.whatsapp_web?.last_updated?.toDate() ||
@@ -296,7 +294,9 @@ export class SessionRecoveryService {
       // Log the full error to console to see the index creation link
       console.error("=== Firestore Index Error ===");
       console.error("Full error object:", error);
-      console.error("If this is a missing index error, check the error above for the index creation URL");
+      console.error(
+        "If this is a missing index error, check the error above for the index creation URL",
+      );
       console.error("=============================");
     }
 

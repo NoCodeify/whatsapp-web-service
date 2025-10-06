@@ -669,8 +669,13 @@ export class SessionManager {
 
   /**
    * Delete a session
+   * @param permanentDelete - If true, deletes the phone number from Firestore (triggers full cleanup). If false, only disconnects the session.
    */
-  async deleteSession(userId: string, phoneNumber: string) {
+  async deleteSession(
+    userId: string,
+    phoneNumber: string,
+    permanentDelete: boolean = false,
+  ) {
     // Format phone number for consistency
     const formattedPhone = formatPhoneNumberSafe(phoneNumber);
     if (formattedPhone) {
@@ -744,7 +749,7 @@ export class SessionManager {
         }
       }
 
-      // Update Firestore - delete from unified phone_numbers collection
+      // Update Firestore - delete or disconnect from unified phone_numbers collection
       const phoneNumbersSnapshot = await this.firestore
         .collection("users")
         .doc(userId)
@@ -756,10 +761,32 @@ export class SessionManager {
 
       if (!phoneNumbersSnapshot.empty) {
         const sessionRef = phoneNumbersSnapshot.docs[0].ref;
-        await sessionRef.delete();
+        if (permanentDelete) {
+          // Permanent deletion: Remove document entirely (triggers onPhoneNumberDeleted)
+          await sessionRef.delete();
+          this.logger.info(
+            { userId, phoneNumber },
+            "Phone number permanently deleted from Firestore",
+          );
+        } else {
+          // Soft disconnect: Just update status, preserve phone number registration
+          await sessionRef.update({
+            status: "disconnected",
+            updated_at: new Date().toISOString(),
+          });
+          this.logger.info(
+            { userId, phoneNumber },
+            "Session disconnected, phone number preserved for reconnection",
+          );
+        }
       }
 
-      this.logger.info({ userId, phoneNumber }, "Session deleted");
+      this.logger.info(
+        { userId, phoneNumber, permanentDelete },
+        permanentDelete
+          ? "Session permanently deleted"
+          : "Session disconnected",
+      );
     } catch (error) {
       this.logger.error(
         { userId, phoneNumber, error },
@@ -910,8 +937,9 @@ export class SessionManager {
         const [userId, phoneNumber] = key.split(":");
 
         try {
-          // Delete the entire session (local + cloud)
-          await this.deleteSession(userId, phoneNumber);
+          // Cleanup old session files but preserve phone number registration
+          // Use soft delete (permanentDelete: false) to keep phone number for reconnection
+          await this.deleteSession(userId, phoneNumber, false);
           cleanedLocal++;
         } catch (error) {
           this.logger.error(
@@ -1042,11 +1070,19 @@ export class SessionManager {
   private getSessionPath(userId: string, phoneNumber: string): string {
     // Sanitize inputs - remove directory traversal sequences
     const sanitizedUserId = userId.replace(/\.\./g, "").replace(/[\/\\]/g, "");
-    const sanitizedPhone = phoneNumber.replace(/\.\./g, "").replace(/[\/\\]/g, "");
+    const sanitizedPhone = phoneNumber
+      .replace(/\.\./g, "")
+      .replace(/[\/\\]/g, "");
 
     // Additional validation: if phone number contained traversal sequences, it's invalid
-    if (phoneNumber.includes("..") || phoneNumber.includes("/") || phoneNumber.includes("\\")) {
-      throw new Error("Invalid phone number: contains directory traversal sequences");
+    if (
+      phoneNumber.includes("..") ||
+      phoneNumber.includes("/") ||
+      phoneNumber.includes("\\")
+    ) {
+      throw new Error(
+        "Invalid phone number: contains directory traversal sequences",
+      );
     }
 
     const sessionPath = path.join(

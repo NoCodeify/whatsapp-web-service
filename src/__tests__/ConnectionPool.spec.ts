@@ -28,7 +28,9 @@ jest.mock("../utils/phoneNumber", () => ({
     }
     return phone;
   }),
-  formatWhatsAppJid: jest.fn((phone) => `${phone.replace("+", "")}@s.whatsapp.net`),
+  formatWhatsAppJid: jest.fn(
+    (phone) => `${phone.replace("+", "")}@s.whatsapp.net`,
+  ),
 }));
 jest.mock("pino", () => {
   const mockLogger = {
@@ -296,10 +298,9 @@ describe("ConnectionPool", () => {
         undefined,
         false,
       );
-      expect(mockInstanceCoordinator.updateSessionActivity).toHaveBeenCalledWith(
-        "user123",
-        "+1234567890",
-      );
+      expect(
+        mockInstanceCoordinator.updateSessionActivity,
+      ).toHaveBeenCalledWith("user123", "+1234567890");
     });
 
     it("should format phone numbers to E.164 format", async () => {
@@ -322,11 +323,7 @@ describe("ConnectionPool", () => {
     it("should reject connections when at capacity", async () => {
       // Add connections up to max
       for (let i = 0; i < 5; i++) {
-        await connectionPool.addConnection(
-          "user123",
-          `+123456789${i}`,
-          "nl",
-        );
+        await connectionPool.addConnection("user123", `+123456789${i}`, "nl");
       }
 
       // Try to add one more
@@ -424,11 +421,7 @@ describe("ConnectionPool", () => {
 
       // Fill to capacity
       for (let i = 0; i < 5; i++) {
-        await connectionPool.addConnection(
-          "user123",
-          `+123456789${i}`,
-          "nl",
-        );
+        await connectionPool.addConnection("user123", `+123456789${i}`, "nl");
       }
 
       // Try to add one more
@@ -466,9 +459,9 @@ describe("ConnectionPool", () => {
         "user123",
         "+1234567890",
       );
-      expect(
-        mockWsManager.unregisterConnection,
-      ).toHaveBeenCalledWith("user123:+1234567890");
+      expect(mockWsManager.unregisterConnection).toHaveBeenCalledWith(
+        "user123:+1234567890",
+      );
       expect(
         mockInstanceCoordinator.releaseSessionOwnership,
       ).toHaveBeenCalledWith("user123", "+1234567890");
@@ -602,11 +595,7 @@ describe("ConnectionPool", () => {
     it("should allow new connections after removing existing ones", async () => {
       // Fill to capacity
       for (let i = 0; i < 5; i++) {
-        await connectionPool.addConnection(
-          "user123",
-          `+123456789${i}`,
-          "nl",
-        );
+        await connectionPool.addConnection("user123", `+123456789${i}`, "nl");
       }
 
       // Try to add one more (should fail)
@@ -1026,11 +1015,13 @@ describe("ConnectionPool", () => {
       mockSessionManager.createConnection.mockResolvedValue(mockSocket);
 
       // Capture the messages.upsert handler when connection is created
-      (mockSocket.ev.on as jest.Mock).mockImplementation((event: string, handler: any) => {
-        if (event === "messages.upsert") {
-          messagesUpsertHandler = handler;
-        }
-      });
+      (mockSocket.ev.on as jest.Mock).mockImplementation(
+        (event: string, handler: any) => {
+          if (event === "messages.upsert") {
+            messagesUpsertHandler = handler;
+          }
+        },
+      );
 
       // Add a connection to register the event handlers
       await connectionPool.addConnection("user123", "+1234567890", "nl");
@@ -1323,10 +1314,7 @@ describe("ConnectionPool", () => {
         }
 
         // Verify cleanup
-        const connection = connectionPool.getConnection(
-          userId,
-          "+12345670099",
-        );
+        const connection = connectionPool.getConnection(userId, "+12345670099");
         expect(connection).toBeNull();
 
         // At least 95% should succeed (allowing for some timing issues)
@@ -1386,10 +1374,9 @@ describe("ConnectionPool", () => {
         expect(mockWsManager.unregisterConnection).toHaveBeenCalledWith(
           `${userId}:${phoneNumber}`,
         );
-        expect(mockInstanceCoordinator.releaseSessionOwnership).toHaveBeenCalledWith(
-          userId,
-          phoneNumber,
-        );
+        expect(
+          mockInstanceCoordinator.releaseSessionOwnership,
+        ).toHaveBeenCalledWith(userId, phoneNumber);
       });
 
       it("should clear all maps and timers on shutdown", async () => {
@@ -1417,7 +1404,10 @@ describe("ConnectionPool", () => {
         await connectionPool.addConnection("user123", "+1234567890", "nl");
 
         // Set connection to open state
-        const connection = connectionPool.getConnection("user123", "+1234567890");
+        const connection = connectionPool.getConnection(
+          "user123",
+          "+1234567890",
+        );
         if (connection) {
           connection.state.connection = "open";
         }
@@ -1469,7 +1459,9 @@ describe("ConnectionPool", () => {
         ).resolves.not.toThrow();
 
         // Connection should still be removed from pool
-        expect(connectionPool.getConnection("user123", "+1234567890")).toBeNull();
+        expect(
+          connectionPool.getConnection("user123", "+1234567890"),
+        ).toBeNull();
       });
 
       it("should handle proxy assignment failure during addConnection", async () => {
@@ -1504,7 +1496,9 @@ describe("ConnectionPool", () => {
         expect(result2).toBeUndefined();
 
         // Connection should be removed
-        expect(connectionPool.getConnection("user123", "+1234567890")).toBeNull();
+        expect(
+          connectionPool.getConnection("user123", "+1234567890"),
+        ).toBeNull();
 
         // Logout should be called at least once (might be called twice due to race)
         expect(mockSocket.logout).toHaveBeenCalled();
@@ -1527,7 +1521,10 @@ describe("ConnectionPool", () => {
         await Promise.all([addPromise, removePromise]);
 
         // The final state should be consistent (either exists or doesn't)
-        const connection = connectionPool.getConnection("user123", "+1234567890");
+        const connection = connectionPool.getConnection(
+          "user123",
+          "+1234567890",
+        );
         // Connection might exist or not depending on timing, but shouldn't crash
         expect(typeof connection).toBeDefined();
       });
@@ -1598,7 +1595,9 @@ describe("ConnectionPool", () => {
         expect(result).toBe(false);
 
         // Connection should not be in pool
-        expect(connectionPool.getConnection("user123", "+1234567890")).toBeNull();
+        expect(
+          connectionPool.getConnection("user123", "+1234567890"),
+        ).toBeNull();
       });
 
       it("should handle SessionManager.listAllSessions failure during recovery", async () => {
@@ -1688,14 +1687,16 @@ describe("ConnectionPool", () => {
         expect(result).toBe(false);
 
         // Connection should not be created
-        expect(connectionPool.getConnection("user123", "+1234567890")).toBeNull();
+        expect(
+          connectionPool.getConnection("user123", "+1234567890"),
+        ).toBeNull();
       });
 
       it("should handle PubSub publish failure gracefully", async () => {
         const mockTopic = {
-          publishMessage: jest.fn().mockRejectedValue(
-            new Error("PubSub unavailable"),
-          ),
+          publishMessage: jest
+            .fn()
+            .mockRejectedValue(new Error("PubSub unavailable")),
         };
         mockPubsub.topic = jest.fn().mockReturnValue(mockTopic);
 
@@ -1704,15 +1705,16 @@ describe("ConnectionPool", () => {
         await connectionPool.addConnection("user123", "+1234567890", "nl");
 
         // Connection should still be created even if PubSub fails
-        const connection = connectionPool.getConnection("user123", "+1234567890");
+        const connection = connectionPool.getConnection(
+          "user123",
+          "+1234567890",
+        );
         expect(connection).not.toBeNull();
       });
 
       it("should handle Firestore doc.get failure during recovery", async () => {
         const mockDoc = {
-          get: jest.fn().mockRejectedValue(
-            new Error("Firestore read timeout"),
-          ),
+          get: jest.fn().mockRejectedValue(new Error("Firestore read timeout")),
         };
         const mockCollection = {
           doc: jest.fn().mockReturnValue(mockDoc),
@@ -1740,7 +1742,9 @@ describe("ConnectionPool", () => {
         ]);
 
         // Recovery should complete even if Firestore reads fail for some sessions
-        await expect(connectionPool.initializeRecovery()).resolves.not.toThrow();
+        await expect(
+          connectionPool.initializeRecovery(),
+        ).resolves.not.toThrow();
       });
     });
 
@@ -1804,7 +1808,10 @@ describe("ConnectionPool", () => {
       it("should handle timeout cleanup for QR codes", async () => {
         await connectionPool.addConnection("user123", "+1234567890", "nl");
 
-        const connection = connectionPool.getConnection("user123", "+1234567890");
+        const connection = connectionPool.getConnection(
+          "user123",
+          "+1234567890",
+        );
 
         // Simulate QR timeout being set
         if (connection) {

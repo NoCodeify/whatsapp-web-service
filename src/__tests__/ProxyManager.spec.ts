@@ -121,12 +121,16 @@ describe("ProxyManager", () => {
         fallbackUsed: false,
       });
 
-      const config = await proxyManager.getProxyConfig(userId, phoneNumber, "us");
+      const config = await proxyManager.getProxyConfig(
+        userId,
+        phoneNumber,
+        "us",
+      );
 
       expect(mockDynamicProxyService.assignProxy).toHaveBeenCalledWith(
         userId,
         phoneNumber,
-        "us"
+        "us",
       );
       expect(config).toMatchObject({
         host: "brd.superproxy.io",
@@ -155,7 +159,11 @@ describe("ProxyManager", () => {
       await proxyManager.getProxyConfig(userId, phoneNumber, "us");
 
       // Second call should reuse existing proxy
-      const config = await proxyManager.getProxyConfig(userId, phoneNumber, "us");
+      const config = await proxyManager.getProxyConfig(
+        userId,
+        phoneNumber,
+        "us",
+      );
 
       // assignProxy should only be called once
       expect(mockDynamicProxyService.assignProxy).toHaveBeenCalledTimes(1);
@@ -164,7 +172,7 @@ describe("ProxyManager", () => {
 
     it("should handle dynamic proxy service failure and fallback", async () => {
       mockDynamicProxyService.assignProxy.mockRejectedValue(
-        new Error("Dynamic allocation failed")
+        new Error("Dynamic allocation failed"),
       );
 
       // Inject BrightDataService as fallback
@@ -185,22 +193,24 @@ describe("ProxyManager", () => {
 
       expect(mockBrightDataService.getProxyConfig).toHaveBeenCalledWith(
         userId,
-        phoneNumber
+        phoneNumber,
       );
       expect(config).toEqual(fallbackConfig);
     });
 
     it("should throw error when no proxy available in ISP mode", async () => {
       mockDynamicProxyService.assignProxy.mockRejectedValue(
-        new Error("No proxy available for us - not falling back to other countries")
+        new Error(
+          "No proxy available for us - not falling back to other countries",
+        ),
       );
       (proxyManager as any).brightDataService = mockBrightDataService;
       mockBrightDataService.getProxyConfig.mockResolvedValue(null);
 
       await expect(
-        proxyManager.getProxyConfig(userId, phoneNumber)
+        proxyManager.getProxyConfig(userId, phoneNumber),
       ).rejects.toThrow(
-        "No proxy available for secure connection. Connection blocked to protect user privacy."
+        "No proxy available for secure connection. Connection blocked to protect user privacy.",
       );
     });
 
@@ -217,7 +227,8 @@ describe("ProxyManager", () => {
       const config = await pm.getProxyConfig(userId, phoneNumber, "gb");
 
       // Restore
-      if (originalProxyType) process.env.BRIGHT_DATA_PROXY_TYPE = originalProxyType;
+      if (originalProxyType)
+        process.env.BRIGHT_DATA_PROXY_TYPE = originalProxyType;
 
       expect(config).toMatchObject({
         host: "brd.superproxy.io",
@@ -265,9 +276,15 @@ describe("ProxyManager", () => {
       });
 
       const mockProxyAgent = {} as ProxyAgent;
-      (ProxyAgent as unknown as jest.Mock).mockImplementation(() => mockProxyAgent);
+      (ProxyAgent as unknown as jest.Mock).mockImplementation(
+        () => mockProxyAgent,
+      );
 
-      const agent = await proxyManager.createProxyAgent(userId, phoneNumber, "us");
+      const agent = await proxyManager.createProxyAgent(
+        userId,
+        phoneNumber,
+        "us",
+      );
 
       expect(agent).toBe(mockProxyAgent);
       expect(ProxyAgent).toHaveBeenCalledWith({
@@ -347,7 +364,9 @@ describe("ProxyManager", () => {
       // Release proxy
       await proxyManager.releaseProxy(userId, phoneNumber);
 
-      expect(mockDynamicProxyService.releaseProxy).toHaveBeenCalledWith("1.2.3.4");
+      expect(mockDynamicProxyService.releaseProxy).toHaveBeenCalledWith(
+        "1.2.3.4",
+      );
     });
 
     it("should handle release when no proxy is assigned", async () => {
@@ -372,7 +391,7 @@ describe("ProxyManager", () => {
       await proxyManager.getProxyConfig(userId, phoneNumber, "us");
 
       mockDynamicProxyService.releaseProxy.mockRejectedValue(
-        new Error("Release failed")
+        new Error("Release failed"),
       );
 
       // Should not throw
@@ -401,13 +420,18 @@ describe("ProxyManager", () => {
       });
 
       const mockProxyAgent = {} as ProxyAgent;
-      (ProxyAgent as unknown as jest.Mock).mockImplementation(() => mockProxyAgent);
+      (ProxyAgent as unknown as jest.Mock).mockImplementation(
+        () => mockProxyAgent,
+      );
 
       (axios.get as jest.Mock).mockResolvedValue({
         data: { ip: "5.6.7.8" },
       });
 
-      const result = await proxyManager.testProxyConnection(userId, phoneNumber);
+      const result = await proxyManager.testProxyConnection(
+        userId,
+        phoneNumber,
+      );
 
       expect(result).toBe(true);
       expect(axios.get).toHaveBeenCalledWith(
@@ -415,7 +439,7 @@ describe("ProxyManager", () => {
         {
           httpsAgent: mockProxyAgent,
           timeout: 10000,
-        }
+        },
       );
     });
 
@@ -441,9 +465,14 @@ describe("ProxyManager", () => {
       });
 
       (ProxyAgent as unknown as jest.Mock).mockImplementation(() => ({}));
-      (axios.get as jest.Mock).mockRejectedValue(new Error("Connection failed"));
+      (axios.get as jest.Mock).mockRejectedValue(
+        new Error("Connection failed"),
+      );
 
-      const result = await proxyManager.testProxyConnection(userId, phoneNumber);
+      const result = await proxyManager.testProxyConnection(
+        userId,
+        phoneNumber,
+      );
 
       expect(result).toBe(false);
     });
@@ -463,7 +492,10 @@ describe("ProxyManager", () => {
       (ProxyAgent as unknown as jest.Mock).mockImplementation(() => ({}));
       (axios.get as jest.Mock).mockResolvedValue({ data: {} });
 
-      const result = await proxyManager.testProxyConnection(userId, phoneNumber);
+      const result = await proxyManager.testProxyConnection(
+        userId,
+        phoneNumber,
+      );
 
       expect(result).toBe(false);
     });
@@ -520,7 +552,7 @@ describe("ProxyManager", () => {
       // Mock availableLocations to make a specific country unavailable
       const locations = proxyManager.getAvailableLocations();
       const modifiedLocations = locations.map((l) =>
-        l.code === "fr" ? { ...l, available: false } : l
+        l.code === "fr" ? { ...l, available: false } : l,
       );
 
       // Replace the private availableLocations property
@@ -572,7 +604,7 @@ describe("ProxyManager", () => {
 
     it("should not throw if session doesn't exist", () => {
       expect(() =>
-        proxyManager.updateSessionInfo(userId, phoneNumber, "1.2.3.4", "us")
+        proxyManager.updateSessionInfo(userId, phoneNumber, "1.2.3.4", "us"),
       ).not.toThrow();
     });
   });
@@ -740,7 +772,7 @@ describe("ProxyManager", () => {
     it("should generate unique session IDs", async () => {
       // Access private method
       const generateSessionId = (proxyManager as any).generateSessionId.bind(
-        proxyManager
+        proxyManager,
       );
 
       const sessionId1 = generateSessionId(userId, phoneNumber);
@@ -752,7 +784,7 @@ describe("ProxyManager", () => {
 
     it("should force new session ID when requested", async () => {
       const generateSessionId = (proxyManager as any).generateSessionId.bind(
-        proxyManager
+        proxyManager,
       );
 
       const sessionId1 = generateSessionId(userId, phoneNumber, false);
@@ -763,7 +795,7 @@ describe("ProxyManager", () => {
 
     it("should generate session ID with correct format", async () => {
       const generateSessionId = (proxyManager as any).generateSessionId.bind(
-        proxyManager
+        proxyManager,
       );
 
       const sessionId = generateSessionId(userId, phoneNumber);
@@ -794,7 +826,7 @@ describe("ProxyManager", () => {
         const config = await pm.getProxyConfig(
           "user123",
           "+1234567890",
-          country
+          country,
         );
         expect(config?.username).toContain(`country-${country}`);
       }
@@ -816,23 +848,23 @@ describe("ProxyManager", () => {
 
     it("should handle dynamic proxy allocation errors", async () => {
       mockDynamicProxyService.assignProxy.mockRejectedValue(
-        new Error("Allocation failed")
+        new Error("Allocation failed"),
       );
 
       // Without fallback, should throw
       await expect(
-        proxyManager.getProxyConfig("user123", "+1234567890")
+        proxyManager.getProxyConfig("user123", "+1234567890"),
       ).rejects.toThrow();
     });
 
     it("should handle proxy release errors gracefully", async () => {
       mockDynamicProxyService.releaseProxy.mockRejectedValue(
-        new Error("Release failed")
+        new Error("Release failed"),
       );
 
       // Should not throw
       await expect(
-        proxyManager.releaseProxy("user123", "+1234567890")
+        proxyManager.releaseProxy("user123", "+1234567890"),
       ).resolves.not.toThrow();
     });
 
@@ -853,7 +885,7 @@ describe("ProxyManager", () => {
       });
 
       await expect(
-        proxyManager.testProxyConnection("user123", "+1234567890")
+        proxyManager.testProxyConnection("user123", "+1234567890"),
       ).resolves.toBe(false);
     });
   });
@@ -882,7 +914,7 @@ describe("ProxyManager", () => {
 
       const isHealthy = await proxyManager.testProxyConnection(
         "user123",
-        "+1234567890"
+        "+1234567890",
       );
 
       expect(isHealthy).toBe(true);
@@ -890,7 +922,7 @@ describe("ProxyManager", () => {
         "https://api.ipify.org?format=json",
         expect.objectContaining({
           timeout: 10000,
-        })
+        }),
       );
     });
 
@@ -911,7 +943,7 @@ describe("ProxyManager", () => {
 
       const isHealthy = await proxyManager.testProxyConnection(
         "user123",
-        "+1234567890"
+        "+1234567890",
       );
 
       expect(isHealthy).toBe(false);
@@ -938,7 +970,7 @@ describe("ProxyManager", () => {
       const mockAgent = {} as ProxyAgent;
       (ProxyAgent as unknown as jest.Mock).mockImplementation((config) => {
         expect(config.uri).toMatch(
-          /^http:\/\/brd-customer-.+:test-password@brd\.superproxy\.io:22225$/
+          /^http:\/\/brd-customer-.+:test-password@brd\.superproxy\.io:22225$/,
         );
         return mockAgent;
       });
@@ -976,7 +1008,7 @@ describe("ProxyManager", () => {
       const config = await pm.getProxyConfig("user123", "+1234567890", "us");
 
       expect(config?.username).toMatch(
-        /^brd-customer-test-customer-id-zone-residential-country-us-session-[a-f0-9]{16}$/
+        /^brd-customer-test-customer-id-zone-residential-country-us-session-[a-f0-9]{16}$/,
       );
     });
 
@@ -1024,10 +1056,17 @@ describe("ProxyManager Integration Tests", () => {
     });
     mockDynamicProxyService.releaseProxy.mockResolvedValue(undefined);
 
-    const proxyManager = new ProxyManager(mockFirestore, mockDynamicProxyService);
+    const proxyManager = new ProxyManager(
+      mockFirestore,
+      mockDynamicProxyService,
+    );
 
     // 1. Get proxy config
-    const config = await proxyManager.getProxyConfig("user123", "+1234567890", "us");
+    const config = await proxyManager.getProxyConfig(
+      "user123",
+      "+1234567890",
+      "us",
+    );
     expect(config).not.toBeNull();
     expect((config as any)?.ip).toBe("1.2.3.4");
 

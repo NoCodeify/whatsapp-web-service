@@ -250,7 +250,10 @@ export function formatPhoneNumberSafe(
   const MAX_PHONE_LENGTH = 20;
   if (!phoneNumber || phoneNumber.length > MAX_PHONE_LENGTH) {
     logger.warn(
-      { phoneNumber: phoneNumber?.substring(0, 50), length: phoneNumber?.length },
+      {
+        phoneNumber: phoneNumber?.substring(0, 50),
+        length: phoneNumber?.length,
+      },
       "Phone number exceeds maximum allowed length",
     );
     return null;

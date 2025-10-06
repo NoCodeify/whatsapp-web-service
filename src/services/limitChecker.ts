@@ -257,12 +257,21 @@ export class LimitChecker {
         };
 
         // CRITICAL: Sanitize all counters to prevent data corruption (BUG #1, #2, #3 fix)
-        usage.new_contacts_today = this.sanitizeCounter(usage.new_contacts_today);
-        usage.total_contacts_today = this.sanitizeCounter(usage.total_contacts_today);
-        usage.monthly_new_contacts = this.sanitizeCounter(usage.monthly_new_contacts);
+        usage.new_contacts_today = this.sanitizeCounter(
+          usage.new_contacts_today,
+        );
+        usage.total_contacts_today = this.sanitizeCounter(
+          usage.total_contacts_today,
+        );
+        usage.monthly_new_contacts = this.sanitizeCounter(
+          usage.monthly_new_contacts,
+        );
 
         // Also sanitize the daily limit (BUG #4 fix)
-        const dailyLimit = Math.max(1, this.sanitizeCounter(phoneData?.messaging_limit) || 25);
+        const dailyLimit = Math.max(
+          1,
+          this.sanitizeCounter(phoneData?.messaging_limit) || 25,
+        );
         const monthlyLimit = dailyLimit * 20; // Approximate monthly limit based on daily
 
         // Reset daily counters if needed
@@ -300,10 +309,7 @@ export class LimitChecker {
               totalMessagesUsage: {
                 used: totalMessagesUsed,
                 limit: DAILY_MESSAGE_LIMIT,
-                remaining: Math.max(
-                  0,
-                  DAILY_MESSAGE_LIMIT - totalMessagesUsed,
-                ),
+                remaining: Math.max(0, DAILY_MESSAGE_LIMIT - totalMessagesUsed),
                 percentage: Math.min(
                   100,
                   (totalMessagesUsed / DAILY_MESSAGE_LIMIT) * 100,
@@ -345,10 +351,7 @@ export class LimitChecker {
               totalMessagesUsage: {
                 used: totalMessagesUsed,
                 limit: DAILY_MESSAGE_LIMIT,
-                remaining: Math.max(
-                  0,
-                  DAILY_MESSAGE_LIMIT - totalMessagesUsed,
-                ),
+                remaining: Math.max(0, DAILY_MESSAGE_LIMIT - totalMessagesUsed),
                 percentage: Math.min(
                   100,
                   (totalMessagesUsed / DAILY_MESSAGE_LIMIT) * 100,
@@ -360,12 +363,15 @@ export class LimitChecker {
           }
 
           // Safe increment: sanitize before adding (prevents string concatenation)
-          usage.new_contacts_today = this.sanitizeCounter(usage.new_contacts_today) + 1;
-          usage.monthly_new_contacts = this.sanitizeCounter(usage.monthly_new_contacts) + 1;
+          usage.new_contacts_today =
+            this.sanitizeCounter(usage.new_contacts_today) + 1;
+          usage.monthly_new_contacts =
+            this.sanitizeCounter(usage.monthly_new_contacts) + 1;
         }
 
         // Safe increment: sanitize before adding (prevents string concatenation)
-        usage.total_contacts_today = this.sanitizeCounter(usage.total_contacts_today) + 1;
+        usage.total_contacts_today =
+          this.sanitizeCounter(usage.total_contacts_today) + 1;
         usage.last_message_timestamp = admin.firestore.Timestamp.now();
 
         // Atomic update within transaction
