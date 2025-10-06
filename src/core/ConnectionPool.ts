@@ -2607,18 +2607,21 @@ export class ConnectionPool extends EventEmitter {
     }
 
     // Check for media with captions
+    // Return caption if exists, otherwise empty string (Cloud Functions will add descriptive prefix)
     if (message.message?.imageMessage) {
-      return message.message.imageMessage.caption || "[Image]";
+      return message.message.imageMessage.caption || "";
     }
     if (message.message?.videoMessage) {
-      return message.message.videoMessage.caption || "[Video]";
+      return message.message.videoMessage.caption || "";
     }
     if (message.message?.audioMessage) {
-      return "[Audio]";
+      // Audio messages don't have captions, return empty string
+      return "";
     }
     if (message.message?.documentMessage) {
+      // Keep document filename for context
       const fileName = message.message.documentMessage.fileName || "";
-      return fileName ? `[Document: ${fileName}]` : "[Document]";
+      return fileName ? `[Document: ${fileName}]` : "";
     }
     if (message.message?.stickerMessage) {
       return "[Sticker]";
