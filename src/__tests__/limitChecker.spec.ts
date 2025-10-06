@@ -81,35 +81,42 @@ describe("LimitChecker", () => {
       .mockName("mockTransactionUpdate");
 
     mockFirestore = {
-      collection: jest.fn((collectionName: string) => ({
-        doc: jest.fn((_docId: string) => {
-          if (collectionName === "users") {
-            return {
-              get: jest.fn().mockResolvedValue(mockUserDoc),
-              collection: jest.fn((subCollection: string) => {
-                if (subCollection === "phone_numbers") {
-                  return {
-                    doc: jest.fn().mockReturnValue({
-                      get: jest.fn().mockResolvedValue(mockPhoneDoc),
-                    }),
-                  };
-                }
-                if (subCollection === "contacts") {
-                  return {
-                    where: jest.fn().mockReturnValue({
-                      limit: jest.fn().mockReturnValue({
-                        get: jest.fn().mockResolvedValue(mockContactsQuery),
-                      }),
-                    }),
-                  };
-                }
-                return {};
+      collection: jest.fn((collectionName: string) => {
+        // Handle top-level contacts collection (not a subcollection!)
+        if (collectionName === "contacts") {
+          return {
+            where: jest.fn().mockReturnValue({
+              where: jest.fn().mockReturnValue({
+                limit: jest.fn().mockReturnValue({
+                  get: jest.fn().mockResolvedValue(mockContactsQuery),
+                }),
               }),
-            };
-          }
-          return {};
-        }),
-      })),
+            }),
+          };
+        }
+
+        // Handle users collection
+        return {
+          doc: jest.fn((_docId: string) => {
+            if (collectionName === "users") {
+              return {
+                get: jest.fn().mockResolvedValue(mockUserDoc),
+                collection: jest.fn((subCollection: string) => {
+                  if (subCollection === "phone_numbers") {
+                    return {
+                      doc: jest.fn().mockReturnValue({
+                        get: jest.fn().mockResolvedValue(mockPhoneDoc),
+                      }),
+                    };
+                  }
+                  return {};
+                }),
+              };
+            }
+            return {};
+          }),
+        };
+      }),
       runTransaction: jest.fn(async (callback: any) => {
         const mockTransaction = {
           get: jest.fn().mockResolvedValue(mockPhoneDoc),
