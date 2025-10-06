@@ -1260,7 +1260,7 @@ export class ConnectionPool extends EventEmitter {
         setTimeout(async () => {
           this.logger.info(
             { userId, phoneNumber, isRecovery: connection.isRecovery },
-            "Emitting sync:started event",
+            "Starting background sync - keeping status as 'connected' to allow messaging",
           );
 
           // Initialize sync progress in database
@@ -1274,21 +1274,12 @@ export class ConnectionPool extends EventEmitter {
             );
           }
 
-          // Update phone number status for UI
-          // For recovery connections, keep status as "connected" (don't show "importing")
-          // For new connections, show "importing" status
-          if (!connection.isRecovery) {
-            await this.updatePhoneNumberStatus(userId, phoneNumber, "importing");
-            this.logger.info(
-              { userId, phoneNumber },
-              "New connection - showing 'importing' status in UI",
-            );
-          } else {
-            this.logger.info(
-              { userId, phoneNumber },
-              "Recovery connection - keeping 'connected' status in UI while syncing in background",
-            );
-          }
+          // IMPORTANT: Do NOT change status to "importing"
+          // Keep status as "connected" so messages can be sent/received during sync
+          this.logger.info(
+            { userId, phoneNumber },
+            "Sync running in background - status remains 'connected' to allow messaging",
+          );
 
           this.emit("sync:started", {
             userId,
