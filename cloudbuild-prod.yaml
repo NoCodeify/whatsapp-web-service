@@ -5,9 +5,9 @@ steps:
     args:
       - "build"
       - "-t"
-      - "europe-central2-docker.pkg.dev/whatzai-prod/whatsapp-repo/whatsapp-web-service:prod"
+      - "europe-central2-docker.pkg.dev/whatzai/whatsapp-repo/whatsapp-web-service:prod"
       - "-t"
-      - "europe-central2-docker.pkg.dev/whatzai-prod/whatsapp-repo/whatsapp-web-service:latest"
+      - "europe-central2-docker.pkg.dev/whatzai/whatsapp-repo/whatsapp-web-service:latest"
       - "."
 
   # Push the container image
@@ -15,7 +15,7 @@ steps:
     args:
       - "push"
       - "--all-tags"
-      - "europe-central2-docker.pkg.dev/whatzai-prod/whatsapp-repo/whatsapp-web-service"
+      - "europe-central2-docker.pkg.dev/whatzai/whatsapp-repo/whatsapp-web-service"
 
   # Deploy to Cloud Run
   - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
@@ -25,7 +25,7 @@ steps:
       - "deploy"
       - "whatsapp-web-service-prod"
       - "--image"
-      - "europe-central2-docker.pkg.dev/whatzai-prod/whatsapp-repo/whatsapp-web-service:prod"
+      - "europe-central2-docker.pkg.dev/whatzai/whatsapp-repo/whatsapp-web-service:prod"
       - "--region"
       - "europe-central2"
       - "--platform"
@@ -47,9 +47,9 @@ steps:
       - "--no-cpu-throttling"
       - "--cpu-boost"
       - "--service-account"
-      - "whatsapp-service@whatzai-prod.iam.gserviceaccount.com"
+      - "whatsapp-service@whatzai.iam.gserviceaccount.com"
       - "--set-env-vars"
-      - "NODE_ENV=production,GOOGLE_CLOUD_PROJECT=whatzai-prod,STORAGE_BUCKET=whatzai-prod-whatsapp-sessions,LOG_LEVEL=info,SESSION_STORAGE_TYPE=cloud,SESSION_BACKUP_INTERVAL=120000,MEMORY_THRESHOLD=0.8,MAX_CONNECTIONS=50,WS_KEEPALIVE_INTERVAL=15000,MEMORY_DEBUG=false,HEALTH_CHECK_INTERVAL=60000,INSTANCE_COORDINATION_ENABLED=true,INSTANCE_HEARTBEAT_INTERVAL=15000,INSTANCE_TIMEOUT=60000,SESSION_TIMEOUT=300000,MAX_CONNECTIONS_PER_INSTANCE=50,ENABLE_SESSION_MIGRATION=true,LOAD_BALANCE_STRATEGY=least_connections"
+      - "NODE_ENV=production,GOOGLE_CLOUD_PROJECT=whatzai,STORAGE_BUCKET=whatzai-whatsapp-sessions,MEDIA_BUCKET=whatzai-whatsapp-media,LOG_LEVEL=info,SESSION_STORAGE_TYPE=cloud,SESSION_BACKUP_INTERVAL=120000,MEMORY_THRESHOLD=0.8,MAX_CONNECTIONS=50,WS_KEEPALIVE_INTERVAL=15000,MEMORY_DEBUG=false,HEALTH_CHECK_INTERVAL=60000,INSTANCE_COORDINATION_ENABLED=true,INSTANCE_HEARTBEAT_INTERVAL=15000,INSTANCE_TIMEOUT=60000,SESSION_TIMEOUT=300000,MAX_CONNECTIONS_PER_INSTANCE=50,ENABLE_SESSION_MIGRATION=true,LOAD_BALANCE_STRATEGY=least_connections"
       - "--set-secrets"
       - "API_KEY=WHATSAPP_WEB_API_KEY:latest,BRIGHT_DATA_CUSTOMER_ID=BRIGHT_DATA_CUSTOMER_ID:latest,BRIGHT_DATA_ZONE_PASSWORD=BRIGHT_DATA_ZONE_PASSWORD:latest,SESSION_ENCRYPTION_KEY=SESSION_ENCRYPTION_KEY:latest,WS_TOKEN=WHATSAPP_WS_TOKEN:latest"
       - "--allow-unauthenticated"

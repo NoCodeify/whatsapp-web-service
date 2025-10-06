@@ -166,7 +166,7 @@ jobs:
         run: |
           gcloud builds submit \
             --config cloudbuild-prod.yaml \
-            --project whatzai-prod \
+            --project whatzai \
             --region ${{ env.REGION }}
 
       - name: 🔍 Verify production deployment
@@ -174,7 +174,7 @@ jobs:
           # Get service URL
           SERVICE_URL=$(gcloud run services describe whatsapp-web-service-prod \
             --region=${{ env.REGION }} \
-            --project=whatzai-prod \
+            --project=whatzai \
             --format='value(status.url)')
 
           echo "🌐 Production service deployed at: ${SERVICE_URL}"

@@ -29,11 +29,38 @@ export class MediaService {
     this.storage = new Storage({
       projectId: process.env.GOOGLE_CLOUD_PROJECT,
     });
-    this.bucket =
-      process.env.MEDIA_BUCKET ||
-      process.env.STORAGE_BUCKET ||
-      "whatzai-whatsapp-media";
+
+    // Determine which bucket to use with fallback logic
+    if (process.env.MEDIA_BUCKET) {
+      this.bucket = process.env.MEDIA_BUCKET;
+      logger.info(
+        { bucket: this.bucket, source: "MEDIA_BUCKET" },
+        "Using dedicated media storage bucket",
+      );
+    } else if (process.env.STORAGE_BUCKET) {
+      this.bucket = process.env.STORAGE_BUCKET;
+      logger.warn(
+        { bucket: this.bucket },
+        "MEDIA_BUCKET not set, using STORAGE_BUCKET for media files. Consider setting MEDIA_BUCKET for better separation.",
+      );
+    } else {
+      this.bucket = "whatzai-whatsapp-media";
+      logger.warn(
+        { bucket: this.bucket },
+        "No bucket configured, using default bucket. Set MEDIA_BUCKET or STORAGE_BUCKET environment variable.",
+      );
+    }
+
     this.maxFileSizeMB = parseInt(process.env.MAX_FILE_SIZE_MB || "16");
+
+    logger.info(
+      {
+        bucket: this.bucket,
+        projectId: process.env.GOOGLE_CLOUD_PROJECT,
+        maxFileSizeMB: this.maxFileSizeMB,
+      },
+      "MediaService initialized",
+    );
   }
 
   /**
@@ -120,15 +147,22 @@ export class MediaService {
       );
 
       return result;
-    } catch (error) {
+    } catch (error: any) {
       logger.error(
         {
-          error,
+          error: {
+            message: error.message,
+            code: error.code,
+            name: error.name,
+            stack: error.stack,
+          },
           userId,
           phoneNumber,
           fileSize: file.size,
           mimetype: file.mimetype,
           uploadDuration: Date.now() - uploadStartTime,
+          bucketName: this.bucket,
+          projectId: process.env.GOOGLE_CLOUD_PROJECT,
         },
         "Failed to upload media",
       );
@@ -161,9 +195,18 @@ export class MediaService {
       };
 
       return await this.uploadMedia(mediaFile, userId, phoneNumber);
-    } catch (error) {
+    } catch (error: any) {
       logger.error(
-        { error, userId, phoneNumber, mimetype },
+        {
+          error: {
+            message: error.message,
+            code: error.code,
+            name: error.name,
+          },
+          userId,
+          phoneNumber,
+          mimetype,
+        },
         "Failed to download and upload WhatsApp media",
       );
       throw error;
@@ -252,8 +295,19 @@ export class MediaService {
       const bucket = this.storage.bucket(this.bucket);
       await bucket.file(filename).delete();
       logger.info({ filename }, "Media file deleted");
-    } catch (error) {
-      logger.error({ error, filename }, "Failed to delete media file");
+    } catch (error: any) {
+      logger.error(
+        {
+          error: {
+            message: error.message,
+            code: error.code,
+            name: error.name,
+          },
+          filename,
+          bucketName: this.bucket,
+        },
+        "Failed to delete media file",
+      );
       throw error;
     }
   }
