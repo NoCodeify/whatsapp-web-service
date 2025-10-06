@@ -99,7 +99,7 @@ describe("Integration: WhatsApp Web Limit Enforcement", () => {
         whatsapp_web_usage: {
           today_date: "2025-01-15",
           new_contacts_today: 0,
-          total_contacts_today: 0,
+          total_messages_today: 0,
         },
         messaging_limit: dailyLimit,
       }),
@@ -186,7 +186,7 @@ describe("Integration: WhatsApp Web Limit Enforcement", () => {
           whatsapp_web_usage: {
             ...currentData.whatsapp_web_usage,
             new_contacts_today: i + 1,
-            total_contacts_today: i + 1,
+            total_messages_today: i + 1,
           },
         });
 
@@ -236,7 +236,7 @@ describe("Integration: WhatsApp Web Limit Enforcement", () => {
         whatsapp_web_usage: {
           today_date: "2025-01-15",
           new_contacts_today: 25,
-          total_contacts_today: 25,
+          total_messages_today: 25,
         },
         messaging_limit: dailyLimit,
       });
@@ -292,7 +292,7 @@ describe("Integration: WhatsApp Web Limit Enforcement", () => {
         whatsapp_web_usage: {
           today_date: "2025-01-15",
           new_contacts_today: 25,
-          total_contacts_today: 26, // Incremented
+          total_messages_today: 26, // Incremented
         },
         messaging_limit: dailyLimit,
       });
@@ -321,7 +321,7 @@ describe("Integration: WhatsApp Web Limit Enforcement", () => {
         whatsapp_web_usage: {
           today_date: "2025-01-15",
           new_contacts_today: 25,
-          total_contacts_today: 250,
+          total_messages_today: 250,
         },
         messaging_limit: dailyLimit,
       });
@@ -349,7 +349,7 @@ describe("Integration: WhatsApp Web Limit Enforcement", () => {
         whatsapp_web_usage: {
           today_date: "2025-01-15", // Old date - system will detect reset needed
           new_contacts_today: 25,
-          total_contacts_today: 250,
+          total_messages_today: 250,
         },
         messaging_limit: dailyLimit,
       });
@@ -400,7 +400,7 @@ describe("Integration: WhatsApp Web Limit Enforcement", () => {
           whatsapp_web_usage: {
             today_date: "2025-01-15",
             new_contacts_today: 24,
-            total_contacts_today: 24,
+            total_messages_today: 24,
           },
           messaging_limit: dailyLimit,
         }),
@@ -416,7 +416,7 @@ describe("Integration: WhatsApp Web Limit Enforcement", () => {
           whatsapp_web_usage: {
             today_date: "2025-01-15",
             new_contacts_today: 5,
-            total_contacts_today: 5,
+            total_messages_today: 5,
           },
           messaging_limit: dailyLimit,
         }),
@@ -503,7 +503,7 @@ describe("Integration: WhatsApp Web Limit Enforcement", () => {
         whatsapp_web_usage: {
           today_date: "2025-01-15",
           new_contacts_today: 25,
-          total_contacts_today: 25,
+          total_messages_today: 25,
         },
         messaging_limit: dailyLimit,
       });
@@ -562,7 +562,7 @@ describe("Integration: WhatsApp Web Limit Enforcement", () => {
         whatsapp_web_usage: {
           today_date: "2025-01-15",
           new_contacts_today: currentUsage,
-          total_contacts_today: currentUsage,
+          total_messages_today: currentUsage,
         },
         messaging_limit: dailyLimit,
       });
@@ -638,7 +638,7 @@ describe("Integration: WhatsApp Web Limit Enforcement", () => {
         whatsapp_web_usage: {
           today_date: "2025-01-15",
           new_contacts_today: 25,
-          total_contacts_today: 25,
+          total_messages_today: 25,
         },
         messaging_limit: dailyLimit,
       });

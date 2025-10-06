@@ -154,6 +154,19 @@ const corsOptions = {
       return callback(null, true);
     }
 
+    // In development mode, allow all localhost origins (Flutter Web uses dynamic ports)
+    if (process.env.NODE_ENV === "development" && origin) {
+      const isLocalhost =
+        origin.startsWith("http://localhost:") ||
+        origin.startsWith("http://127.0.0.1:") ||
+        origin === "http://localhost" ||
+        origin === "http://127.0.0.1";
+
+      if (isLocalhost) {
+        return callback(null, true);
+      }
+    }
+
     // Otherwise, check against allowed origins
     const allowedOrigins = process.env.CORS_ORIGIN?.split(",") || [
       "http://localhost:3000",

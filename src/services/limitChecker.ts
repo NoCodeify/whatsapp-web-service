@@ -20,7 +20,7 @@ interface WhatsAppWebSettings {
 interface WhatsAppWebUsage {
   today_date: string;
   new_contacts_today: number;
-  total_contacts_today: number; // Actually tracks total messages sent
+  total_messages_today: number; // Actually tracks total messages sent
   last_reset: admin.firestore.Timestamp;
   monthly_new_contacts: number;
   last_message_timestamp?: admin.firestore.Timestamp;
@@ -134,7 +134,7 @@ export class LimitChecker {
         ...usage,
         today_date: today,
         new_contacts_today: 0,
-        total_contacts_today: 0,
+        total_messages_today: 0,
         limit_email_sent_today: false,
         last_reset: admin.firestore.Timestamp.now(),
       };
@@ -251,7 +251,7 @@ export class LimitChecker {
         let usage: WhatsAppWebUsage = phoneData?.whatsapp_web_usage || {
           today_date: new Date().toISOString().split("T")[0],
           new_contacts_today: 0,
-          total_contacts_today: 0,
+          total_messages_today: 0,
           last_reset: admin.firestore.Timestamp.now(),
           monthly_new_contacts: 0,
         };
@@ -260,8 +260,8 @@ export class LimitChecker {
         usage.new_contacts_today = this.sanitizeCounter(
           usage.new_contacts_today,
         );
-        usage.total_contacts_today = this.sanitizeCounter(
-          usage.total_contacts_today,
+        usage.total_messages_today = this.sanitizeCounter(
+          usage.total_messages_today,
         );
         usage.monthly_new_contacts = this.sanitizeCounter(
           usage.monthly_new_contacts,
@@ -291,7 +291,7 @@ export class LimitChecker {
             );
 
             // Calculate total message usage even when new contact limit reached
-            const totalMessagesUsed = usage.total_contacts_today || 0;
+            const totalMessagesUsed = usage.total_messages_today || 0;
             const totalMessageLimitReached =
               totalMessagesUsed >= DAILY_MESSAGE_LIMIT;
 
@@ -333,7 +333,7 @@ export class LimitChecker {
             );
 
             // Calculate total message usage even when monthly limit reached
-            const totalMessagesUsed = usage.total_contacts_today || 0;
+            const totalMessagesUsed = usage.total_messages_today || 0;
             const totalMessageLimitReached =
               totalMessagesUsed >= DAILY_MESSAGE_LIMIT;
 
@@ -370,8 +370,8 @@ export class LimitChecker {
         }
 
         // Safe increment: sanitize before adding (prevents string concatenation)
-        usage.total_contacts_today =
-          this.sanitizeCounter(usage.total_contacts_today) + 1;
+        usage.total_messages_today =
+          this.sanitizeCounter(usage.total_messages_today) + 1;
         usage.last_message_timestamp = admin.firestore.Timestamp.now();
 
         // Atomic update within transaction
@@ -387,7 +387,7 @@ export class LimitChecker {
         const percentage = (usage.new_contacts_today / dailyLimit) * 100;
 
         // Calculate total message usage stats
-        const totalMessagesUsed = usage.total_contacts_today;
+        const totalMessagesUsed = usage.total_messages_today;
         const totalMessageLimitReached =
           totalMessagesUsed >= DAILY_MESSAGE_LIMIT;
         const shouldSendEmail =

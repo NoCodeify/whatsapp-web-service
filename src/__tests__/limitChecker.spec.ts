@@ -271,7 +271,7 @@ describe("LimitChecker", () => {
           whatsapp_web_usage: {
             today_date: "2025-01-15",
             new_contacts_today: 0,
-            total_contacts_today: 0,
+            total_messages_today: 0,
             last_reset: admin.firestore.Timestamp.now(),
             monthly_new_contacts: 0,
           },
@@ -294,7 +294,7 @@ describe("LimitChecker", () => {
           {
             whatsapp_web_usage: expect.objectContaining({
               new_contacts_today: 1,
-              total_contacts_today: 1,
+              total_messages_today: 1,
               monthly_new_contacts: 1,
             }),
           },
@@ -325,7 +325,7 @@ describe("LimitChecker", () => {
           {
             whatsapp_web_usage: expect.objectContaining({
               new_contacts_today: 0, // Not incremented for existing contact
-              total_contacts_today: 1, // Still counts as a message
+              total_messages_today: 1, // Still counts as a message
             }),
           },
         );
@@ -355,7 +355,7 @@ describe("LimitChecker", () => {
           {
             whatsapp_web_usage: expect.objectContaining({
               new_contacts_today: 0, // Not incremented - just replying
-              total_contacts_today: 1, // Still counts as a message
+              total_messages_today: 1, // Still counts as a message
             }),
           },
         );
@@ -386,7 +386,7 @@ describe("LimitChecker", () => {
           {
             whatsapp_web_usage: expect.objectContaining({
               new_contacts_today: 1, // Incremented for new contact
-              total_contacts_today: 1,
+              total_messages_today: 1,
               monthly_new_contacts: 1,
             }),
           },
@@ -467,7 +467,7 @@ describe("LimitChecker", () => {
           whatsapp_web_usage: {
             today_date: "2025-01-15",
             new_contacts_today: 25, // Already at limit
-            total_contacts_today: 50,
+            total_messages_today: 50,
             last_reset: admin.firestore.Timestamp.now(),
             monthly_new_contacts: 100,
           },
@@ -512,7 +512,7 @@ describe("LimitChecker", () => {
           whatsapp_web_usage: {
             today_date: "2025-01-15",
             new_contacts_today: 24, // One under limit
-            total_contacts_today: 50,
+            total_messages_today: 50,
             last_reset: admin.firestore.Timestamp.now(),
             monthly_new_contacts: 100,
           },
@@ -559,7 +559,7 @@ describe("LimitChecker", () => {
           whatsapp_web_usage: {
             today_date: "2025-01-15",
             new_contacts_today: 10,
-            total_contacts_today: 50,
+            total_messages_today: 50,
             last_reset: admin.firestore.Timestamp.now(),
             monthly_new_contacts: 500, // Monthly limit is 25 * 20 = 500
           },
@@ -607,7 +607,7 @@ describe("LimitChecker", () => {
           whatsapp_web_usage: {
             today_date: "2025-01-15",
             new_contacts_today: 10,
-            total_contacts_today: 100,
+            total_messages_today: 100,
             last_reset: admin.firestore.Timestamp.now(),
             monthly_new_contacts: 50,
           },
@@ -636,7 +636,7 @@ describe("LimitChecker", () => {
           whatsapp_web_usage: {
             today_date: "2025-01-15",
             new_contacts_today: 10,
-            total_contacts_today: 249, // One under total limit
+            total_messages_today: 249, // One under total limit
             last_reset: admin.firestore.Timestamp.now(),
             monthly_new_contacts: 50,
           },
@@ -668,7 +668,7 @@ describe("LimitChecker", () => {
           whatsapp_web_usage: {
             today_date: "2025-01-15",
             new_contacts_today: 10,
-            total_contacts_today: 249,
+            total_messages_today: 249,
             last_reset: admin.firestore.Timestamp.now(),
             monthly_new_contacts: 50,
             limit_email_sent_today: false, // Email not sent yet
@@ -692,7 +692,7 @@ describe("LimitChecker", () => {
           whatsapp_web_usage: {
             today_date: "2025-01-15",
             new_contacts_today: 10,
-            total_contacts_today: 250,
+            total_messages_today: 250,
             last_reset: admin.firestore.Timestamp.now(),
             monthly_new_contacts: 50,
             limit_email_sent_today: true, // Email already sent
@@ -729,7 +729,7 @@ describe("LimitChecker", () => {
           whatsapp_web_usage: {
             today_date: "2025-01-14", // Yesterday
             new_contacts_today: 20,
-            total_contacts_today: 100,
+            total_messages_today: 100,
             last_reset: admin.firestore.Timestamp.now(),
             monthly_new_contacts: 50,
             limit_email_sent_today: true,
@@ -749,7 +749,7 @@ describe("LimitChecker", () => {
             whatsapp_web_usage: expect.objectContaining({
               today_date: "2025-01-15", // Updated to today
               new_contacts_today: 1, // Reset and incremented
-              total_contacts_today: 1, // Reset and incremented
+              total_messages_today: 1, // Reset and incremented
               limit_email_sent_today: false, // Reset
               monthly_new_contacts: 51, // Monthly counter persists
             }),
@@ -765,7 +765,7 @@ describe("LimitChecker", () => {
           whatsapp_web_usage: {
             today_date: "2025-01-15", // Today
             new_contacts_today: 10,
-            total_contacts_today: 50,
+            total_messages_today: 50,
             last_reset: admin.firestore.Timestamp.now(),
             monthly_new_contacts: 100,
           },
@@ -784,7 +784,7 @@ describe("LimitChecker", () => {
             whatsapp_web_usage: expect.objectContaining({
               today_date: "2025-01-15",
               new_contacts_today: 11, // Incremented, not reset
-              total_contacts_today: 51, // Incremented, not reset
+              total_messages_today: 51, // Incremented, not reset
               monthly_new_contacts: 101,
             }),
           },
@@ -812,7 +812,7 @@ describe("LimitChecker", () => {
           whatsapp_web_usage: {
             today_date: "2025-01-15",
             new_contacts_today: 19, // 80% after increment
-            total_contacts_today: 99, // 40% after increment
+            total_messages_today: 99, // 40% after increment
             last_reset: admin.firestore.Timestamp.now(),
             monthly_new_contacts: 100,
           },
@@ -847,7 +847,7 @@ describe("LimitChecker", () => {
           whatsapp_web_usage: {
             today_date: "2025-01-15",
             new_contacts_today: 24,
-            total_contacts_today: 100,
+            total_messages_today: 100,
             last_reset: admin.firestore.Timestamp.now(),
             monthly_new_contacts: 100,
           },
@@ -879,7 +879,7 @@ describe("LimitChecker", () => {
           whatsapp_web_usage: {
             today_date: "2025-01-15",
             new_contacts_today: 0,
-            total_contacts_today: 0,
+            total_messages_today: 0,
             last_reset: admin.firestore.Timestamp.now(),
             monthly_new_contacts: 0,
           },
@@ -921,7 +921,7 @@ describe("LimitChecker", () => {
             whatsapp_web_usage: expect.objectContaining({
               today_date: "2025-01-15",
               new_contacts_today: 0,
-              total_contacts_today: 1,
+              total_messages_today: 1,
             }),
           },
         );
@@ -939,7 +939,7 @@ describe("LimitChecker", () => {
           whatsapp_web_usage: {
             today_date: "2025-01-15",
             new_contacts_today: 0,
-            total_contacts_today: 0,
+            total_messages_today: 0,
             last_reset: admin.firestore.Timestamp.now(),
             monthly_new_contacts: 0,
           },
@@ -973,7 +973,7 @@ describe("LimitChecker", () => {
           whatsapp_web_usage: {
             today_date: "2025-01-15",
             new_contacts_today: 0,
-            total_contacts_today: 0,
+            total_messages_today: 0,
             last_reset: admin.firestore.Timestamp.now(),
             monthly_new_contacts: 0,
           },
@@ -1007,7 +1007,7 @@ describe("LimitChecker", () => {
           whatsapp_web_usage: {
             today_date: "2025-01-15",
             new_contacts_today: 0,
-            total_contacts_today: 0,
+            total_messages_today: 0,
             last_reset: admin.firestore.Timestamp.now(),
             monthly_new_contacts: 0,
           },
@@ -1065,7 +1065,7 @@ describe("LimitChecker", () => {
         whatsapp_web_usage: {
           today_date: "2025-01-15",
           new_contacts_today: 0,
-          total_contacts_today: 300, // Over limit
+          total_messages_today: 300, // Over limit
           last_reset: admin.firestore.Timestamp.now(),
           monthly_new_contacts: 0,
         },
@@ -1088,7 +1088,7 @@ describe("LimitChecker", () => {
         whatsapp_web_usage: {
           today_date: "2025-01-15",
           new_contacts_today: 0,
-          total_contacts_today: 300,
+          total_messages_today: 300,
           last_reset: admin.firestore.Timestamp.now(),
           monthly_new_contacts: 0,
         },
@@ -1111,7 +1111,7 @@ describe("LimitChecker", () => {
         whatsapp_web_usage: {
           today_date: "2025-01-15",
           new_contacts_today: 0,
-          total_contacts_today: 0,
+          total_messages_today: 0,
           last_reset: admin.firestore.Timestamp.now(),
           monthly_new_contacts: 0,
         },
@@ -1156,7 +1156,7 @@ describe("LimitChecker", () => {
             whatsapp_web_usage: {
               today_date: "2025-01-15",
               new_contacts_today: 24, // Both requests see 24
-              total_contacts_today: 50,
+              total_messages_today: 50,
               last_reset: admin.firestore.Timestamp.now(),
               monthly_new_contacts: 100,
             },
@@ -1196,7 +1196,7 @@ describe("LimitChecker", () => {
           whatsapp_web_usage: {
             today_date: "2025-01-15",
             new_contacts_today: 24,
-            total_contacts_today: 100,
+            total_messages_today: 100,
             last_reset: admin.firestore.Timestamp.now(),
             monthly_new_contacts: 100,
           },
@@ -1217,7 +1217,7 @@ describe("LimitChecker", () => {
           whatsapp_web_usage: {
             today_date: "2025-01-15",
             new_contacts_today: Number.MAX_SAFE_INTEGER,
-            total_contacts_today: Number.MAX_SAFE_INTEGER,
+            total_messages_today: Number.MAX_SAFE_INTEGER,
             last_reset: admin.firestore.Timestamp.now(),
             monthly_new_contacts: Number.MAX_SAFE_INTEGER,
           },
@@ -1240,7 +1240,7 @@ describe("LimitChecker", () => {
           whatsapp_web_usage: {
             today_date: "2025-01-15",
             new_contacts_today: -10,
-            total_contacts_today: -50,
+            total_messages_today: -50,
             last_reset: admin.firestore.Timestamp.now(),
             monthly_new_contacts: -100,
           },
@@ -1264,7 +1264,7 @@ describe("LimitChecker", () => {
           whatsapp_web_usage: {
             today_date: "2025-01-15",
             new_contacts_today: NaN,
-            total_contacts_today: NaN,
+            total_messages_today: NaN,
             last_reset: admin.firestore.Timestamp.now(),
             monthly_new_contacts: NaN,
           },
@@ -1287,7 +1287,7 @@ describe("LimitChecker", () => {
           whatsapp_web_usage: {
             today_date: "2025-01-15",
             new_contacts_today: Infinity,
-            total_contacts_today: Infinity,
+            total_messages_today: Infinity,
             last_reset: admin.firestore.Timestamp.now(),
             monthly_new_contacts: Infinity,
           },
@@ -1310,7 +1310,7 @@ describe("LimitChecker", () => {
           whatsapp_web_usage: {
             today_date: "2025-01-15",
             new_contacts_today: 0,
-            total_contacts_today: 0,
+            total_messages_today: 0,
             last_reset: admin.firestore.Timestamp.now(),
             monthly_new_contacts: 0,
           },
@@ -1333,7 +1333,7 @@ describe("LimitChecker", () => {
           whatsapp_web_usage: {
             today_date: "2025-01-15",
             new_contacts_today: 0,
-            total_contacts_today: 0,
+            total_messages_today: 0,
             last_reset: admin.firestore.Timestamp.now(),
             monthly_new_contacts: 0,
           },
@@ -1361,7 +1361,7 @@ describe("LimitChecker", () => {
           whatsapp_web_usage: {
             today_date: "2025-01-15",
             new_contacts_today: 10,
-            total_contacts_today: 50,
+            total_messages_today: 50,
             last_reset: admin.firestore.Timestamp.now(),
             monthly_new_contacts: 100,
           },
@@ -1388,7 +1388,7 @@ describe("LimitChecker", () => {
           whatsapp_web_usage: {
             today_date: "2025-12-31", // Future date
             new_contacts_today: 20,
-            total_contacts_today: 100,
+            total_messages_today: 100,
             last_reset: admin.firestore.Timestamp.now(),
             monthly_new_contacts: 200,
           },
@@ -1416,7 +1416,7 @@ describe("LimitChecker", () => {
           whatsapp_web_usage: {
             today_date: "2025-01-15",
             new_contacts_today: 24,
-            total_contacts_today: 100,
+            total_messages_today: 100,
             last_reset: admin.firestore.Timestamp.now(),
             monthly_new_contacts: 100,
           },
@@ -1442,7 +1442,7 @@ describe("LimitChecker", () => {
           whatsapp_web_usage: {
             today_date: "2025-01-15", // Yesterday
             new_contacts_today: 24,
-            total_contacts_today: 249,
+            total_messages_today: 249,
             last_reset: admin.firestore.Timestamp.now(),
             monthly_new_contacts: 100,
             limit_email_sent_today: true,
@@ -1466,7 +1466,7 @@ describe("LimitChecker", () => {
           whatsapp_web_usage: {
             today_date: "2025-01-16", // Different timezone already rolled over
             new_contacts_today: 5,
-            total_contacts_today: 50,
+            total_messages_today: 50,
             last_reset: admin.firestore.Timestamp.now(),
             monthly_new_contacts: 50,
           },
@@ -1490,7 +1490,7 @@ describe("LimitChecker", () => {
           whatsapp_web_usage: {
             today_date: "2025-01-15",
             new_contacts_today: "20" as any, // String instead of number
-            total_contacts_today: "100" as any,
+            total_messages_today: "100" as any,
             last_reset: admin.firestore.Timestamp.now(),
             monthly_new_contacts: "150" as any,
           },
@@ -1513,7 +1513,7 @@ describe("LimitChecker", () => {
           whatsapp_web_usage: {
             today_date: "2025-01-15",
             new_contacts_today: 20,
-            total_contacts_today: 100,
+            total_messages_today: 100,
             last_reset: admin.firestore.Timestamp.now(),
             monthly_new_contacts: 150,
           },
@@ -1537,7 +1537,7 @@ describe("LimitChecker", () => {
           whatsapp_web_usage: {
             today_date: "2025-01-15",
             new_contacts_today: 10,
-            total_contacts_today: 50,
+            total_messages_today: 50,
             last_reset: null as any,
             monthly_new_contacts: 100,
           },
@@ -1559,7 +1559,7 @@ describe("LimitChecker", () => {
           whatsapp_web_usage: {
             today_date: "2025-01-15",
             new_contacts_today: 10,
-            total_contacts_today: 50,
+            total_messages_today: 50,
             last_reset: undefined as any,
             monthly_new_contacts: 100,
           },
@@ -1580,7 +1580,7 @@ describe("LimitChecker", () => {
           whatsapp_web_usage: {
             today_date: undefined as any,
             new_contacts_today: 10,
-            total_contacts_today: 50,
+            total_messages_today: 50,
             last_reset: admin.firestore.Timestamp.now(),
             monthly_new_contacts: 100,
           },
@@ -1619,7 +1619,7 @@ describe("LimitChecker", () => {
           whatsapp_web_usage: {
             today_date: "2025-01-15",
             new_contacts_today: 3,
-            total_contacts_today: 75,
+            total_messages_today: 75,
             last_reset: admin.firestore.Timestamp.now(),
             monthly_new_contacts: 50,
           },
@@ -1642,7 +1642,7 @@ describe("LimitChecker", () => {
           whatsapp_web_usage: {
             today_date: "2025-01-15",
             new_contacts_today: 3,
-            total_contacts_today: 171, // Results in repeating decimal
+            total_messages_today: 171, // Results in repeating decimal
             last_reset: admin.firestore.Timestamp.now(),
             monthly_new_contacts: 50,
           },
@@ -1665,7 +1665,7 @@ describe("LimitChecker", () => {
           whatsapp_web_usage: {
             today_date: "2025-01-15",
             new_contacts_today: 1,
-            total_contacts_today: 1,
+            total_messages_today: 1,
             last_reset: admin.firestore.Timestamp.now(),
             monthly_new_contacts: 1,
           },
@@ -1701,7 +1701,7 @@ describe("LimitChecker", () => {
                   whatsapp_web_usage: {
                     today_date: "2025-01-15",
                     new_contacts_today: 10,
-                    total_contacts_today: 50,
+                    total_messages_today: 50,
                     last_reset: admin.firestore.Timestamp.now(),
                     monthly_new_contacts: 100,
                   },
@@ -1743,7 +1743,7 @@ describe("LimitChecker", () => {
           whatsapp_web_usage: {
             today_date: "2025-01-15",
             new_contacts_today: true as any,
-            total_contacts_today: false as any,
+            total_messages_today: false as any,
             last_reset: admin.firestore.Timestamp.now(),
             monthly_new_contacts: true as any,
           },
