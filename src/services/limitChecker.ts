@@ -75,11 +75,13 @@ export class LimitChecker {
     recipientNumber: string,
   ): Promise<boolean> {
     try {
-      // Check if contact exists in user's contacts collection
+      // Get user reference for querying
+      const userRef = this.db.collection("users").doc(userId);
+
+      // Check if contact exists in GLOBAL contacts collection (not subcollection!)
       const contactsQuery = await this.db
-        .collection("users")
-        .doc(userId)
         .collection("contacts")
+        .where("user", "==", userRef)
         .where("phone_number", "==", recipientNumber)
         .limit(1)
         .get();

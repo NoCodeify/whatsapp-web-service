@@ -38,6 +38,7 @@ export interface WhatsAppConnection {
   proxySessionId?: string;
   instanceUrl: string;
   proxyReleased?: boolean; // Track if proxy was released after successful connection
+  isRecovery?: boolean; // Track if this is a recovery connection (redeployment)
 }
 
 export interface ConnectionPoolConfig {
@@ -678,6 +679,7 @@ export class ConnectionPool extends EventEmitter {
         messageCount: 0,
         instanceUrl: this.config.instanceUrl,
         proxySessionId: proxyCountry,
+        isRecovery: isRecovery, // Track if this is a recovery connection
       };
 
       // Set up event handlers
@@ -1250,14 +1252,14 @@ export class ConnectionPool extends EventEmitter {
         });
 
         this.logger.info(
-          { userId, phoneNumber },
+          { userId, phoneNumber, isRecovery: connection.isRecovery },
           "WhatsApp connection established",
         );
 
         // Emit sync started event with small delay to ensure WebSocket clients are ready
         setTimeout(async () => {
           this.logger.info(
-            { userId, phoneNumber },
+            { userId, phoneNumber, isRecovery: connection.isRecovery },
             "Emitting sync:started event",
           );
 
@@ -1273,7 +1275,20 @@ export class ConnectionPool extends EventEmitter {
           }
 
           // Update phone number status for UI
-          await this.updatePhoneNumberStatus(userId, phoneNumber, "importing");
+          // For recovery connections, keep status as "connected" (don't show "importing")
+          // For new connections, show "importing" status
+          if (!connection.isRecovery) {
+            await this.updatePhoneNumberStatus(userId, phoneNumber, "importing");
+            this.logger.info(
+              { userId, phoneNumber },
+              "New connection - showing 'importing' status in UI",
+            );
+          } else {
+            this.logger.info(
+              { userId, phoneNumber },
+              "Recovery connection - keeping 'connected' status in UI while syncing in background",
+            );
+          }
 
           this.emit("sync:started", {
             userId,
@@ -1289,7 +1304,7 @@ export class ConnectionPool extends EventEmitter {
           if (!syncCompleted) {
             syncCompleted = true;
             this.logger.info(
-              { userId, phoneNumber },
+              { userId, phoneNumber, isRecovery: connection.isRecovery },
               "Sync timeout reached, completing sync",
             );
 
@@ -1305,6 +1320,8 @@ export class ConnectionPool extends EventEmitter {
             }
 
             // Update phone number status for UI - sync completed
+            // For recovery, this is a no-op (status already "connected")
+            // For new connections, transition from "importing" to "connected"
             await this.updatePhoneNumberStatus(
               userId,
               phoneNumber,
