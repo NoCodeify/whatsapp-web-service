@@ -384,7 +384,6 @@ describe("ConnectionPool", () => {
         "user123",
         "+1234567890",
         {
-          status: "connecting",
           instanceUrl: "http://test-instance:8080",
         },
       );

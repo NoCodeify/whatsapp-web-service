@@ -111,11 +111,13 @@ By default, Firebase Firestore emulator uses port 8080. That's why we use port 8
 The service automatically handles CORS in different modes:
 
 **Development Mode (NODE_ENV=development):**
+
 - Automatically allows ALL localhost origins on any port
 - Perfect for Flutter Web which uses dynamic ports (e.g., `http://localhost:64217`)
 - No configuration needed - works out of the box
 
 **Production Mode:**
+
 - Requires explicit origin configuration via `CORS_ORIGIN` environment variable
 - Set `CORS_ORIGIN=*` to allow all origins (not recommended for production)
 - Or specify comma-separated origins: `CORS_ORIGIN=https://yourdomain.com,https://app.yourdomain.com`
@@ -133,6 +135,7 @@ CORS_ORIGIN=https://yourdomain.com,https://app.yourdomain.com
 ```
 
 **Troubleshooting CORS:**
+
 - Make sure `NODE_ENV=development` is set in your `.env` file for local dev
 - Check browser console for the exact origin being blocked
 - The service logs all CORS requests in debug mode (`LOG_LEVEL=debug`)

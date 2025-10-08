@@ -106,16 +106,14 @@ describe.skip("Integration: Session Management & Recovery Complete Flow", () => 
 
     mockBucket = {
       file: jest.fn().mockReturnValue(mockStorageFile),
-      getFiles: jest
-        .fn()
-        .mockResolvedValue([
-          [
-            { name: `sessions/${userId}/${phoneNumber}/creds.json` },
-            {
-              name: `sessions/${userId}/${phoneNumber}/app-state-sync-key-1.json`,
-            },
-          ],
-        ]),
+      getFiles: jest.fn().mockResolvedValue([
+        [
+          { name: `sessions/${userId}/${phoneNumber}/creds.json` },
+          {
+            name: `sessions/${userId}/${phoneNumber}/app-state-sync-key-1.json`,
+          },
+        ],
+      ]),
     };
 
     mockStorage = {
