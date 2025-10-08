@@ -458,25 +458,31 @@ export class SessionRecoveryService {
 
       // Get current data to preserve existing fields
       const phoneDoc = await phoneNumberRef.get();
+
+      // Don't recreate deleted documents - respect user/system deletions
+      if (!phoneDoc.exists) {
+        this.logger.info(
+          { userId, phoneNumber },
+          "Phone number document doesn't exist (was deleted), skipping status update to respect deletion",
+        );
+        return;
+      }
+
       const currentData = phoneDoc.data() || {};
 
       // Update with new status and recovery information in nested structure
-      await phoneNumberRef.set(
-        {
-          ...currentData,
-          whatsapp_web: {
-            ...(currentData.whatsapp_web || {}),
-            status: firestoreStatus, // Single source of truth for status
-            last_activity: Timestamp.now(),
-            last_updated: Timestamp.now(),
-            instance_id: this.instanceId,
-            recovery_attempted: true,
-            recovery_attempt_time: Timestamp.now(),
-          },
-          updated_at: Timestamp.now(),
+      await phoneNumberRef.update({
+        whatsapp_web: {
+          ...(currentData.whatsapp_web || {}),
+          status: firestoreStatus, // Single source of truth for status
+          last_activity: Timestamp.now(),
+          last_updated: Timestamp.now(),
+          instance_id: this.instanceId,
+          recovery_attempted: true,
+          recovery_attempt_time: Timestamp.now(),
         },
-        { merge: true },
-      );
+        updated_at: Timestamp.now(),
+      });
 
       this.logger.info(
         { userId, phoneNumber, status: firestoreStatus },

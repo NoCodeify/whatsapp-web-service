@@ -958,14 +958,13 @@ describe("SessionRecoveryService", () => {
 
       await sessionRecoveryService.recoverActiveSessions();
 
-      expect(mockDoc.set).toHaveBeenCalledWith(
+      expect(mockDoc.update).toHaveBeenCalledWith(
         expect.objectContaining({
           whatsapp_web: expect.objectContaining({
             status: "connected",
             recovery_attempted: true,
           }),
         }),
-        { merge: true },
       );
     });
 
@@ -1000,14 +999,13 @@ describe("SessionRecoveryService", () => {
 
       await sessionRecoveryService.recoverActiveSessions();
 
-      expect(mockDoc.set).toHaveBeenCalledWith(
+      expect(mockDoc.update).toHaveBeenCalledWith(
         expect.objectContaining({
           whatsapp_web: expect.objectContaining({
             status: "failed",
             recovery_attempted: true,
           }),
         }),
-        { merge: true },
       );
     });
 
