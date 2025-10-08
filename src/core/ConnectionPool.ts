@@ -702,7 +702,7 @@ export class ConnectionPool extends EventEmitter {
         instanceUrl: this.config.instanceUrl,
         proxySessionId: proxyCountry,
         isRecovery: isRecovery, // Track if this is a recovery connection
-        syncCompleted: skipHandshake, // Skip sync for recovery or existing sessions (same logic as handshake)
+        syncCompleted: false, // All connections need to sync missed messages
         handshakeCompleted: skipHandshake, // Skip handshake for recovery or existing sessions
       };
 
@@ -4295,10 +4295,11 @@ export class ConnectionPool extends EventEmitter {
         return; // Skip Firestore write during handshake
       }
 
-      // DEFENSIVE CHECK: Prevent "connected" or "connecting" status for first-time connections until sync completes
+      // DEFENSIVE CHECK: Prevent premature "connected" status for connections until sync completes
       // This prevents status regression during import phase
+      // Allow "connecting" status so UI can show progress
       if (
-        (status === "connected" || status === "connecting") &&
+        status === "connected" &&
         connection &&
         !connection.isRecovery &&
         !connection.syncCompleted
@@ -4311,7 +4312,7 @@ export class ConnectionPool extends EventEmitter {
             isRecovery: connection.isRecovery,
             syncCompleted: connection.syncCompleted,
           },
-          "DEFENSIVE BLOCK: Preventing status change during sync - keeping import status",
+          "DEFENSIVE BLOCK: Preventing premature 'connected' status during sync - keeping import status",
         );
         // Override to importing_messages until sync is complete
         status = "importing_messages";
