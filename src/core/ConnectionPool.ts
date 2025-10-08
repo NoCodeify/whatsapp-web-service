@@ -702,7 +702,7 @@ export class ConnectionPool extends EventEmitter {
         instanceUrl: this.config.instanceUrl,
         proxySessionId: proxyCountry,
         isRecovery: isRecovery, // Track if this is a recovery connection
-        syncCompleted: isRecovery, // Recovery connections are already synced, first-time are not
+        syncCompleted: skipHandshake, // Skip sync for recovery or existing sessions (same logic as handshake)
         handshakeCompleted: skipHandshake, // Skip handshake for recovery or existing sessions
       };
 
