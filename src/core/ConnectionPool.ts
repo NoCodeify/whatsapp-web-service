@@ -661,12 +661,32 @@ export class ConnectionPool extends EventEmitter {
 
       // Create connection with proxy and custom browser name
       // Skip proxy creation during recovery since SessionRecoveryService already has one
-      const socket = await this.sessionManager.createConnection(
-        userId,
-        phoneNumber,
-        proxyCountry,
-        browserName,
-        isRecovery, // Skip proxy creation if this is a recovery
+      const { socket, sessionExists } =
+        await this.sessionManager.createConnection(
+          userId,
+          phoneNumber,
+          proxyCountry,
+          browserName,
+          isRecovery, // Skip proxy creation if this is a recovery
+        );
+
+      // Determine if handshake should be skipped:
+      // - Recovery connections skip handshake (already authenticated)
+      // - Connections with existing sessions skip handshake (manual reconnects)
+      // - Only new QR connections without sessions need handshake validation
+      const skipHandshake = isRecovery || sessionExists;
+
+      this.logger.info(
+        {
+          userId,
+          phoneNumber,
+          isRecovery,
+          sessionExists,
+          skipHandshake,
+        },
+        skipHandshake
+          ? "Skipping handshake validation - existing session or recovery"
+          : "Requiring handshake validation - new QR connection",
       );
 
       const connection: WhatsAppConnection = {
@@ -683,7 +703,7 @@ export class ConnectionPool extends EventEmitter {
         proxySessionId: proxyCountry,
         isRecovery: isRecovery, // Track if this is a recovery connection
         syncCompleted: isRecovery, // Recovery connections are already synced, first-time are not
-        handshakeCompleted: isRecovery, // Recovery connections skip handshake, first-time connections need handshake
+        handshakeCompleted: skipHandshake, // Skip handshake for recovery or existing sessions
       };
 
       // Set up event handlers

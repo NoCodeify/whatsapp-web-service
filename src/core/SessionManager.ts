@@ -105,7 +105,7 @@ export class SessionManager {
     proxyCountry?: string,
     browserName?: string,
     skipProxy?: boolean, // Skip proxy creation during recovery
-  ): Promise<WASocket> {
+  ): Promise<{ socket: WASocket; sessionExists: boolean }> {
     // Validate userId to prevent directory traversal
     this.validateUserId(userId);
 
@@ -131,7 +131,10 @@ export class SessionManager {
       }
 
       // Get or create auth state
-      const { state, saveCreds } = await this.getAuthState(userId, phoneNumber);
+      const { state, saveCreds, sessionExists } = await this.getAuthState(
+        userId,
+        phoneNumber,
+      );
 
       // Get proxy agent if configured with country (skip during recovery)
       const proxyAgent = skipProxy
@@ -220,9 +223,12 @@ export class SessionManager {
       };
       this.sessions.set(sessionKey, sessionData);
 
-      this.logger.info({ userId, phoneNumber }, "WhatsApp connection created");
+      this.logger.info(
+        { userId, phoneNumber, sessionExists },
+        "WhatsApp connection created",
+      );
 
-      return socket;
+      return { socket, sessionExists };
     } catch (error) {
       this.logger.error(
         { userId, phoneNumber, error },
@@ -234,12 +240,21 @@ export class SessionManager {
 
   /**
    * Get or create authentication state
+   * Returns auth state and whether an existing session was found
    */
-  private async getAuthState(userId: string, phoneNumber: string) {
+  private async getAuthState(
+    userId: string,
+    phoneNumber: string,
+  ): Promise<{
+    state: AuthenticationState;
+    saveCreds: () => Promise<void>;
+    sessionExists: boolean;
+  }> {
     const sessionPath = this.getSessionPath(userId, phoneNumber);
 
     // Check if local session exists
     const localSessionExists = await this.localSessionExists(sessionPath);
+    let sessionRestoredFromCloud = false;
 
     // In hybrid or cloud mode, try to restore from Cloud Storage if local doesn't exist
     if (
@@ -267,6 +282,7 @@ export class SessionManager {
         }
 
         if (restored) {
+          sessionRestoredFromCloud = true;
           this.logger.info(
             {
               userId,
@@ -292,7 +308,13 @@ export class SessionManager {
       this.setupAutoBackup(userId, phoneNumber);
     }
 
-    return authState;
+    // Session exists if it was found locally or restored from cloud
+    const sessionExists = localSessionExists || sessionRestoredFromCloud;
+
+    return {
+      ...authState,
+      sessionExists,
+    };
   }
 
   /**

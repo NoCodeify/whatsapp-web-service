@@ -275,7 +275,10 @@ describe("ConnectionPool", () => {
         mockInstanceCoordinator,
       );
 
-      mockSessionManager.createConnection.mockResolvedValue(mockSocket);
+      mockSessionManager.createConnection.mockResolvedValue({
+        socket: mockSocket,
+        sessionExists: false,
+      });
     });
 
     it("should successfully add a new connection", async () => {
@@ -443,7 +446,10 @@ describe("ConnectionPool", () => {
         mockInstanceCoordinator,
       );
 
-      mockSessionManager.createConnection.mockResolvedValue(mockSocket);
+      mockSessionManager.createConnection.mockResolvedValue({
+        socket: mockSocket,
+        sessionExists: false,
+      });
     });
 
     it("should remove connection and logout", async () => {
@@ -521,7 +527,10 @@ describe("ConnectionPool", () => {
         mockInstanceCoordinator,
       );
 
-      mockSessionManager.createConnection.mockResolvedValue(mockSocket);
+      mockSessionManager.createConnection.mockResolvedValue({
+        socket: mockSocket,
+        sessionExists: false,
+      });
     });
 
     it("should retrieve existing connection", async () => {
@@ -571,7 +580,10 @@ describe("ConnectionPool", () => {
         mockInstanceCoordinator,
       );
 
-      mockSessionManager.createConnection.mockResolvedValue(mockSocket);
+      mockSessionManager.createConnection.mockResolvedValue({
+        socket: mockSocket,
+        sessionExists: false,
+      });
     });
 
     it("should enforce max connections limit", async () => {
@@ -631,7 +643,10 @@ describe("ConnectionPool", () => {
         mockInstanceCoordinator,
       );
 
-      mockSessionManager.createConnection.mockResolvedValue(mockSocket);
+      mockSessionManager.createConnection.mockResolvedValue({
+        socket: mockSocket,
+        sessionExists: false,
+      });
     });
 
     it("should handle multiple concurrent connection requests", async () => {
@@ -725,7 +740,10 @@ describe("ConnectionPool", () => {
         mockInstanceCoordinator,
       );
 
-      mockSessionManager.createConnection.mockResolvedValue(mockSocket);
+      mockSessionManager.createConnection.mockResolvedValue({
+        socket: mockSocket,
+        sessionExists: false,
+      });
     });
 
     it("should handle invalid phone numbers", async () => {
@@ -788,7 +806,10 @@ describe("ConnectionPool", () => {
         mockInstanceCoordinator,
       );
 
-      mockSessionManager.createConnection.mockResolvedValue(mockSocket);
+      mockSessionManager.createConnection.mockResolvedValue({
+        socket: mockSocket,
+        sessionExists: false,
+      });
     });
 
     it("should recover connections from session files", async () => {
@@ -919,7 +940,10 @@ describe("ConnectionPool", () => {
         mockInstanceCoordinator,
       );
 
-      mockSessionManager.createConnection.mockResolvedValue(mockSocket);
+      mockSessionManager.createConnection.mockResolvedValue({
+        socket: mockSocket,
+        sessionExists: false,
+      });
     });
 
     it("should send message successfully", async () => {
@@ -1011,7 +1035,10 @@ describe("ConnectionPool", () => {
         mockInstanceCoordinator,
       );
 
-      mockSessionManager.createConnection.mockResolvedValue(mockSocket);
+      mockSessionManager.createConnection.mockResolvedValue({
+        socket: mockSocket,
+        sessionExists: false,
+      });
 
       // Capture the messages.upsert handler when connection is created
       (mockSocket.ev.on as jest.Mock).mockImplementation(
@@ -1126,7 +1153,10 @@ describe("ConnectionPool", () => {
         mockInstanceCoordinator,
       );
 
-      mockSessionManager.createConnection.mockResolvedValue(mockSocket);
+      mockSessionManager.createConnection.mockResolvedValue({
+        socket: mockSocket,
+        sessionExists: false,
+      });
     });
 
     it("should shutdown gracefully with session preservation", async () => {
@@ -1231,7 +1261,10 @@ describe("ConnectionPool", () => {
         mockInstanceCoordinator,
       );
 
-      mockSessionManager.createConnection.mockResolvedValue(mockSocket);
+      mockSessionManager.createConnection.mockResolvedValue({
+        socket: mockSocket,
+        sessionExists: false,
+      });
     });
 
     describe("Connection Pool Exhaustion", () => {
@@ -1660,9 +1693,9 @@ describe("ConnectionPool", () => {
 
         // Make second session fail
         mockSessionManager.createConnection
-          .mockResolvedValueOnce(mockSocket)
+          .mockResolvedValueOnce({ socket: mockSocket, sessionExists: false })
           .mockRejectedValueOnce(new Error("Session 2 failed"))
-          .mockResolvedValueOnce(mockSocket);
+          .mockResolvedValueOnce({ socket: mockSocket, sessionExists: false });
 
         await connectionPool.initializeRecovery();
 
