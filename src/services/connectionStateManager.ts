@@ -435,18 +435,17 @@ export class ConnectionStateManager extends EventEmitter {
         .limit(1)
         .get();
 
-      let ref;
-      if (!phoneNumbersSnapshot.empty) {
-        // Update existing phone number document
-        ref = phoneNumbersSnapshot.docs[0].ref;
-      } else {
-        // Create new phone number document using phone number as ID (consistent with Cloud Function)
-        ref = this.firestore
-          .collection("users")
-          .doc(state.userId)
-          .collection("phone_numbers")
-          .doc(state.phoneNumber);
+      // Don't recreate deleted documents - respect user/system deletions
+      if (phoneNumbersSnapshot.empty) {
+        this.logger.info(
+          { userId: state.userId, phoneNumber: state.phoneNumber },
+          "Phone number document doesn't exist (was deleted), skipping state persistence to respect deletion",
+        );
+        return;
       }
+
+      // Update existing document only
+      const ref = phoneNumbersSnapshot.docs[0].ref;
 
       const whatsappData: any = {
         status: state.status,
@@ -459,20 +458,6 @@ export class ConnectionStateManager extends EventEmitter {
         last_error: state.lastError ?? null,
         last_seen: admin.firestore.Timestamp.now(),
       };
-
-      const firestoreData: any = {
-        phone_number: state.phoneNumber,
-        type: "whatsapp_web",
-        status: "active",
-        updated_at: admin.firestore.Timestamp.now(),
-        last_activity: admin.firestore.Timestamp.now(),
-        whatsapp_web: whatsappData,
-      };
-
-      // Only set created_at if this is a new document
-      if (phoneNumbersSnapshot.empty) {
-        firestoreData.created_at = admin.firestore.Timestamp.now();
-      }
 
       // Add sync progress fields if available
       if (state.syncProgress) {
@@ -502,10 +487,15 @@ export class ConnectionStateManager extends EventEmitter {
         whatsappData.sync_last_update = admin.firestore.Timestamp.now();
       }
 
-      // Update the whatsapp_web nested object
-      firestoreData.whatsapp_web = whatsappData;
-
-      await ref.set(firestoreData, { merge: true });
+      // Use .update() to only modify existing documents (won't create new ones)
+      await ref.update({
+        phone_number: state.phoneNumber,
+        type: "whatsapp_web",
+        status: "active",
+        updated_at: admin.firestore.Timestamp.now(),
+        last_activity: admin.firestore.Timestamp.now(),
+        whatsapp_web: whatsappData,
+      });
     } catch (error: any) {
       this.logger.error(
         {
