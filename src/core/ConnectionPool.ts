@@ -1832,6 +1832,13 @@ export class ConnectionPool extends EventEmitter {
             "Latest history batch received, completing sync",
           );
 
+          // Ensure status is set to importing_messages before the grace period
+          await this.updatePhoneNumberStatus(
+            userId,
+            phoneNumber,
+            "importing_messages",
+          );
+
           // Mark sync as completed in database
           if (this.connectionStateManager) {
             await this.connectionStateManager.updateSyncProgress(
@@ -1843,16 +1850,53 @@ export class ConnectionPool extends EventEmitter {
             );
           }
 
-          // Update phone number status for UI - sync completed
-          await this.updatePhoneNumberStatus(userId, phoneNumber, "connected");
+          // Add a grace period before marking as connected
+          // This ensures the UI shows "importing" status for a reasonable duration
+          // and allows any pending async operations to complete
+          const SYNC_COMPLETION_DELAY = 3000; // 3 seconds
 
-          // Emit sync completion event with cumulative totals
-          this.emit("history-synced", {
-            userId,
-            phoneNumber,
-            contacts: totalContactsSynced,
-            messages: totalMessagesSynced,
-          });
+          this.logger.info(
+            {
+              userId,
+              phoneNumber,
+              delayMs: SYNC_COMPLETION_DELAY,
+            },
+            "Waiting for grace period before marking connection as fully synced",
+          );
+
+          setTimeout(async () => {
+            try {
+              this.logger.info(
+                {
+                  userId,
+                  phoneNumber,
+                  totalContacts: totalContactsSynced,
+                  totalMessages: totalMessagesSynced,
+                },
+                "Grace period completed, marking connection as synced",
+              );
+
+              // Update phone number status for UI - sync completed
+              await this.updatePhoneNumberStatus(
+                userId,
+                phoneNumber,
+                "connected",
+              );
+
+              // Emit sync completion event with cumulative totals
+              this.emit("history-synced", {
+                userId,
+                phoneNumber,
+                contacts: totalContactsSynced,
+                messages: totalMessagesSynced,
+              });
+            } catch (error) {
+              this.logger.error(
+                { userId, phoneNumber, error },
+                "Failed to complete sync status update after grace period",
+              );
+            }
+          }, SYNC_COMPLETION_DELAY);
         }
       } catch (error) {
         this.logger.error(
