@@ -4669,20 +4669,40 @@ export class ConnectionPool extends EventEmitter {
         this.config.instanceUrl.includes("localhost") ||
         this.config.instanceUrl.includes("127.0.0.1");
 
-      // Build session data with nested whatsapp_web structure
-      const whatsappWebData: any = {
-        status,
-        last_activity: admin.firestore.Timestamp.now(),
-        last_updated: admin.firestore.Timestamp.now(),
-        instance_url: this.config.instanceUrl,
-        is_localhost: isLocalhost,
-        session_id: `${userId}-${phoneNumber}`,
-        session_exists: true, // Required by SessionRecoveryService to identify recoverable sessions
+      // Build session data using NESTED FIELD UPDATES to preserve existing whatsapp_web fields
+      // This prevents overwriting status and sync progress set by other functions
+      const sessionData: any = {
+        phone_number: phoneNumber,
+        type: "whatsapp_web",
+        updated_at: admin.firestore.Timestamp.now(),
+        // Use nested field syntax to update only specific fields
+        "whatsapp_web.last_activity": admin.firestore.Timestamp.now(),
+        "whatsapp_web.last_updated": admin.firestore.Timestamp.now(),
+        "whatsapp_web.instance_url": this.config.instanceUrl,
+        "whatsapp_web.is_localhost": isLocalhost,
+        "whatsapp_web.session_id": `${userId}-${phoneNumber}`,
+        "whatsapp_web.session_exists": true, // Required by SessionRecoveryService
       };
+
+      // Only update status field for actual recovery states
+      // For "connected" recovery tracking, DON'T update status (let updatePhoneNumberStatus handle it)
+      // This prevents overwriting "importing_messages" status set during initial sync
+      if (status === "pending_recovery" || status === "failed") {
+        sessionData["whatsapp_web.status"] = status;
+        this.logger.debug(
+          { userId, phoneNumber, status },
+          "Updating status for recovery state",
+        );
+      } else {
+        this.logger.debug(
+          { userId, phoneNumber, status },
+          "Skipping status update - preserving UI status set by updatePhoneNumberStatus",
+        );
+      }
 
       // Add proxy country if available
       if (proxyCountry) {
-        whatsappWebData.proxy_country = proxyCountry;
+        sessionData["whatsapp_web.proxy_country"] = proxyCountry;
       }
 
       // Use phone's country from existing data (user-selected from frontend)
@@ -4690,15 +4710,8 @@ export class ConnectionPool extends EventEmitter {
         existingData?.whatsapp_web?.phone_country || existingData?.country_code;
 
       if (phoneCountry) {
-        whatsappWebData.phone_country = phoneCountry;
+        sessionData["whatsapp_web.phone_country"] = phoneCountry;
       }
-
-      const sessionData: any = {
-        phone_number: phoneNumber,
-        whatsapp_web: whatsappWebData,
-        type: "whatsapp_web",
-        updated_at: admin.firestore.Timestamp.now(),
-      };
 
       // Preserve country_code at root level for backward compatibility
       if (existingData?.country_code) {
