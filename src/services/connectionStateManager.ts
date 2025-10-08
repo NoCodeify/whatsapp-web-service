@@ -6,7 +6,15 @@ import { EventEmitter } from "events";
 export interface ConnectionState {
   userId: string;
   phoneNumber: string;
-  status: "connecting" | "connected" | "disconnected" | "failed" | "qr_pending";
+  status:
+    | "connecting"
+    | "connected"
+    | "disconnected"
+    | "failed"
+    | "qr_pending"
+    | "importing" // Generic import state
+    | "importing_contacts" // Importing contacts phase
+    | "importing_messages"; // Importing messages phase
   instanceUrl: string;
   createdAt: Date;
   lastActivity: Date;
