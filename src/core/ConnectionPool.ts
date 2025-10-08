@@ -1233,14 +1233,21 @@ export class ConnectionPool extends EventEmitter {
 
         await this.updateConnectionStatus(userId, phoneNumber, "connected");
 
-        // Update phone number status for UI immediately
-        await this.updatePhoneNumberStatus(userId, phoneNumber, "connected");
+        // Determine initial status based on connection type
+        // First-time connections: Show "importing_messages" so users see the import
+        // Reconnections/Recovery: Show "connected" immediately for instant messaging
+        const initialStatus = connection.isRecovery
+          ? "connected"
+          : "importing_messages";
+
+        // Update phone number status for UI
+        await this.updatePhoneNumberStatus(userId, phoneNumber, initialStatus);
 
         // Track session for recovery
         await this.updateSessionForRecovery(
           userId,
           phoneNumber,
-          "connected",
+          initialStatus,
           connection.proxyCountry,
         );
 
@@ -1248,20 +1255,32 @@ export class ConnectionPool extends EventEmitter {
         this.emit("connection-update", {
           userId,
           phoneNumber,
-          status: "connected",
+          status: initialStatus,
         });
 
         this.logger.info(
-          { userId, phoneNumber, isRecovery: connection.isRecovery },
+          {
+            userId,
+            phoneNumber,
+            isRecovery: connection.isRecovery,
+            initialStatus,
+          },
           "WhatsApp connection established",
         );
 
         // Emit sync started event with small delay to ensure WebSocket clients are ready
         setTimeout(async () => {
-          this.logger.info(
-            { userId, phoneNumber, isRecovery: connection.isRecovery },
-            "Starting background sync - keeping status as 'connected' to allow messaging",
-          );
+          if (connection.isRecovery) {
+            this.logger.info(
+              { userId, phoneNumber, isRecovery: true },
+              "Reconnection: Starting background sync - keeping status as 'connected' to allow messaging",
+            );
+          } else {
+            this.logger.info(
+              { userId, phoneNumber, isRecovery: false },
+              "First-time connection: Starting import - status will show 'importing_messages'",
+            );
+          }
 
           // Initialize sync progress in database
           if (this.connectionStateManager) {
@@ -1273,13 +1292,6 @@ export class ConnectionPool extends EventEmitter {
               false, // not completed yet
             );
           }
-
-          // IMPORTANT: Do NOT change status to "importing"
-          // Keep status as "connected" so messages can be sent/received during sync
-          this.logger.info(
-            { userId, phoneNumber },
-            "Sync running in background - status remains 'connected' to allow messaging",
-          );
 
           this.emit("sync:started", {
             userId,
@@ -1793,12 +1805,20 @@ export class ConnectionPool extends EventEmitter {
             );
           }
 
-          // Update phone number status for UI
-          await this.updatePhoneNumberStatus(
-            userId,
-            phoneNumber,
-            "importing_messages",
-          );
+          // Check if this is a recovery connection
+          const connectionKey = this.getConnectionKey(userId, phoneNumber);
+          const currentConnection = this.connections.get(connectionKey);
+          const isRecoveryConnection = currentConnection?.isRecovery || false;
+
+          // Update phone number status for UI - only for first-time connections
+          // Recovery/reconnection keeps status as "connected" for background sync
+          if (!isRecoveryConnection) {
+            await this.updatePhoneNumberStatus(
+              userId,
+              phoneNumber,
+              "importing_messages",
+            );
+          }
 
           // Emit message sync progress for UI updates
           this.emit("messages-synced", {
@@ -1822,21 +1842,20 @@ export class ConnectionPool extends EventEmitter {
         if (!syncCompleted && history.isLatest) {
           syncCompleted = true;
 
+          // Check if this is a recovery connection
+          const connectionKey = this.getConnectionKey(userId, phoneNumber);
+          const currentConnection = this.connections.get(connectionKey);
+          const isRecoveryConnection = currentConnection?.isRecovery || false;
+
           this.logger.info(
             {
               userId,
               phoneNumber,
               totalContacts: totalContactsSynced,
               totalMessages: totalMessagesSynced,
+              isRecovery: isRecoveryConnection,
             },
             "Latest history batch received, completing sync",
-          );
-
-          // Ensure status is set to importing_messages before the grace period
-          await this.updatePhoneNumberStatus(
-            userId,
-            phoneNumber,
-            "importing_messages",
           );
 
           // Mark sync as completed in database
@@ -1850,53 +1869,83 @@ export class ConnectionPool extends EventEmitter {
             );
           }
 
-          // Add a grace period before marking as connected
-          // This ensures the UI shows "importing" status for a reasonable duration
-          // and allows any pending async operations to complete
-          const SYNC_COMPLETION_DELAY = 3000; // 3 seconds
+          // Different behavior for first-time vs recovery connections
+          if (isRecoveryConnection) {
+            // Recovery/Reconnection: No status change, emit completion immediately
+            this.logger.info(
+              {
+                userId,
+                phoneNumber,
+                totalContacts: totalContactsSynced,
+                totalMessages: totalMessagesSynced,
+              },
+              "Recovery connection: Sync completed in background, status remains 'connected'",
+            );
 
-          this.logger.info(
-            {
+            // Emit sync completion event immediately
+            this.emit("history-synced", {
               userId,
               phoneNumber,
-              delayMs: SYNC_COMPLETION_DELAY,
-            },
-            "Waiting for grace period before marking connection as fully synced",
-          );
+              contacts: totalContactsSynced,
+              messages: totalMessagesSynced,
+            });
+          } else {
+            // First-time connection: Show importing status with grace period
+            // Ensure status is set to importing_messages before the grace period
+            await this.updatePhoneNumberStatus(
+              userId,
+              phoneNumber,
+              "importing_messages",
+            );
 
-          setTimeout(async () => {
-            try {
-              this.logger.info(
-                {
+            // Add a grace period before marking as connected
+            // This ensures the UI shows "importing" status for a reasonable duration
+            // and allows any pending async operations to complete
+            const SYNC_COMPLETION_DELAY = 3000; // 3 seconds
+
+            this.logger.info(
+              {
+                userId,
+                phoneNumber,
+                delayMs: SYNC_COMPLETION_DELAY,
+              },
+              "First-time connection: Waiting for grace period before marking as fully synced",
+            );
+
+            setTimeout(async () => {
+              try {
+                this.logger.info(
+                  {
+                    userId,
+                    phoneNumber,
+                    totalContacts: totalContactsSynced,
+                    totalMessages: totalMessagesSynced,
+                  },
+                  "Grace period completed, marking connection as synced",
+                );
+
+                // Update phone number status for UI - sync completed
+                await this.updatePhoneNumberStatus(
                   userId,
                   phoneNumber,
-                  totalContacts: totalContactsSynced,
-                  totalMessages: totalMessagesSynced,
-                },
-                "Grace period completed, marking connection as synced",
-              );
+                  "connected",
+                );
 
-              // Update phone number status for UI - sync completed
-              await this.updatePhoneNumberStatus(
-                userId,
-                phoneNumber,
-                "connected",
-              );
-
-              // Emit sync completion event with cumulative totals
-              this.emit("history-synced", {
-                userId,
-                phoneNumber,
-                contacts: totalContactsSynced,
-                messages: totalMessagesSynced,
-              });
-            } catch (error) {
-              this.logger.error(
-                { userId, phoneNumber, error },
-                "Failed to complete sync status update after grace period",
-              );
-            }
-          }, SYNC_COMPLETION_DELAY);
+                // Emit sync completion event with cumulative totals
+                this.emit("history-synced", {
+                  userId,
+                  phoneNumber,
+                  contacts: totalContactsSynced,
+                  messages: totalMessagesSynced,
+                });
+              } catch (error) {
+                this.logger.error(
+                  { userId, phoneNumber, error },
+                  "Failed to complete sync status update after grace period",
+                );
+              }
+            }, SYNC_COMPLETION_DELAY);
+          }
         }
       } catch (error) {
         this.logger.error(
