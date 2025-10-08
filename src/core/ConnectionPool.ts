@@ -40,6 +40,7 @@ export interface WhatsAppConnection {
   proxyReleased?: boolean; // Track if proxy was released after successful connection
   isRecovery?: boolean; // Track if this is a recovery connection (redeployment)
   syncCompleted?: boolean; // Track if initial history sync has completed
+  handshakeCompleted?: boolean; // Track if initial QR pairing handshake has completed (before first disconnect code 515)
 }
 
 export interface ConnectionPoolConfig {
@@ -682,6 +683,7 @@ export class ConnectionPool extends EventEmitter {
         proxySessionId: proxyCountry,
         isRecovery: isRecovery, // Track if this is a recovery connection
         syncCompleted: isRecovery, // Recovery connections are already synced, first-time are not
+        handshakeCompleted: isRecovery, // Recovery connections skip handshake, first-time connections need handshake
       };
 
       // Set up event handlers
@@ -1363,6 +1365,7 @@ export class ConnectionPool extends EventEmitter {
           );
           connection.qrCode = undefined; // Clear QR as we're now paired
           connection.hasConnectedSuccessfully = true; // Mark as successfully connected
+          connection.handshakeCompleted = true; // Handshake phase is now complete, subsequent status updates should be saved
 
           // Clear QR timeout to prevent it from firing during restart
           if (connection.qrTimeout) {
@@ -4148,10 +4151,29 @@ export class ConnectionPool extends EventEmitter {
     status: string,
   ) {
     try {
-      // DEFENSIVE CHECK: Prevent "connected" status for first-time connections until sync completes
       const connectionKey = this.getConnectionKey(userId, phoneNumber);
       const connection = this.connections.get(connectionKey);
 
+      // DEFENSIVE CHECK: Skip status updates during handshake phase (before disconnect code 515)
+      // Exception: Always allow qr_pending status (before handshake starts)
+      if (
+        connection &&
+        !connection.handshakeCompleted &&
+        status !== "qr_pending"
+      ) {
+        this.logger.info(
+          {
+            userId,
+            phoneNumber,
+            requestedStatus: status,
+            handshakeCompleted: connection.handshakeCompleted,
+          },
+          "Skipping status update during handshake phase - will write after disconnect code 515",
+        );
+        return; // Skip Firestore write during handshake
+      }
+
+      // DEFENSIVE CHECK: Prevent "connected" status for first-time connections until sync completes
       if (
         status === "connected" &&
         connection &&
