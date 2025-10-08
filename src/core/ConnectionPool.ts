@@ -4040,9 +4040,10 @@ export class ConnectionPool extends EventEmitter {
     const maxAttempts = 5;
     const baseDelay = 5000;
 
-    // Get existing connection's proxy country BEFORE deleting
+    // Get existing connection's state BEFORE deleting
     const existingConnection = this.connections.get(connectionKey);
     const storedProxyCountry = existingConnection?.proxyCountry;
+    const handshakeWasCompleted = existingConnection?.handshakeCompleted || false;
 
     // Remove old connection from pool (but keep auth state)
     this.connections.delete(connectionKey);
@@ -4074,10 +4075,13 @@ export class ConnectionPool extends EventEmitter {
 
     try {
       // Try to reconnect with preserved proxy country
+      // If handshake was already completed, treat as recovery (credentials exist in memory)
       const success = await this.addConnection(
         userId,
         phoneNumber,
         storedProxyCountry,
+        undefined, // countryCode
+        handshakeWasCompleted, // isRecovery - true if reconnecting after successful pairing
       );
       if (!success) {
         // If addConnection failed, try again (only increment if not immediate reconnect)
