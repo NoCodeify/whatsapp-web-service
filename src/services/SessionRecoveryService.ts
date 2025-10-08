@@ -440,9 +440,10 @@ export class SessionRecoveryService {
   ): Promise<void> {
     try {
       // Map recovery service status to collection status
+      // For recovery, use "connecting" to let normal ConnectionPool flow handle progression
       let firestoreStatus: string = status;
       if (status === "active") {
-        firestoreStatus = "connected";
+        firestoreStatus = "connecting"; // Let ConnectionPool progress to importing_messages → connected
       } else if (status === "error") {
         firestoreStatus = "failed";
       } else if (status === "disconnected") {
@@ -468,19 +469,15 @@ export class SessionRecoveryService {
         return;
       }
 
-      const currentData = phoneDoc.data() || {};
-
-      // Update with new status and recovery information in nested structure
+      // Update with new status and recovery information using nested field updates
+      // This preserves other fields like sync progress and whatsapp_web_usage
       await phoneNumberRef.update({
-        whatsapp_web: {
-          ...(currentData.whatsapp_web || {}),
-          status: firestoreStatus, // Single source of truth for status
-          last_activity: Timestamp.now(),
-          last_updated: Timestamp.now(),
-          instance_id: this.instanceId,
-          recovery_attempted: true,
-          recovery_attempt_time: Timestamp.now(),
-        },
+        "whatsapp_web.status": firestoreStatus, // Single source of truth for status
+        "whatsapp_web.last_activity": Timestamp.now(),
+        "whatsapp_web.last_updated": Timestamp.now(),
+        "whatsapp_web.instance_id": this.instanceId,
+        "whatsapp_web.recovery_attempted": true,
+        "whatsapp_web.recovery_attempt_time": Timestamp.now(),
         updated_at: Timestamp.now(),
       });
 
