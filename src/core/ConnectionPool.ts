@@ -641,8 +641,8 @@ export class ConnectionPool extends EventEmitter {
       if (this.connectionStateManager) {
         if (isRecovery) {
           // Update existing state for recovery
+          // Don't update status - let the connection lifecycle handle status naturally
           await this.connectionStateManager.updateState(userId, phoneNumber, {
-            status: "connecting",
             instanceUrl: this.config.instanceUrl,
           });
         } else {
