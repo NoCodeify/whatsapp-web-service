@@ -1155,15 +1155,42 @@ export class ConnectionPool extends EventEmitter {
 
       // Emit connecting state if applicable
       // Don't regress status if we're already past the connecting phase
+      // CRITICAL: Check Firestore status first to prevent overwriting import states
       if (state === "connecting" && !connection.syncCompleted) {
-        // Update phone number status for UI
-        await this.updatePhoneNumberStatus(userId, phoneNumber, "connecting");
+        // Check current Firestore status to avoid regression
+        const phoneDoc = await this.firestore
+          .collection("users")
+          .doc(userId)
+          .collection("phone_numbers")
+          .doc(phoneNumber)
+          .get();
 
-        this.emit("connection-update", {
-          userId,
-          phoneNumber,
-          status: "connecting",
-        });
+        const currentStatus = phoneDoc.data()?.whatsapp_web?.status;
+        const isImporting =
+          currentStatus &&
+          (currentStatus.includes("importing") ||
+            currentStatus === "importing_contacts" ||
+            currentStatus === "importing_messages");
+
+        if (!isImporting) {
+          // Only update to "connecting" if we're not already importing
+          await this.updatePhoneNumberStatus(
+            userId,
+            phoneNumber,
+            "connecting",
+          );
+
+          this.emit("connection-update", {
+            userId,
+            phoneNumber,
+            status: "connecting",
+          });
+        } else {
+          this.logger.debug(
+            { userId, phoneNumber, currentStatus, baileysState: state },
+            "Skipping 'connecting' status update - already in import phase (preventing regression)",
+          );
+        }
       }
 
       if (qr) {
@@ -4242,9 +4269,10 @@ export class ConnectionPool extends EventEmitter {
         return; // Skip Firestore write during handshake
       }
 
-      // DEFENSIVE CHECK: Prevent "connected" status for first-time connections until sync completes
+      // DEFENSIVE CHECK: Prevent "connected" or "connecting" status for first-time connections until sync completes
+      // This prevents status regression during import phase
       if (
-        status === "connected" &&
+        (status === "connected" || status === "connecting") &&
         connection &&
         !connection.isRecovery &&
         !connection.syncCompleted
@@ -4257,7 +4285,7 @@ export class ConnectionPool extends EventEmitter {
             isRecovery: connection.isRecovery,
             syncCompleted: connection.syncCompleted,
           },
-          "DEFENSIVE BLOCK: Preventing 'connected' status until sync completes for first-time connection",
+          "DEFENSIVE BLOCK: Preventing status change during sync - keeping import status",
         );
         // Override to importing_messages until sync is complete
         status = "importing_messages";
