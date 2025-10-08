@@ -1398,14 +1398,18 @@ export class ConnectionPool extends EventEmitter {
             }
 
             // Update phone number status for UI - sync completed
-            // Only transition to "connected" if we have actual data OR it's a recovery
-            // This prevents premature "connected" status when no messages were synced
+            // Transition to "connected" if:
+            // - Recovery connection (already authenticated)
+            // - Handshake completed (manual reconnects with existing sessions)
+            // - Data was synced (new QR connections with history)
             if (
               connection.isRecovery ||
+              connection.handshakeCompleted ||
               totalContactsSynced > 0 ||
               totalMessagesSynced > 0
             ) {
               // For recovery, this is a no-op (status already "connected")
+              // For manual reconnects with existing sessions, transition to "connected"
               // For new connections with data, transition from "importing" to "connected"
               await this.updatePhoneNumberStatus(
                 userId,
@@ -1413,7 +1417,7 @@ export class ConnectionPool extends EventEmitter {
                 "connected",
               );
             } else {
-              // No data synced - keep as importing_messages to indicate still waiting
+              // No data synced and no existing session - keep as importing_messages
               this.logger.warn(
                 { userId, phoneNumber },
                 "Sync timeout with no data - keeping import status instead of connected",
