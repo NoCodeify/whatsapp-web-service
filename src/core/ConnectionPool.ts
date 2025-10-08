@@ -4154,14 +4154,21 @@ export class ConnectionPool extends EventEmitter {
         .collection("phone_numbers")
         .doc(phoneNumber);
 
-      await sessionRef.set(
-        {
-          status,
-          instance_url: this.config.instanceUrl,
-          updated_at: new Date(),
-        },
-        { merge: true },
-      );
+      // Check if document exists before updating
+      const doc = await sessionRef.get();
+      if (!doc.exists) {
+        this.logger.info(
+          { userId, phoneNumber, status },
+          "Phone number document doesn't exist (was deleted), skipping connection status update to respect deletion",
+        );
+        return;
+      }
+
+      await sessionRef.update({
+        status,
+        instance_url: this.config.instanceUrl,
+        updated_at: new Date(),
+      });
     } catch (error) {
       this.logger.error(
         { userId, phoneNumber, error },
@@ -4707,6 +4714,16 @@ export class ConnectionPool extends EventEmitter {
         .doc(userId)
         .collection("phone_numbers")
         .doc(phoneNumber);
+
+      // Check if document exists before updating
+      const doc = await sessionRef.get();
+      if (!doc.exists) {
+        this.logger.info(
+          { userId, phoneNumber },
+          "Phone number document doesn't exist (was deleted), skipping recovery tracking removal",
+        );
+        return;
+      }
 
       // Don't delete the document! Just clear recovery-specific fields
       await sessionRef.update({
