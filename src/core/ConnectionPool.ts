@@ -1660,8 +1660,14 @@ export class ConnectionPool extends EventEmitter {
 
           const msgTime = Number(msg.messageTimestamp || 0) * 1000;
           const isOldMessage = msgTime < hourAgo;
+          const isFromMe = msg.key?.fromMe === true;
 
-          if (isHistorySync || isOldMessage) {
+          // Messages sent by us should NEVER be treated as history sync,
+          // even if they come with type="append". They're just-sent messages.
+          if (isFromMe && !isOldMessage) {
+            // This is a message we just sent - treat as real-time
+            realtimeMessages.push(msg);
+          } else if (isHistorySync || isOldMessage) {
             // This is a history message from sync
             historyMessages.push(msg);
           } else {
