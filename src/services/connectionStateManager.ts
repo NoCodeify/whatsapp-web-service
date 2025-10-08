@@ -447,8 +447,23 @@ export class ConnectionStateManager extends EventEmitter {
       // Update existing document only
       const ref = phoneNumbersSnapshot.docs[0].ref;
 
+      // Determine the correct main status
+      // When syncing, show "importing_messages" to user instead of "connected"
+      // This ensures frontend sees the import in progress
+      let mainStatus = state.status;
+      if (state.syncProgress && !state.syncCompleted) {
+        // Override status during sync to show import progress
+        if (state.syncProgress.messages > 0) {
+          mainStatus = "importing_messages";
+        } else if (state.syncProgress.contacts > 0) {
+          mainStatus = "importing_contacts";
+        } else {
+          mainStatus = "importing";
+        }
+      }
+
       const whatsappData: any = {
-        status: state.status,
+        status: mainStatus, // Use computed status that reflects sync state
         instance_url: state.instanceUrl,
         session_exists: state.sessionExists,
         qr_scanned: state.qrScanned,
@@ -487,15 +502,28 @@ export class ConnectionStateManager extends EventEmitter {
         whatsappData.sync_last_update = admin.firestore.Timestamp.now();
       }
 
-      // Use .update() to only modify existing documents (won't create new ones)
-      await ref.update({
+      // Prepare update data
+      const updateData: any = {
         phone_number: state.phoneNumber,
         type: "whatsapp_web",
         status: "active",
         updated_at: admin.firestore.Timestamp.now(),
         last_activity: admin.firestore.Timestamp.now(),
         whatsapp_web: whatsappData,
-      });
+      };
+
+      // Also update whatsapp_web_usage field for frontend compatibility
+      // Frontend expects this field to show sync progress in the QR modal
+      if (state.syncProgress) {
+        updateData.whatsapp_web_usage = {
+          contacts_synced: state.syncProgress.contacts,
+          messages_synced: state.syncProgress.messages,
+          last_sync: admin.firestore.Timestamp.now(),
+        };
+      }
+
+      // Use .update() to only modify existing documents (won't create new ones)
+      await ref.update(updateData);
     } catch (error: any) {
       this.logger.error(
         {

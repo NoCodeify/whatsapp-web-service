@@ -1333,13 +1333,29 @@ export class ConnectionPool extends EventEmitter {
             }
 
             // Update phone number status for UI - sync completed
-            // For recovery, this is a no-op (status already "connected")
-            // For new connections, transition from "importing" to "connected"
-            await this.updatePhoneNumberStatus(
-              userId,
-              phoneNumber,
-              "connected",
-            );
+            // Only transition to "connected" if we have actual data OR it's a recovery
+            // This prevents premature "connected" status when no messages were synced
+            if (
+              connection.isRecovery ||
+              totalContactsSynced > 0 ||
+              totalMessagesSynced > 0
+            ) {
+              // For recovery, this is a no-op (status already "connected")
+              // For new connections with data, transition from "importing" to "connected"
+              await this.updatePhoneNumberStatus(
+                userId,
+                phoneNumber,
+                "connected",
+              );
+            } else {
+              // No data synced - keep as importing_messages to indicate still waiting
+              this.logger.warn(
+                { userId, phoneNumber },
+                "Sync timeout with no data - keeping import status instead of connected",
+              );
+              // Don't change status - let it remain as "importing_messages"
+              // The connectionStateManager.updateSyncProgress above will handle the status
+            }
 
             // Emit sync completion event with cumulative totals
             this.emit("history-synced", {
