@@ -1182,8 +1182,14 @@ export class ConnectionPool extends EventEmitter {
         }
 
         // Update connection state manager if available
-        if (this.connectionStateManager) {
+        // For recovery connections, mark as connected immediately
+        // For first-time connections, defer until sync completes
+        if (this.connectionStateManager && connection.isRecovery) {
           await this.connectionStateManager.markConnected(userId, phoneNumber);
+          this.logger.info(
+            { userId, phoneNumber },
+            "Marked connection as connected in state manager (recovery)",
+          );
         }
 
         // Release proxy after successful connection - TCP tunnel persists
@@ -1232,8 +1238,6 @@ export class ConnectionPool extends EventEmitter {
             );
           }
         }, 30000); // 30 seconds to avoid pairing restart issues
-
-        await this.updateConnectionStatus(userId, phoneNumber, "connected");
 
         // Determine initial status based on connection type
         // First-time connections: Show "importing_messages" so users see the import
@@ -1951,6 +1955,18 @@ export class ConnectionPool extends EventEmitter {
                   phoneNumber,
                   "connected",
                 );
+
+                // Mark as connected in ConnectionStateManager now that sync is complete
+                if (this.connectionStateManager) {
+                  await this.connectionStateManager.markConnected(
+                    userId,
+                    phoneNumber,
+                  );
+                  this.logger.info(
+                    { userId, phoneNumber },
+                    "Marked connection as connected in state manager (first-time, after sync)",
+                  );
+                }
 
                 // Emit sync completion event with cumulative totals
                 this.emit("history-synced", {
