@@ -958,12 +958,12 @@ describe("SessionRecoveryService", () => {
 
       await sessionRecoveryService.recoverActiveSessions();
 
+      // After our fix, SessionRecoveryService writes "connecting" status using nested field syntax
+      // This allows ConnectionPool to handle the normal progression: connecting → importing_messages → connected
       expect(mockDoc.update).toHaveBeenCalledWith(
         expect.objectContaining({
-          whatsapp_web: expect.objectContaining({
-            status: "connected",
-            recovery_attempted: true,
-          }),
+          "whatsapp_web.status": "connecting",
+          "whatsapp_web.recovery_attempted": true,
         }),
       );
     });
@@ -999,12 +999,11 @@ describe("SessionRecoveryService", () => {
 
       await sessionRecoveryService.recoverActiveSessions();
 
+      // Failed recovery still writes "failed" status, but using nested field syntax
       expect(mockDoc.update).toHaveBeenCalledWith(
         expect.objectContaining({
-          whatsapp_web: expect.objectContaining({
-            status: "failed",
-            recovery_attempted: true,
-          }),
+          "whatsapp_web.status": "failed",
+          "whatsapp_web.recovery_attempted": true,
         }),
       );
     });
