@@ -1243,11 +1243,12 @@ export class ConnectionPool extends EventEmitter {
         // Update phone number status for UI
         await this.updatePhoneNumberStatus(userId, phoneNumber, initialStatus);
 
-        // Track session for recovery
+        // Track session for recovery (always use "connected" since the connection is open)
+        // Note: Recovery tracking is separate from UI status - it tracks if session can be recovered
         await this.updateSessionForRecovery(
           userId,
           phoneNumber,
-          initialStatus,
+          "connected", // Always "connected" for recovery tracking, regardless of UI status
           connection.proxyCountry,
         );
 
