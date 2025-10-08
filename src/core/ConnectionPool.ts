@@ -720,11 +720,16 @@ export class ConnectionPool extends EventEmitter {
 
   /**
    * Remove a connection from the pool
+   * @param userId - The user ID
+   * @param phoneNumber - The phone number to disconnect
+   * @param skipLogout - If true, preserve session for reconnection; if false, perform full logout
+   * @param reason - The reason for disconnection (e.g., "deleted", "manual", "disabled")
    */
   async removeConnection(
     userId: string,
     phoneNumber: string,
     skipLogout = false,
+    reason?: string,
   ): Promise<void> {
     // Format phone number for consistency
     const formattedPhone = formatPhoneNumberSafe(phoneNumber);
@@ -804,9 +809,22 @@ export class ConnectionPool extends EventEmitter {
 
       // Update Firestore - preserve status for recovery when preserving session
       if (!skipLogout) {
-        await this.updateConnectionStatus(userId, phoneNumber, "disconnected");
-        // Remove from recovery tracking since it's a normal disconnect
-        await this.removeSessionFromRecovery(userId, phoneNumber);
+        // Don't update Firestore status for permanent deletions
+        // The document is being deleted, so writing "disconnected" status would recreate it
+        if (reason !== "deleted") {
+          await this.updateConnectionStatus(userId, phoneNumber, "disconnected");
+          // Remove from recovery tracking since it's a normal disconnect
+          await this.removeSessionFromRecovery(userId, phoneNumber);
+          this.logger.info(
+            { userId, phoneNumber, reason },
+            "Updated connection status to disconnected",
+          );
+        } else {
+          this.logger.info(
+            { userId, phoneNumber },
+            "Skipping status update for permanent deletion - document is being removed",
+          );
+        }
       } else {
         // Mark session as pending recovery for graceful shutdown
         await this.updateSessionForRecovery(

@@ -356,7 +356,8 @@ export function createApiRoutes(
           "Processing session deletion request",
         );
 
-        await connectionPool.removeConnection(userId, formattedPhone, false); // User-initiated disconnect = explicit logout
+        // Pass reason to removeConnection so it can skip status updates for permanent deletions
+        await connectionPool.removeConnection(userId, formattedPhone, false, reason);
         await sessionManager.deleteSession(
           userId,
           formattedPhone,

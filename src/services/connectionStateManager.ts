@@ -455,23 +455,8 @@ export class ConnectionStateManager extends EventEmitter {
       // Update existing document only
       const ref = phoneNumbersSnapshot.docs[0].ref;
 
-      // Determine the correct main status
-      // When syncing, show "importing_messages" to user instead of "connected"
-      // This ensures frontend sees the import in progress
-      let mainStatus = state.status;
-      if (state.syncProgress && !state.syncCompleted) {
-        // Override status during sync to show import progress
-        if (state.syncProgress.messages > 0) {
-          mainStatus = "importing_messages";
-        } else if (state.syncProgress.contacts > 0) {
-          mainStatus = "importing_contacts";
-        } else {
-          mainStatus = "importing";
-        }
-      }
-
       const whatsappData: any = {
-        status: mainStatus, // Use computed status that reflects sync state
+        status: state.status, // Use status as-is from ConnectionPool (single source of truth)
         instance_url: state.instanceUrl,
         session_exists: state.sessionExists,
         qr_scanned: state.qrScanned,
