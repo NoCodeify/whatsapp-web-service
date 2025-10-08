@@ -4084,14 +4084,29 @@ export class ConnectionPool extends EventEmitter {
 
     try {
       // Try to reconnect with preserved proxy country
-      // If handshake was already completed, treat as recovery (credentials exist in memory)
+      // Note: Always use isRecovery=false for pairing reconnections to show import UI
+      // We'll manually restore handshakeCompleted state after connection is created
       const success = await this.addConnection(
         userId,
         phoneNumber,
         storedProxyCountry,
         undefined, // countryCode
-        handshakeWasCompleted, // isRecovery - true if reconnecting after successful pairing
+        false, // isRecovery - false to show import UI even after pairing
       );
+
+      // Restore handshake completion state after successful reconnection
+      if (success && handshakeWasCompleted) {
+        const connectionKey = this.getConnectionKey(userId, phoneNumber);
+        const connection = this.connections.get(connectionKey);
+        if (connection) {
+          connection.handshakeCompleted = true;
+          this.logger.info(
+            { userId, phoneNumber },
+            "Restored handshake completion state after pairing reconnection",
+          );
+        }
+      }
+
       if (!success) {
         // If addConnection failed, try again (only increment if not immediate reconnect)
         const nextAttempt = attempt === 0 ? 1 : attempt + 1;
