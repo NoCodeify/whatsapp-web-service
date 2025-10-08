@@ -455,55 +455,54 @@ export class ConnectionStateManager extends EventEmitter {
       // Update existing document only
       const ref = phoneNumbersSnapshot.docs[0].ref;
 
-      const whatsappData: any = {
-        status: state.status, // Use status as-is from ConnectionPool (single source of truth)
-        instance_url: state.instanceUrl,
-        session_exists: state.sessionExists,
-        qr_scanned: state.qrScanned,
-        sync_completed: state.syncCompleted,
-        message_count: state.messageCount,
-        error_count: state.errorCount,
-        last_error: state.lastError ?? null,
-        last_seen: admin.firestore.Timestamp.now(),
-      };
-
-      // Add sync progress fields if available
-      if (state.syncProgress) {
-        whatsappData.sync_contacts_count = state.syncProgress.contacts;
-        whatsappData.sync_messages_count = state.syncProgress.messages;
-        whatsappData.sync_started_at = admin.firestore.Timestamp.fromDate(
-          state.syncProgress.startedAt,
-        );
-
-        if (state.syncProgress.completedAt) {
-          whatsappData.sync_completed_at = admin.firestore.Timestamp.fromDate(
-            state.syncProgress.completedAt,
-          );
-        }
-
-        // Add sync status based on progress
-        if (state.syncCompleted) {
-          whatsappData.sync_status = "completed";
-        } else if (state.syncProgress.messages > 0) {
-          whatsappData.sync_status = "importing_messages";
-        } else if (state.syncProgress.contacts > 0) {
-          whatsappData.sync_status = "importing_contacts";
-        } else {
-          whatsappData.sync_status = "started";
-        }
-
-        whatsappData.sync_last_update = admin.firestore.Timestamp.now();
-      }
-
-      // Prepare update data
+      // Prepare update data using nested field updates to avoid overwriting other fields
+      // Use dot notation (e.g., "whatsapp_web.status") instead of object replacement
       const updateData: any = {
         phone_number: state.phoneNumber,
         type: "whatsapp_web",
         status: "active",
         updated_at: admin.firestore.Timestamp.now(),
         last_activity: admin.firestore.Timestamp.now(),
-        whatsapp_web: whatsappData,
+        // Use nested field updates instead of object replacement
+        "whatsapp_web.status": state.status, // Use status as-is from ConnectionPool (single source of truth)
+        "whatsapp_web.instance_url": state.instanceUrl,
+        "whatsapp_web.session_exists": state.sessionExists,
+        "whatsapp_web.qr_scanned": state.qrScanned,
+        "whatsapp_web.sync_completed": state.syncCompleted,
+        "whatsapp_web.message_count": state.messageCount,
+        "whatsapp_web.error_count": state.errorCount,
+        "whatsapp_web.last_error": state.lastError ?? null,
+        "whatsapp_web.last_seen": admin.firestore.Timestamp.now(),
       };
+
+      // Add sync progress fields if available
+      if (state.syncProgress) {
+        updateData["whatsapp_web.sync_contacts_count"] =
+          state.syncProgress.contacts;
+        updateData["whatsapp_web.sync_messages_count"] =
+          state.syncProgress.messages;
+        updateData["whatsapp_web.sync_started_at"] =
+          admin.firestore.Timestamp.fromDate(state.syncProgress.startedAt);
+
+        if (state.syncProgress.completedAt) {
+          updateData["whatsapp_web.sync_completed_at"] =
+            admin.firestore.Timestamp.fromDate(state.syncProgress.completedAt);
+        }
+
+        // Add sync status based on progress
+        if (state.syncCompleted) {
+          updateData["whatsapp_web.sync_status"] = "completed";
+        } else if (state.syncProgress.messages > 0) {
+          updateData["whatsapp_web.sync_status"] = "importing_messages";
+        } else if (state.syncProgress.contacts > 0) {
+          updateData["whatsapp_web.sync_status"] = "importing_contacts";
+        } else {
+          updateData["whatsapp_web.sync_status"] = "started";
+        }
+
+        updateData["whatsapp_web.sync_last_update"] =
+          admin.firestore.Timestamp.now();
+      }
 
       // Also update whatsapp_web_usage field for frontend compatibility
       // Frontend expects this field to show sync progress in the QR modal
