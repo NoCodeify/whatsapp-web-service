@@ -2131,16 +2131,24 @@ export class ConnectionPool extends EventEmitter {
         .collection("phone_numbers")
         .doc(phoneNumber);
 
+      // Check if document exists before storing QR code
       sessionRef
-        .set(
-          {
+        .get()
+        .then((doc) => {
+          if (!doc.exists) {
+            this.logger.info(
+              { userId, phoneNumber },
+              "Phone number document doesn't exist (was deleted), skipping QR code storage",
+            );
+            return;
+          }
+          return sessionRef.update({
             qr_code: qr,
             status: "qr_pending",
             instance_url: this.config.instanceUrl,
             updated_at: new Date(),
-          },
-          { merge: true },
-        )
+          });
+        })
         .catch((error) => {
           this.logger.error(
             { userId, phoneNumber, error },
@@ -4043,7 +4051,8 @@ export class ConnectionPool extends EventEmitter {
     // Get existing connection's state BEFORE deleting
     const existingConnection = this.connections.get(connectionKey);
     const storedProxyCountry = existingConnection?.proxyCountry;
-    const handshakeWasCompleted = existingConnection?.handshakeCompleted || false;
+    const handshakeWasCompleted =
+      existingConnection?.handshakeCompleted || false;
 
     // Remove old connection from pool (but keep auth state)
     this.connections.delete(connectionKey);
@@ -4204,16 +4213,21 @@ export class ConnectionPool extends EventEmitter {
         .collection("phone_numbers")
         .doc(phoneNumber);
 
-      await phoneNumberRef.set(
-        {
-          whatsapp_web: {
-            status,
-            last_updated: admin.firestore.Timestamp.now(),
-          },
-          updated_at: admin.firestore.Timestamp.now(),
-        },
-        { merge: true },
-      );
+      // Check if document exists before updating
+      const phoneDoc = await phoneNumberRef.get();
+      if (!phoneDoc.exists) {
+        this.logger.info(
+          { userId, phoneNumber, status },
+          "Phone number document doesn't exist (was deleted), skipping status update to respect deletion",
+        );
+        return;
+      }
+
+      await phoneNumberRef.update({
+        "whatsapp_web.status": status,
+        "whatsapp_web.last_updated": admin.firestore.Timestamp.now(),
+        updated_at: admin.firestore.Timestamp.now(),
+      });
 
       this.logger.info(
         { userId, phoneNumber, status },
@@ -4582,7 +4596,17 @@ export class ConnectionPool extends EventEmitter {
 
       // Check if document already exists to preserve country_code
       const existingDoc = await sessionRef.get();
-      const existingData = existingDoc.exists ? existingDoc.data() : {};
+
+      // Don't recreate deleted documents - respect user/system deletions
+      if (!existingDoc.exists) {
+        this.logger.info(
+          { userId, phoneNumber },
+          "Phone number document doesn't exist (was deleted), skipping session recovery update to respect deletion",
+        );
+        return;
+      }
+
+      const existingData = existingDoc.data() || {};
 
       // Determine if instance is localhost
       const isLocalhost =
@@ -4640,7 +4664,7 @@ export class ConnectionPool extends EventEmitter {
         );
       }
 
-      await sessionRef.set(sessionData, { merge: true });
+      await sessionRef.update(sessionData);
 
       this.logger.info(
         { userId, phoneNumber, status, proxyCountry },
