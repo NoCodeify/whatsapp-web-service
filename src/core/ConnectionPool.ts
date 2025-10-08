@@ -1134,7 +1134,8 @@ export class ConnectionPool extends EventEmitter {
       );
 
       // Emit connecting state if applicable
-      if (state === "connecting") {
+      // Don't regress status if we're already past the connecting phase
+      if (state === "connecting" && !connection.syncCompleted) {
         // Update phone number status for UI
         await this.updatePhoneNumberStatus(userId, phoneNumber, "connecting");
 
