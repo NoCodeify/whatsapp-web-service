@@ -39,6 +39,7 @@ export interface WhatsAppConnection {
   instanceUrl: string;
   proxyReleased?: boolean; // Track if proxy was released after successful connection
   isRecovery?: boolean; // Track if this is a recovery connection (redeployment)
+  syncCompleted?: boolean; // Track if initial history sync has completed
 }
 
 export interface ConnectionPoolConfig {
@@ -680,6 +681,7 @@ export class ConnectionPool extends EventEmitter {
         instanceUrl: this.config.instanceUrl,
         proxySessionId: proxyCountry,
         isRecovery: isRecovery, // Track if this is a recovery connection
+        syncCompleted: isRecovery, // Recovery connections are already synced, first-time are not
       };
 
       // Set up event handlers
@@ -1883,6 +1885,11 @@ export class ConnectionPool extends EventEmitter {
               "Recovery connection: Sync completed in background, status remains 'connected'",
             );
 
+            // Mark sync as completed for this connection
+            if (currentConnection) {
+              currentConnection.syncCompleted = true;
+            }
+
             // Emit sync completion event immediately
             this.emit("history-synced", {
               userId,
@@ -1925,7 +1932,20 @@ export class ConnectionPool extends EventEmitter {
                   "Grace period completed, marking connection as synced",
                 );
 
+                // Mark sync as completed for this connection BEFORE updating status
+                // This allows the defensive check in updatePhoneNumberStatus to pass
+                const connKey = this.getConnectionKey(userId, phoneNumber);
+                const conn = this.connections.get(connKey);
+                if (conn) {
+                  conn.syncCompleted = true;
+                  this.logger.info(
+                    { userId, phoneNumber },
+                    "Marked connection as syncCompleted=true",
+                  );
+                }
+
                 // Update phone number status for UI - sync completed
+                // Now the defensive check will allow "connected" status
                 await this.updatePhoneNumberStatus(
                   userId,
                   phoneNumber,
@@ -4111,6 +4131,30 @@ export class ConnectionPool extends EventEmitter {
     status: string,
   ) {
     try {
+      // DEFENSIVE CHECK: Prevent "connected" status for first-time connections until sync completes
+      const connectionKey = this.getConnectionKey(userId, phoneNumber);
+      const connection = this.connections.get(connectionKey);
+
+      if (
+        status === "connected" &&
+        connection &&
+        !connection.isRecovery &&
+        !connection.syncCompleted
+      ) {
+        this.logger.warn(
+          {
+            userId,
+            phoneNumber,
+            requestedStatus: status,
+            isRecovery: connection.isRecovery,
+            syncCompleted: connection.syncCompleted,
+          },
+          "DEFENSIVE BLOCK: Preventing 'connected' status until sync completes for first-time connection",
+        );
+        // Override to importing_messages until sync is complete
+        status = "importing_messages";
+      }
+
       const phoneNumberRef = this.firestore
         .collection("users")
         .doc(userId)
