@@ -1175,7 +1175,7 @@ export class ConnectionPool extends EventEmitter {
 
       // Emit connecting state if applicable
       // Don't regress status if we're already past the connecting phase
-      // CRITICAL: Check Firestore status first to prevent overwriting import states
+      // CRITICAL: Check Firestore status first to prevent overwriting advanced states
       if (state === "connecting" && !connection.syncCompleted) {
         // Check current Firestore status to avoid regression
         const phoneDoc = await this.firestore
@@ -1186,14 +1186,15 @@ export class ConnectionPool extends EventEmitter {
           .get();
 
         const currentStatus = phoneDoc.data()?.whatsapp_web?.status;
-        const isImporting =
+        const isProgressedStatus =
           currentStatus &&
           (currentStatus.includes("importing") ||
             currentStatus === "importing_contacts" ||
-            currentStatus === "importing_messages");
+            currentStatus === "importing_messages" ||
+            currentStatus === "connected");
 
-        if (!isImporting) {
-          // Only update to "connecting" if we're not already importing
+        if (!isProgressedStatus) {
+          // Only update to "connecting" if we're not already in a progressed state
           await this.updatePhoneNumberStatus(
             userId,
             phoneNumber,
@@ -1208,7 +1209,7 @@ export class ConnectionPool extends EventEmitter {
         } else {
           this.logger.debug(
             { userId, phoneNumber, currentStatus, baileysState: state },
-            "Skipping 'connecting' status update - already in import phase (preventing regression)",
+            "Skipping 'connecting' status update - already in progressed state (preventing regression)",
           );
         }
       }
@@ -1347,14 +1348,24 @@ export class ConnectionPool extends EventEmitter {
 
         // Emit sync started event with small delay to ensure WebSocket clients are ready
         setTimeout(async () => {
-          if (connection.isRecovery) {
+          if (connection.isRecovery || connection.handshakeCompleted) {
             this.logger.info(
-              { userId, phoneNumber, isRecovery: true },
+              {
+                userId,
+                phoneNumber,
+                isRecovery: connection.isRecovery,
+                handshakeCompleted: connection.handshakeCompleted,
+              },
               "Reconnection: Starting background sync - keeping status as 'connected' to allow messaging",
             );
           } else {
             this.logger.info(
-              { userId, phoneNumber, isRecovery: false },
+              {
+                userId,
+                phoneNumber,
+                isRecovery: false,
+                handshakeCompleted: false,
+              },
               "First-time connection: Starting import - status will show 'importing_messages'",
             );
           }
