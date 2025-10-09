@@ -1240,13 +1240,15 @@ export class ConnectionPool extends EventEmitter {
 
         // Update sessionExists flag for connections with existing session files
         // This ensures recovery works after redeployment
+        // Also update status to "connected" to keep in-memory state synchronized
         if (this.connectionStateManager && connection.handshakeCompleted) {
           await this.connectionStateManager.updateState(userId, phoneNumber, {
+            status: "connected",
             sessionExists: true,
           });
           this.logger.debug(
             { userId, phoneNumber, handshakeCompleted: true },
-            "Updated sessionExists=true for connection with existing session files",
+            "Updated status=connected and sessionExists=true for connection with existing session files",
           );
         }
 
@@ -4276,7 +4278,15 @@ export class ConnectionPool extends EventEmitter {
   private async updatePhoneNumberStatus(
     userId: string,
     phoneNumber: string,
-    status: string,
+    status:
+      | "connecting"
+      | "connected"
+      | "disconnected"
+      | "failed"
+      | "qr_pending"
+      | "importing"
+      | "importing_contacts"
+      | "importing_messages",
   ) {
     try {
       const connectionKey = this.getConnectionKey(userId, phoneNumber);
@@ -4349,9 +4359,18 @@ export class ConnectionPool extends EventEmitter {
         updated_at: admin.firestore.Timestamp.now(),
       });
 
+      // Also update in-memory state to prevent stale state during shutdown
+      if (this.connectionStateManager) {
+        this.connectionStateManager.updateInMemoryStatus(
+          userId,
+          phoneNumber,
+          status,
+        );
+      }
+
       this.logger.info(
         { userId, phoneNumber, status },
-        "Updated phone number status in nested structure",
+        "Updated phone number status in nested structure and in-memory state",
       );
     } catch (error) {
       this.logger.error(

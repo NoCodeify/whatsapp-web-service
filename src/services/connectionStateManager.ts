@@ -159,6 +159,29 @@ export class ConnectionStateManager extends EventEmitter {
   }
 
   /**
+   * Update in-memory status only (without persisting to Firestore)
+   * Used to keep in-memory state synchronized when status is updated elsewhere
+   */
+  updateInMemoryStatus(
+    userId: string,
+    phoneNumber: string,
+    status: ConnectionState["status"],
+  ): void {
+    const key = this.getStateKey(userId, phoneNumber);
+    const state = this.states.get(key);
+
+    if (state) {
+      state.status = status;
+      state.lastActivity = new Date();
+
+      this.logger.debug(
+        { userId, phoneNumber, status },
+        "Updated in-memory status without Firestore write",
+      );
+    }
+  }
+
+  /**
    * Get all active connections
    */
   async getActiveConnections(): Promise<ConnectionState[]> {
