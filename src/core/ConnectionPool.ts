@@ -4302,10 +4302,12 @@ export class ConnectionPool extends EventEmitter {
       // DEFENSIVE CHECK: Prevent premature "connected" status for connections until sync completes
       // This prevents status regression during import phase
       // Allow "connecting" status so UI can show progress
+      // Skip this check for connections with handshakeCompleted (manual reconnects with existing sessions)
       if (
         status === "connected" &&
         connection &&
         !connection.isRecovery &&
+        !connection.handshakeCompleted &&
         !connection.syncCompleted
       ) {
         this.logger.warn(
@@ -4314,6 +4316,7 @@ export class ConnectionPool extends EventEmitter {
             phoneNumber,
             requestedStatus: status,
             isRecovery: connection.isRecovery,
+            handshakeCompleted: connection.handshakeCompleted,
             syncCompleted: connection.syncCompleted,
           },
           "DEFENSIVE BLOCK: Preventing premature 'connected' status during sync - keeping import status",
