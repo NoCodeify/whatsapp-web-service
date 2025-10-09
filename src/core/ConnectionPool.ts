@@ -1174,44 +1174,21 @@ export class ConnectionPool extends EventEmitter {
       );
 
       // Emit connecting state if applicable
-      // Don't regress status if we're already past the connecting phase
-      // CRITICAL: Check Firestore status first to prevent overwriting advanced states
-      if (state === "connecting" && !connection.syncCompleted) {
-        // Check current Firestore status to avoid regression
-        const phoneDoc = await this.firestore
-          .collection("users")
-          .doc(userId)
-          .collection("phone_numbers")
-          .doc(phoneNumber)
-          .get();
+      // Don't regress status if we've already successfully opened the connection
+      // Use in-memory flag to avoid race conditions with async Firestore reads
+      if (state === "connecting" && !connection.hasConnectedSuccessfully) {
+        // Only update to "connecting" if connection hasn't opened yet
+        await this.updatePhoneNumberStatus(
+          userId,
+          phoneNumber,
+          "connecting",
+        );
 
-        const currentStatus = phoneDoc.data()?.whatsapp_web?.status;
-        const isProgressedStatus =
-          currentStatus &&
-          (currentStatus.includes("importing") ||
-            currentStatus === "importing_contacts" ||
-            currentStatus === "importing_messages" ||
-            currentStatus === "connected");
-
-        if (!isProgressedStatus) {
-          // Only update to "connecting" if we're not already in a progressed state
-          await this.updatePhoneNumberStatus(
-            userId,
-            phoneNumber,
-            "connecting",
-          );
-
-          this.emit("connection-update", {
-            userId,
-            phoneNumber,
-            status: "connecting",
-          });
-        } else {
-          this.logger.debug(
-            { userId, phoneNumber, currentStatus, baileysState: state },
-            "Skipping 'connecting' status update - already in progressed state (preventing regression)",
-          );
-        }
+        this.emit("connection-update", {
+          userId,
+          phoneNumber,
+          status: "connecting",
+        });
       }
 
       if (qr) {
