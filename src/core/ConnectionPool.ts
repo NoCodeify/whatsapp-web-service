@@ -1261,6 +1261,18 @@ export class ConnectionPool extends EventEmitter {
           );
         }
 
+        // Update sessionExists flag for connections with existing session files
+        // This ensures recovery works after redeployment
+        if (this.connectionStateManager && connection.handshakeCompleted) {
+          await this.connectionStateManager.updateState(userId, phoneNumber, {
+            sessionExists: true,
+          });
+          this.logger.debug(
+            { userId, phoneNumber, handshakeCompleted: true },
+            "Updated sessionExists=true for connection with existing session files",
+          );
+        }
+
         // Release proxy after successful connection - TCP tunnel persists
         // 30 second delay to ensure connection is truly stable (past any pairing restarts)
         setTimeout(async () => {
