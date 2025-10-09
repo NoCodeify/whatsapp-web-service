@@ -258,7 +258,7 @@ export class ConnectionStateManager extends EventEmitter {
           const state: ConnectionState = {
             userId,
             phoneNumber,
-            status: "connecting", // Mark as recovering
+            status: whatsappData.status || "connecting", // Use actual status from database
             instanceUrl: whatsappData.instance_url || "",
             createdAt: data.created_at?.toDate() || new Date(),
             lastActivity: data.updated_at?.toDate() || new Date(),
