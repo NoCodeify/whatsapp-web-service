@@ -1310,9 +1310,11 @@ export class ConnectionPool extends EventEmitter {
         // Determine initial status based on connection type
         // First-time connections: Show "importing_messages" so users see the import
         // Reconnections/Recovery: Show "connected" immediately for instant messaging
-        const initialStatus = connection.isRecovery
-          ? "connected"
-          : "importing_messages";
+        // Manual reconnects with existing sessions also skip to "connected"
+        const initialStatus =
+          connection.isRecovery || connection.handshakeCompleted
+            ? "connected"
+            : "importing_messages";
 
         // Update phone number status for UI
         await this.updatePhoneNumberStatus(userId, phoneNumber, initialStatus);
