@@ -23,6 +23,15 @@ import { formatPhoneNumberSafe, formatWhatsAppJid } from "../utils/phoneNumber";
 import * as admin from "firebase-admin";
 import { DocumentReference } from "@google-cloud/firestore";
 
+export interface QueuedMessage {
+  toNumber: string;
+  content: WAMessageContent;
+  timestamp: Date;
+  timeoutId: NodeJS.Timeout;
+  resolve: (value: WAMessageKey | null) => void;
+  reject: (reason: any) => void;
+}
+
 export interface WhatsAppConnection {
   userId: string;
   phoneNumber: string;
@@ -41,6 +50,7 @@ export interface WhatsAppConnection {
   isRecovery?: boolean; // Track if this is a recovery connection (redeployment)
   syncCompleted?: boolean; // Track if initial history sync has completed
   handshakeCompleted?: boolean; // Track if initial QR pairing handshake has completed (before first disconnect code 515)
+  messageQueue?: QueuedMessage[]; // Queue messages during recovery for zero message loss
 }
 
 export interface ConnectionPoolConfig {
@@ -927,7 +937,8 @@ export class ConnectionPool extends EventEmitter {
 
     const connection = this.getConnection(userId, phoneNumber);
 
-    if (!connection || connection.state.connection !== "open") {
+    // If no connection exists at all, reject immediately
+    if (!connection) {
       this.logger.error(
         {
           messageId,
@@ -938,13 +949,43 @@ export class ConnectionPool extends EventEmitter {
             (content as any).text ||
             (content as any).caption ||
             "[Media Message]",
-          connectionExists: !!connection,
-          connectionState: connection?.state?.connection,
-          error: "no_active_connection",
+          error: "no_connection",
         },
-        "No active connection for sending message",
+        "No connection found for phone number",
       );
       return null;
+    }
+
+    // If connection exists but is not open, queue the message if it's recovering
+    if (connection.state.connection !== "open") {
+      // Check if connection is recovering (recently connected or has session)
+      const isRecovering =
+        connection.hasConnectedSuccessfully ||
+        connection.isRecovery ||
+        connection.handshakeCompleted;
+
+      if (!isRecovering) {
+        // Connection never connected successfully, reject immediately
+        this.logger.error(
+          {
+            messageId,
+            userId,
+            phoneNumber: phoneNumber,
+            toNumber: toNumber,
+            body:
+              (content as any).text ||
+              (content as any).caption ||
+              "[Media Message]",
+            connectionState: connection.state.connection,
+            error: "connection_not_established",
+          },
+          "Connection not established yet, cannot send message",
+        );
+        return null;
+      }
+
+      // Queue the message for sending when connection reopens
+      return this.queueMessage(connection, toNumber, content, messageId);
     }
 
     try {
@@ -1136,6 +1177,206 @@ export class ConnectionPool extends EventEmitter {
   }
 
   /**
+   * Queue a message for sending when connection reopens (zero message loss during recovery)
+   */
+  private queueMessage(
+    connection: WhatsAppConnection,
+    toNumber: string,
+    content: WAMessageContent,
+    messageId: string,
+  ): Promise<WAMessageKey | null> {
+    const MAX_QUEUE_SIZE = 50;
+    const QUEUE_TIMEOUT_MS = 30000; // 30 seconds
+
+    // Initialize queue if it doesn't exist
+    if (!connection.messageQueue) {
+      connection.messageQueue = [];
+    }
+
+    // Check queue size limit
+    if (connection.messageQueue.length >= MAX_QUEUE_SIZE) {
+      this.logger.error(
+        {
+          messageId,
+          userId: connection.userId,
+          phoneNumber: connection.phoneNumber,
+          queueSize: connection.messageQueue.length,
+          error: "queue_full",
+        },
+        "Message queue full, rejecting message",
+      );
+      return Promise.resolve(null);
+    }
+
+    // Create promise that will be resolved when message is sent or timeout occurs
+    return new Promise<WAMessageKey | null>((resolve, reject) => {
+      // Setup timeout
+      const timeoutId = setTimeout(() => {
+        // Remove from queue
+        const index = connection.messageQueue!.findIndex(
+          (m) => m.timeoutId === timeoutId,
+        );
+        if (index >= 0) {
+          connection.messageQueue!.splice(index, 1);
+        }
+
+        this.logger.error(
+          {
+            messageId,
+            userId: connection.userId,
+            phoneNumber: connection.phoneNumber,
+            toNumber: toNumber,
+            queueTime: QUEUE_TIMEOUT_MS,
+            error: "queue_timeout",
+          },
+          "Message queue timeout - connection did not reopen in time",
+        );
+
+        resolve(null); // Resolve with null instead of rejecting to match API behavior
+      }, QUEUE_TIMEOUT_MS);
+
+      // Add to queue
+      connection.messageQueue!.push({
+        toNumber,
+        content,
+        timestamp: new Date(),
+        timeoutId,
+        resolve,
+        reject,
+      });
+
+      this.logger.info(
+        {
+          messageId,
+          userId: connection.userId,
+          phoneNumber: connection.phoneNumber,
+          toNumber: toNumber,
+          body:
+            (content as any).text ||
+            (content as any).caption ||
+            "[Media Message]",
+          queueSize: connection.messageQueue!.length,
+          queueTimeout: QUEUE_TIMEOUT_MS,
+        },
+        "Message queued for sending when connection reopens",
+      );
+    });
+  }
+
+  /**
+   * Flush message queue when connection reopens (send all queued messages)
+   */
+  private async flushMessageQueue(
+    connection: WhatsAppConnection,
+  ): Promise<void> {
+    if (!connection.messageQueue || connection.messageQueue.length === 0) {
+      return; // No messages to flush
+    }
+
+    const queueSize = connection.messageQueue.length;
+    const flushStart = Date.now();
+
+    this.logger.info(
+      {
+        userId: connection.userId,
+        phoneNumber: connection.phoneNumber,
+        queueSize,
+      },
+      "Flushing message queue after connection reopened",
+    );
+
+    // Process all queued messages
+    const queue = connection.messageQueue;
+    connection.messageQueue = []; // Clear queue immediately to prevent re-entry
+
+    let sentCount = 0;
+    let failedCount = 0;
+
+    for (const queuedMsg of queue) {
+      // Clear timeout since we're processing now
+      clearTimeout(queuedMsg.timeoutId);
+
+      try {
+        // Calculate how long message was queued
+        const queueDuration = Date.now() - queuedMsg.timestamp.getTime();
+
+        this.logger.debug(
+          {
+            userId: connection.userId,
+            phoneNumber: connection.phoneNumber,
+            toNumber: queuedMsg.toNumber,
+            queueDuration,
+          },
+          "Sending queued message",
+        );
+
+        // Send the message using the actual socket
+        const jid = this.formatJid(queuedMsg.toNumber);
+        const result = await connection.socket.sendMessage(
+          jid,
+          queuedMsg.content as any,
+        );
+
+        if (result && result.key) {
+          queuedMsg.resolve(result.key);
+          sentCount++;
+
+          this.logger.info(
+            {
+              userId: connection.userId,
+              phoneNumber: connection.phoneNumber,
+              toNumber: queuedMsg.toNumber,
+              messageId: result.key.id,
+              queueDuration,
+            },
+            "Queued message sent successfully",
+          );
+        } else {
+          queuedMsg.resolve(null);
+          failedCount++;
+
+          this.logger.warn(
+            {
+              userId: connection.userId,
+              phoneNumber: connection.phoneNumber,
+              toNumber: queuedMsg.toNumber,
+              queueDuration,
+            },
+            "Queued message sent but no key returned",
+          );
+        }
+      } catch (error: any) {
+        queuedMsg.resolve(null); // Resolve with null instead of rejecting
+        failedCount++;
+
+        this.logger.error(
+          {
+            userId: connection.userId,
+            phoneNumber: connection.phoneNumber,
+            toNumber: queuedMsg.toNumber,
+            error: error.message,
+          },
+          "Failed to send queued message",
+        );
+      }
+    }
+
+    const flushDuration = Date.now() - flushStart;
+
+    this.logger.info(
+      {
+        userId: connection.userId,
+        phoneNumber: connection.phoneNumber,
+        queueSize,
+        sentCount,
+        failedCount,
+        flushDuration,
+      },
+      "Message queue flush completed",
+    );
+  }
+
+  /**
    * Setup event handlers for a connection
    */
   private setupConnectionHandlers(connection: WhatsAppConnection) {
@@ -1251,6 +1492,9 @@ export class ConnectionPool extends EventEmitter {
             "Updated status=connected and sessionExists=true for connection with existing session files",
           );
         }
+
+        // Flush message queue - send all queued messages now that connection is open
+        await this.flushMessageQueue(connection);
 
         // Release proxy after successful connection - TCP tunnel persists
         // 30 second delay to ensure connection is truly stable (past any pairing restarts)
