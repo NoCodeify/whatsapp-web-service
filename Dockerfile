@@ -24,8 +24,6 @@ FROM node:20-alpine
 
 # Install runtime dependencies
 RUN apk add --no-cache \
-    ffmpeg \
-    chromium \
     ca-certificates \
     && rm -rf /var/cache/apk/*
 
@@ -54,9 +52,7 @@ USER nodejs
 
 # Environment variables
 ENV NODE_ENV=production \
-    PORT=8080 \
-    PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+    PORT=8080
 
 # Expose port
 EXPOSE 8080

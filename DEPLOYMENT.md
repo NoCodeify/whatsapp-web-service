@@ -57,7 +57,7 @@ git push origin main
 
 - Project: `whatzaidev`
 - Service: `whatsapp-web-service-dev`
-- Resources: 4Gi RAM, 2 CPU cores
+- Resources: 2Gi RAM, 1 CPU core
 - Min instances: 1 (no cold starts)
 
 ### 2. Production Deployment (Manual Only)
@@ -96,10 +96,10 @@ gh workflow run deploy.yml \
 
 **Production Environment:**
 
-- Project: `whatzai-prod`
+- Project: `whatzai`
 - Service: `whatsapp-web-service-prod`
-- Resources: 8Gi RAM, 4 CPU cores
-- Min instances: 2 (high availability)
+- Resources: 2Gi RAM, 1 CPU core
+- Min instances: 1
 
 ## 🛠️ Manual Deployment Commands
 
@@ -228,8 +228,8 @@ gcloud run services update whatsapp-web-service-prod \
 
 | Environment | Project        | Service Name                | Resources | Min Instances | Purpose              |
 | ----------- | -------------- | --------------------------- | --------- | ------------- | -------------------- |
-| Development | `whatzaidev`   | `whatsapp-web-service-dev`  | 4Gi/2CPU  | 1             | Testing & validation |
-| Production  | `whatzai-prod` | `whatsapp-web-service-prod` | 8Gi/4CPU  | 2             | Live service         |
+| Development | `whatzaidev`   | `whatsapp-web-service-dev`  | 2Gi/1CPU  | 1             | Testing & validation |
+| Production  | `whatzai`      | `whatsapp-web-service-prod` | 2Gi/1CPU  | 1             | Live service         |
 
 ## 🔐 Security & Access
 

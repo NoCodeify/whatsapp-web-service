@@ -9,11 +9,11 @@ This document explains the Cloud Run configuration optimizations specifically de
 ### Development Environment (`cloudbuild-dev.yaml`)
 
 ```yaml
-Memory: 4Gi
-CPU: 2 cores
+Memory: 2Gi
+CPU: 1 core
 Min Instances: 1
-Max Instances: 5
-Concurrency: 10
+Max Instances: 1
+Concurrency: 25
 No CPU Throttling: Enabled
 CPU Boost: Enabled
 ```
@@ -21,11 +21,11 @@ CPU Boost: Enabled
 ### Production Environment (`cloudbuild-prod.yaml`)
 
 ```yaml
-Memory: 8Gi
-CPU: 4 cores
-Min Instances: 2
-Max Instances: 10
-Concurrency: 5
+Memory: 2Gi
+CPU: 1 core
+Min Instances: 1
+Max Instances: 1
+Concurrency: 25
 No CPU Throttling: Enabled
 CPU Boost: Enabled
 ```
@@ -34,50 +34,54 @@ CPU Boost: Enabled
 
 ### 1. Memory Configuration
 
-- **Development**: 4Gi (increased from 2Gi)
-- **Production**: 8Gi
+- **Development**: 2Gi (optimized for Baileys)
+- **Production**: 2Gi (optimized for Baileys)
 
-**Rationale**: WhatsApp Web connections require significant memory for:
+**Rationale**: Baileys is a lightweight WhatsApp library that doesn't require browser automation:
 
-- Session storage and authentication state
-- Message queues and chat history
-- WebSocket connection buffers
-- Baileys library internal state
+- No Chromium/Puppeteer overhead (uses native WhatsApp Web protocol)
+- Session storage and authentication state (~50-100MB per connection)
+- Message queues and chat history (minimal overhead)
+- WebSocket connection buffers (low memory footprint)
+- 2Gi sufficient for 20-50 concurrent connections
 
 ### 2. CPU Configuration
 
-- **Development**: 2 cores (increased from 1)
-- **Production**: 4 cores
+- **Development**: 1 core (optimized for WebSocket workload)
+- **Production**: 1 core (optimized for WebSocket workload)
 - **CPU Throttling**: Disabled for both environments
 - **CPU Boost**: Enabled for both environments
 
 **Rationale**:
 
-- WebSocket keep-alive and message processing require consistent CPU
-- Disabled throttling prevents connection drops due to CPU limitations
-- CPU boost improves response times for connection establishment
+- WebSocket connections are I/O-bound, not CPU-intensive
+- 1 vCPU sufficient for message processing and keep-alive
+- Disabled throttling prevents connection drops during idle periods
+- CPU boost improves cold start and reconnection times
 
 ### 3. Instance Configuration
 
-- **Development**: Min 1, Max 5 (changed from Min 0, Max 3)
-- **Production**: Min 2, Max 10
+- **Development**: Min 1, Max 1 (single instance for cost optimization)
+- **Production**: Min 1, Max 1 (single instance for cost optimization)
 
 **Rationale**:
 
-- Minimum instances prevent cold starts which can disrupt WebSocket connections
-- Higher maximum allows for better load distribution
-- Prevents connection timeouts during scaling events
+- Minimum 1 instance prevents cold starts which can disrupt WebSocket connections
+- Max 1 instance optimizes costs while maintaining stable service
+- Suitable for moderate connection loads (up to 25 concurrent per instance)
+- Can be increased if load monitoring shows need for scaling
 
 ### 4. Concurrency Settings
 
-- **Development**: 10 (reduced from 100)
-- **Production**: 5
+- **Development**: 25 (optimized for Baileys)
+- **Production**: 25 (optimized for Baileys)
 
 **Rationale**:
 
-- Lower concurrency ensures each instance has sufficient resources per connection
-- WhatsApp Web connections are stateful and resource-intensive
-- Prevents memory exhaustion under high load
+- Baileys is lightweight, allowing higher concurrency than browser-based solutions
+- 25 concurrent connections per instance balances throughput and stability
+- Each connection uses minimal resources (~50-100MB)
+- Prevents memory exhaustion while maximizing instance utilization
 
 ### 5. Environment Variables
 
@@ -136,14 +140,28 @@ The optimized configuration includes enhanced monitoring capabilities:
 
 ### Development Environment
 
-- **Estimated Cost**: ~$50-100/month
-- **Justification**: Sufficient for testing and development workloads
+- **Estimated Cost**: ~$37/month (2Gi/1vCPU, always-on)
+- **Justification**: Cost-optimized for testing and development workloads
+- **Savings**: 75% reduction from previous 4Gi/2vCPU configuration
 
 ### Production Environment
 
-- **Estimated Cost**: ~$200-500/month (depending on load)
-- **Justification**: Cost-effective compared to managing dedicated infrastructure
-- **Scaling**: Costs scale with actual usage due to per-instance billing
+- **Estimated Cost**: ~$37/month (2Gi/1vCPU, always-on)
+- **Justification**: Cost-effective for moderate load; can scale if needed
+- **Scaling**: Fixed cost with current single-instance setup
+- **Total Monthly Cost**: ~$74/month (both environments)
+
+### Cost Breakdown
+
+**Per Instance (2Gi RAM, 1 vCPU):**
+- CPU: 1 vCPU × $0.000024/sec × 2,592,000 sec/month = $62.21
+- Memory: 2 GiB × $0.0000025/sec × 2,592,000 sec/month = $12.96
+- **Total per environment**: ~$75/month
+
+**Compared to previous configuration (4Gi/2vCPU):**
+- Previous cost: ~$150/month per environment
+- New cost: ~$75/month per environment
+- **Savings: 50% reduction ($150/month total)**
 
 ## Deployment Commands
 
