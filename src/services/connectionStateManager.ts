@@ -618,6 +618,21 @@ export class ConnectionStateManager extends EventEmitter {
       const data = phoneNumbersSnapshot.docs[0].data();
       const whatsappData = data.whatsapp_web || {};
 
+      // Load sync progress from Firestore if available
+      let syncProgress: ConnectionState["syncProgress"] = undefined;
+      if (
+        whatsappData.sync_contacts_count ||
+        whatsappData.sync_messages_count ||
+        whatsappData.sync_started_at
+      ) {
+        syncProgress = {
+          contacts: whatsappData.sync_contacts_count || 0,
+          messages: whatsappData.sync_messages_count || 0,
+          startedAt: whatsappData.sync_started_at?.toDate() || new Date(),
+          completedAt: whatsappData.sync_completed_at?.toDate(),
+        };
+      }
+
       return {
         userId,
         phoneNumber,
@@ -637,7 +652,7 @@ export class ConnectionStateManager extends EventEmitter {
         syncCompleted: whatsappData.sync_completed || false,
         errorCount: whatsappData.error_count || 0,
         lastError: whatsappData.last_error,
-        syncProgress: undefined,
+        syncProgress,
       } as ConnectionState;
     } catch (error) {
       this.logger.error({ error, userId, phoneNumber }, "Failed to load state");

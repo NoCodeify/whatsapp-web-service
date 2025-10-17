@@ -481,6 +481,67 @@ export class ConnectionPool extends EventEmitter {
           "Attempting to recover WhatsApp connection from session files",
         );
 
+        // Check for stuck sync and complete it before recovery
+        // This prevents infinite sync loops when service restarts frequently
+        if (
+          firestoreState &&
+          (firestoreState.status === "importing_contacts" ||
+            firestoreState.status === "importing_messages")
+        ) {
+          try {
+            // Get full session data to check sync timing
+            const sessionSnapshot = await this.firestore
+              .collection("users")
+              .doc(userId)
+              .collection("phone_numbers")
+              .where("phone_number", "==", phoneNumber)
+              .where("type", "==", "whatsapp_web")
+              .limit(1)
+              .get();
+
+            if (!sessionSnapshot.empty) {
+              const sessionData = sessionSnapshot.docs[0].data();
+              const whatsappData = sessionData.whatsapp_web || {};
+              const syncStartedAt = whatsappData.sync_started_at;
+
+              if (syncStartedAt) {
+                const minutesSinceSync =
+                  (Date.now() - syncStartedAt.toMillis()) / 60000;
+
+                // If sync has been stuck for > 5 minutes, complete it before recovery
+                if (minutesSinceSync > 5) {
+                  this.logger.info(
+                    {
+                      userId,
+                      phoneNumber,
+                      minutesStuck: Math.round(minutesSinceSync),
+                      contactsCount: whatsappData.sync_contacts_count || 0,
+                      messagesCount: whatsappData.sync_messages_count || 0,
+                    },
+                    "Completing abandoned sync before recovery",
+                  );
+
+                  // Mark sync as completed with current counts
+                  if (this.connectionStateManager) {
+                    await this.connectionStateManager.updateSyncProgress(
+                      userId,
+                      phoneNumber,
+                      whatsappData.sync_contacts_count || 0,
+                      whatsappData.sync_messages_count || 0,
+                      true, // Mark as completed
+                    );
+                  }
+                }
+              }
+            }
+          } catch (error) {
+            this.logger.warn(
+              { userId, phoneNumber, error },
+              "Failed to check for stuck sync, continuing with recovery",
+            );
+          }
+        }
+
         try {
           // Use stored country from Firestore if available, otherwise undefined
           const storedCountry =
@@ -1625,6 +1686,20 @@ export class ConnectionPool extends EventEmitter {
 
         // Set a longer timeout for sync completion
         // Give more time for messages to sync in background
+        // Use extended timeout for recovery connections to handle large accounts
+        // that may need to resync many messages after service restarts
+        const syncTimeout = connection.isRecovery ? 300000 : 90000; // 5 min for recovery, 90s for first-time
+
+        this.logger.info(
+          {
+            userId,
+            phoneNumber,
+            isRecovery: connection.isRecovery,
+            timeoutSeconds: syncTimeout / 1000,
+          },
+          "Setting sync timeout",
+        );
+
         setTimeout(async () => {
           // Only emit if sync hasn't completed yet
           if (!syncCompleted) {
@@ -1683,7 +1758,7 @@ export class ConnectionPool extends EventEmitter {
               timedOut: true,
             });
           }
-        }, 90000); // 90 seconds timeout for accounts with more data
+        }, syncTimeout);
       }
 
       if (state === "close") {
