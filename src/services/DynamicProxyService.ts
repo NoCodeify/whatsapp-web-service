@@ -1,6 +1,7 @@
 import axios, { AxiosInstance } from "axios";
 import pino from "pino";
 import { secretManager } from "../config/secrets";
+import { CountryFallbackAgent } from "./CountryFallbackAgent";
 
 export interface ProxyPurchaseRequest {
   country: string;
@@ -305,46 +306,119 @@ export class DynamicProxyService {
   }
 
   /**
-   * Assign a proxy to a user
+   * Assign a proxy to a user with AI-powered geographic fallback
    */
   async assignProxy(
     userId: string,
     phoneNumber: string,
     requestedCountry: string,
-  ): Promise<{ proxy: ProxyInfo; fallbackUsed: boolean }> {
-    let country = requestedCountry.toLowerCase();
-    let proxy: ProxyInfo | null = null;
+  ): Promise<{
+    proxy: ProxyInfo;
+    fallbackUsed: boolean;
+    originalCountry?: string;
+    usedCountry?: string;
+  }> {
+    const unavailableCountries: string[] = [];
+    const MAX_ATTEMPTS = 5; // Try up to 5 different countries
+    let currentCountry = requestedCountry.toLowerCase();
+    let attempts = 0;
 
-    try {
-      // Try to get proxy for requested country
-      proxy = await this.purchaseProxy(country);
-    } catch (error: any) {
-      if (error.message.startsWith("NO_PROXY_AVAILABLE")) {
-        // Don't fallback to other countries - only use requested country
-        throw new Error(
-          `No proxy available for ${requestedCountry} - not falling back to other countries`,
+    // Initialize AI agent for fallback suggestions
+    const fallbackAgent = new CountryFallbackAgent();
+
+    while (attempts < MAX_ATTEMPTS) {
+      try {
+        // Try to get proxy for current country
+        this.logger.info(
+          { currentCountry, attempt: attempts + 1, requestedCountry },
+          "Attempting to purchase proxy",
         );
-      } else {
-        throw error;
+
+        const proxy = await this.purchaseProxy(currentCountry);
+
+        // Success! Log the result
+        const fallbackUsed = currentCountry !== requestedCountry.toLowerCase();
+        this.logger.info(
+          {
+            userId,
+            phoneNumber,
+            ip: proxy.ip,
+            originalCountry: requestedCountry,
+            usedCountry: currentCountry,
+            fallbackUsed,
+            attempts: attempts + 1,
+          },
+          fallbackUsed
+            ? "Proxy assigned using AI-suggested fallback"
+            : "Proxy assigned for requested country",
+        );
+
+        return {
+          proxy,
+          fallbackUsed,
+          originalCountry: requestedCountry,
+          usedCountry: currentCountry,
+        };
+      } catch (error: any) {
+        if (!error.message.startsWith("NO_PROXY_AVAILABLE")) {
+          // Not a proxy availability error, throw it
+          throw error;
+        }
+
+        // Proxy not available for this country
+        unavailableCountries.push(currentCountry);
+        this.logger.warn(
+          {
+            unavailableCountry: currentCountry,
+            attempt: attempts + 1,
+            requestedCountry,
+            unavailableCountries,
+          },
+          "Proxy not available for country, requesting AI fallback",
+        );
+
+        attempts++;
+
+        if (attempts >= MAX_ATTEMPTS) {
+          // Exhausted all attempts
+          throw new Error(
+            `No proxy available for ${requestedCountry} after ${MAX_ATTEMPTS} attempts. ` +
+              `Tried countries: ${requestedCountry}, ${unavailableCountries.slice(1).join(", ")}`,
+          );
+        }
+
+        // Use AI agent to get next best country
+        try {
+          currentCountry = await fallbackAgent.getNextBestCountry(
+            requestedCountry,
+            unavailableCountries,
+          );
+
+          this.logger.info(
+            {
+              originalCountry: requestedCountry,
+              suggestedCountry: currentCountry,
+              unavailableCountries,
+              attempt: attempts + 1,
+            },
+            "AI agent suggested fallback country",
+          );
+        } catch (aiError: any) {
+          this.logger.error(
+            { error: aiError.message, requestedCountry, unavailableCountries },
+            "AI agent failed to suggest fallback country",
+          );
+          throw new Error(
+            `Failed to find fallback country for ${requestedCountry}: ${aiError.message}`,
+          );
+        }
       }
     }
 
-    if (!proxy) {
-      throw new Error("Failed to obtain proxy");
-    }
-
-    this.logger.info(
-      {
-        userId,
-        phoneNumber,
-        ip: proxy.ip,
-        country: proxy.country,
-        fallbackUsed: false,
-      },
-      "Proxy assigned to user",
+    // This should never be reached due to the MAX_ATTEMPTS check above
+    throw new Error(
+      `Failed to obtain proxy after ${MAX_ATTEMPTS} attempts for ${requestedCountry}`,
     );
-
-    return { proxy, fallbackUsed: false };
   }
 
   /**

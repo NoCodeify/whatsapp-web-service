@@ -842,7 +842,11 @@ export class ConnectionPool extends EventEmitter {
         // Don't update Firestore status for permanent deletions
         // The document is being deleted, so writing "disconnected" status would recreate it
         if (reason !== "deleted") {
-          await this.updateConnectionStatus(userId, phoneNumber, "disconnected");
+          await this.updateConnectionStatus(
+            userId,
+            phoneNumber,
+            "disconnected",
+          );
           // Remove from recovery tracking since it's a normal disconnect
           await this.removeSessionFromRecovery(userId, phoneNumber);
           this.logger.info(
@@ -1419,11 +1423,7 @@ export class ConnectionPool extends EventEmitter {
       // Use in-memory flag to avoid race conditions with async Firestore reads
       if (state === "connecting" && !connection.hasConnectedSuccessfully) {
         // Only update to "connecting" if connection hasn't opened yet
-        await this.updatePhoneNumberStatus(
-          userId,
-          phoneNumber,
-          "connecting",
-        );
+        await this.updatePhoneNumberStatus(userId, phoneNumber, "connecting");
 
         this.emit("connection-update", {
           userId,

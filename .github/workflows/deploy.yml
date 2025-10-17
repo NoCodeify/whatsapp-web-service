@@ -171,11 +171,8 @@ jobs:
 
       - name: 🔍 Verify production deployment
         run: |
-          # Get service URL
-          SERVICE_URL=$(gcloud run services describe whatsapp-web-service-prod \
-            --region=${{ env.REGION }} \
-            --project=whatzai \
-            --format='value(status.url)')
+          # Use the stable production URL
+          SERVICE_URL="https://whatsapp-web-service-prod-884210822568.europe-central2.run.app"
 
           echo "🌐 Production service deployed at: ${SERVICE_URL}"
           echo "url=${SERVICE_URL}" >> $GITHUB_OUTPUT

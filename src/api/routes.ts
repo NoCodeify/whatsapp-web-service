@@ -357,7 +357,12 @@ export function createApiRoutes(
         );
 
         // Pass reason to removeConnection so it can skip status updates for permanent deletions
-        await connectionPool.removeConnection(userId, formattedPhone, false, reason);
+        await connectionPool.removeConnection(
+          userId,
+          formattedPhone,
+          false,
+          reason,
+        );
         await sessionManager.deleteSession(
           userId,
           formattedPhone,

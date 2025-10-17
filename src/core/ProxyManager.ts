@@ -531,8 +531,12 @@ export class ProxyManager {
                 ip: proxy.ip,
                 proxyPort: proxy.port,
                 fallbackUsed: dynamicResult.fallbackUsed,
+                originalCountry: dynamicResult.originalCountry,
+                usedCountry: dynamicResult.usedCountry,
               },
-              "Using dynamic ISP proxy with direct purchase",
+              dynamicResult.fallbackUsed
+                ? `Using dynamic ISP proxy with AI-suggested fallback (${dynamicResult.originalCountry} → ${dynamicResult.usedCountry})`
+                : "Using dynamic ISP proxy with direct purchase",
             );
             return dynamicConfig;
           }

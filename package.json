@@ -17,6 +17,7 @@
     "pre-deploy": "npm run lint && npm run build && npm test"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.67.0",
     "@google-cloud/firestore": "^7.10.0",
     "@google-cloud/pubsub": "^4.3.3",
     "@google-cloud/secret-manager": "^5.5.0",

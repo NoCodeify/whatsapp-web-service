@@ -61,6 +61,29 @@ export class SecretManager {
   }
 
   /**
+   * Get Anthropic API key from Secret Manager
+   * Uses the same API key as Cloud Functions
+   */
+  async getAnthropicApiKey(): Promise<string> {
+    const secretName =
+      process.env.ANTHROPIC_API_KEY_SECRET ||
+      `projects/${process.env.GOOGLE_CLOUD_PROJECT}/secrets/ANTHROPIC_API_KEY/versions/latest`;
+
+    // Check if we have a hardcoded key (for local dev)
+    if (
+      process.env.ANTHROPIC_API_KEY &&
+      process.env.NODE_ENV === "development"
+    ) {
+      logger.warn(
+        "Using hardcoded Anthropic API key from environment variable - only for development!",
+      );
+      return process.env.ANTHROPIC_API_KEY;
+    }
+
+    return this.getSecret(secretName);
+  }
+
+  /**
    * Get a secret from Google Secret Manager with caching
    */
   private async getSecret(secretName: string): Promise<string> {
@@ -106,7 +129,9 @@ export class SecretManager {
         secretName.includes("BRIGHT_DATA_API_KEY") &&
         process.env.BRIGHT_DATA_API_KEY
       ) {
-        logger.warn("Falling back to environment variable for API key");
+        logger.warn(
+          "Falling back to environment variable for BrightData API key",
+        );
         return process.env.BRIGHT_DATA_API_KEY;
       } else if (
         secretName.includes("BRIGHT_DATA_CUSTOMER_ID") &&
@@ -124,6 +149,14 @@ export class SecretManager {
             "Environment variable BRIGHT_DATA_CUSTOMER_ID contains placeholder value",
           );
         }
+      } else if (
+        secretName.includes("ANTHROPIC_API_KEY") &&
+        process.env.ANTHROPIC_API_KEY
+      ) {
+        logger.warn(
+          "Falling back to environment variable for Anthropic API key",
+        );
+        return process.env.ANTHROPIC_API_KEY;
       }
 
       throw new Error(`Failed to retrieve secret: ${error.message}`);
