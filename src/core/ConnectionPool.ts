@@ -1812,13 +1812,27 @@ export class ConnectionPool extends EventEmitter {
       if (state === "close") {
         const disconnectReason = (lastDisconnect?.error as any)?.output
           ?.statusCode;
+        const disconnectError = lastDisconnect?.error;
 
         // Handle expected restart after QR pairing (error code 515)
         if (disconnectReason === DisconnectReason.restartRequired) {
+          // Enhanced logging with full error context and timing
+          const pairingTimestamp = new Date().toISOString();
           this.logger.info(
-            { userId, phoneNumber },
-            "Connection restart required after pairing - this is expected",
+            {
+              userId,
+              phoneNumber,
+              disconnectReason,
+              pairingTimestamp,
+              errorMessage: disconnectError?.message,
+              errorStack:
+                disconnectError?.stack?.split("\n").slice(0, 3).join(" | "),
+              proxyCountry: connection.proxyCountry,
+              proxyActive: !!connection.proxyCountry,
+            },
+            "Connection restart required after pairing - this is expected. Full error context logged for diagnostics.",
           );
+
           connection.qrCode = undefined; // Clear QR as we're now paired
           connection.hasConnectedSuccessfully = true; // Mark as successfully connected
           connection.handshakeCompleted = true; // Handshake phase is now complete, subsequent status updates should be saved
@@ -1833,6 +1847,19 @@ export class ConnectionPool extends EventEmitter {
             );
           }
 
+          // Log pre-reconnection state for diagnostics
+          this.logger.info(
+            {
+              userId,
+              phoneNumber,
+              hasAuthState: !!connection.socket.authState?.creds,
+              proxyCountry: connection.proxyCountry,
+              connectionId: connection.connectionId,
+              timestamp: new Date().toISOString(),
+            },
+            "Pre-reconnection state check - waiting for session save and network stabilization",
+          );
+
           // Emit status update
           this.emit("connection-update", {
             userId,
@@ -1840,7 +1867,28 @@ export class ConnectionPool extends EventEmitter {
             status: "restarting",
           });
 
-          // Immediate reconnect with no delay for pairing restart
+          // Wait for session save and network stabilization before reconnecting
+          // This prevents "stream errored out" during reconnection
+          const stabilizationDelay = 1500; // 1.5 seconds for Cloud Storage upload + network stabilization
+          this.logger.info(
+            { userId, phoneNumber, delayMs: stabilizationDelay },
+            `Waiting ${stabilizationDelay}ms for session save and network stabilization before reconnection`,
+          );
+
+          await new Promise((resolve) =>
+            setTimeout(resolve, stabilizationDelay),
+          );
+
+          // Log post-stabilization state
+          this.logger.info(
+            {
+              userId,
+              phoneNumber,
+              timestamp: new Date().toISOString(),
+            },
+            "Stabilization period complete, initiating reconnection",
+          );
+
           await this.reconnect(userId, phoneNumber, 0);
           return;
         }
@@ -4685,39 +4733,90 @@ export class ConnectionPool extends EventEmitter {
     }
 
     try {
+      // Defensive checks before reconnection attempt
+      let hasValidSession = false;
+
+      if (this.sessionManager) {
+        try {
+          hasValidSession =
+            await this.sessionManager.sessionExists(userId, phoneNumber);
+
+          this.logger.info(
+            {
+              userId,
+              phoneNumber,
+              hasValidSession,
+              hasProxyCountry: !!storedProxyCountry,
+              attempt,
+            },
+            "Pre-reconnection validation check",
+          );
+
+          if (!hasValidSession) {
+            this.logger.warn(
+              { userId, phoneNumber },
+              "No valid session found before reconnection - reconnection may require new QR scan",
+            );
+          }
+        } catch (sessionError) {
+          this.logger.warn(
+            { userId, phoneNumber, error: sessionError },
+            "Failed to validate session before reconnection",
+          );
+        }
+      }
+
       // Try to reconnect with preserved proxy country
-      // Note: Always use isRecovery=false for pairing reconnections to show import UI
-      // We'll manually restore handshakeCompleted state after connection is created
+      // Use isRecovery=true because manual reconnections have existing sessions
+      // This ensures handshakeCompleted is set immediately, allowing status updates to "connected"
+      const reconnectStartTime = Date.now();
       const success = await this.addConnection(
         userId,
         phoneNumber,
         storedProxyCountry,
         undefined, // countryCode
-        false, // isRecovery - false to show import UI even after pairing
+        true, // isRecovery - treat manual reconnects as session recovery
+      );
+      const reconnectDuration = Date.now() - reconnectStartTime;
+
+      this.logger.info(
+        {
+          userId,
+          phoneNumber,
+          success,
+          durationMs: reconnectDuration,
+          attempt,
+          handshakeWasCompleted, // Log for debugging
+        },
+        "Reconnection attempt completed",
       );
 
-      // Restore handshake completion state after successful reconnection
-      if (success && handshakeWasCompleted) {
-        const connectionKey = this.getConnectionKey(userId, phoneNumber);
-        const connection = this.connections.get(connectionKey);
-        if (connection) {
-          connection.handshakeCompleted = true;
-          this.logger.info(
-            { userId, phoneNumber },
-            "Restored handshake completion state after pairing reconnection",
-          );
-        }
-      }
+      // Note: handshakeCompleted is now set correctly during addConnection (isRecovery=true)
+      // No need to manually restore it after the fact
 
       if (!success) {
         // If addConnection failed, try again (only increment if not immediate reconnect)
         const nextAttempt = attempt === 0 ? 1 : attempt + 1;
+        this.logger.warn(
+          { userId, phoneNumber, attempt, nextAttempt },
+          "Reconnection failed, scheduling retry",
+        );
         await this.reconnect(userId, phoneNumber, nextAttempt);
       }
     } catch (error) {
       this.logger.error(
-        { userId, phoneNumber, attempt, error },
-        "Reconnection attempt failed",
+        {
+          userId,
+          phoneNumber,
+          attempt,
+          error,
+          errorMessage: error instanceof Error ? error.message : String(error),
+          errorStack:
+            error instanceof Error
+              ? error.stack?.split("\n").slice(0, 5).join(" | ")
+              : undefined,
+        },
+        "Reconnection attempt failed with exception",
       );
       // Only increment attempt if not immediate reconnect
       const nextAttempt = attempt === 0 ? 1 : attempt + 1;
