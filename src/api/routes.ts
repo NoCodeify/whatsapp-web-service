@@ -449,11 +449,17 @@ export function createApiRoutes(
           let statusCode = 200;
           if (!result.success) {
             if (result.status === "rate_limited") {
-              statusCode = 429;
+              statusCode = 429; // Too Many Requests
             } else if (result.status === "session_not_found") {
-              statusCode = 404;
+              statusCode = 404; // Not Found
+            } else if (result.status === "timeout") {
+              statusCode = 408; // Request Timeout
+            } else if (result.status === "connection_failed") {
+              statusCode = 503; // Service Unavailable
+            } else if (result.status === "needs_qr") {
+              statusCode = 401; // Unauthorized - needs re-authentication
             } else {
-              statusCode = 400;
+              statusCode = 400; // Bad Request
             }
           }
 

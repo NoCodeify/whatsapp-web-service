@@ -4726,6 +4726,112 @@ export class ConnectionPool extends EventEmitter {
   }
 
   /**
+   * Wait for connection to reach a specific state
+   * Returns promise that resolves when state is reached or rejects on failure/timeout
+   */
+  async waitForConnectionState(
+    userId: string,
+    phoneNumber: string,
+    timeout: number = 30000, // 30 seconds default
+  ): Promise<{ success: boolean; state: string; error?: string }> {
+    const connectionKey = this.getConnectionKey(userId, phoneNumber);
+    const connection = this.connections.get(connectionKey);
+
+    if (!connection) {
+      return {
+        success: false,
+        state: "not_found",
+        error: "Connection not found in pool",
+      };
+    }
+
+    // Check if already open
+    if (connection.state?.connection === "open") {
+      return {
+        success: true,
+        state: "open",
+      };
+    }
+
+    // Wait for state change with timeout
+    return new Promise((resolve) => {
+      const timeoutHandle = setTimeout(() => {
+        cleanup();
+        resolve({
+          success: false,
+          state: connection.state?.connection || "unknown",
+          error: "Connection establishment timeout",
+        });
+      }, timeout);
+
+      const onStateChange = (update: {
+        userId: string;
+        phoneNumber: string;
+        status: string;
+      }) => {
+        if (update.userId === userId && update.phoneNumber === phoneNumber) {
+          const currentConnection = this.connections.get(connectionKey);
+
+          if (!currentConnection) {
+            cleanup();
+            resolve({
+              success: false,
+              state: "disconnected",
+              error: "Connection removed from pool",
+            });
+            return;
+          }
+
+          const state = currentConnection.state?.connection;
+
+          // Connection successfully opened
+          if (state === "open") {
+            cleanup();
+            resolve({
+              success: true,
+              state: "open",
+            });
+          }
+          // Connection closed/failed
+          else if (state === "close") {
+            cleanup();
+            resolve({
+              success: false,
+              state: "close",
+              error: "Connection closed during establishment",
+            });
+          }
+        }
+      };
+
+      const cleanup = () => {
+        clearTimeout(timeoutHandle);
+        this.removeListener("connection-update", onStateChange);
+      };
+
+      // Listen for connection updates
+      this.on("connection-update", onStateChange);
+
+      // Double-check state in case it changed before we started listening
+      const latestConnection = this.connections.get(connectionKey);
+      if (latestConnection?.state?.connection === "open") {
+        cleanup();
+        resolve({
+          success: true,
+          state: "open",
+        });
+      } else if (latestConnection?.state?.connection === "close") {
+        cleanup();
+        resolve({
+          success: false,
+          state: "close",
+          error: "Connection already closed",
+        });
+      }
+    });
+  }
+
+  /**
    * Handle proxy errors
    */
   private async handleProxyError(userId: string, phoneNumber: string) {

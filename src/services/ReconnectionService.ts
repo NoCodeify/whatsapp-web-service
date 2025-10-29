@@ -20,7 +20,9 @@ export interface ReconnectionResult {
     | "needs_qr"
     | "failed"
     | "rate_limited"
-    | "session_not_found";
+    | "session_not_found"
+    | "timeout"
+    | "connection_failed";
   qrCode?: string;
   qrExpiresAt?: Date;
   proxy?: {
@@ -208,9 +210,34 @@ export class ReconnectionService {
         userCountry,
       );
 
-      if (success) {
-        logger.info(
+      if (!success) {
+        logger.warn(
           { userId, phoneNumber },
+          "Failed to create connection in pool",
+        );
+
+        return {
+          success: false,
+          status: "failed",
+          message: "Failed to establish WhatsApp Web connection",
+        };
+      }
+
+      // Wait for connection to actually reach "open" state before returning success
+      logger.info(
+        { userId, phoneNumber },
+        "Connection created, waiting for establishment...",
+      );
+
+      const connectionResult = await this.connectionPool.waitForConnectionState(
+        userId,
+        phoneNumber,
+        30000, // 30 second timeout
+      );
+
+      if (connectionResult.success) {
+        logger.info(
+          { userId, phoneNumber, state: connectionResult.state },
           "Successfully reconnected WhatsApp Web session",
         );
 
@@ -221,14 +248,27 @@ export class ReconnectionService {
         };
       } else {
         logger.warn(
-          { userId, phoneNumber },
-          "Failed to reconnect WhatsApp Web session",
+          {
+            userId,
+            phoneNumber,
+            state: connectionResult.state,
+            error: connectionResult.error,
+          },
+          "Connection failed during establishment",
         );
+
+        // Determine appropriate status based on failure reason
+        let status: "failed" | "timeout" | "connection_failed" = "failed";
+        if (connectionResult.error?.includes("timeout")) {
+          status = "timeout";
+        } else if (connectionResult.error?.includes("closed")) {
+          status = "connection_failed";
+        }
 
         return {
           success: false,
-          status: "failed",
-          message: "Failed to establish WhatsApp Web connection",
+          status,
+          message: connectionResult.error || "Connection failed during establishment",
         };
       }
     } catch (error: any) {
