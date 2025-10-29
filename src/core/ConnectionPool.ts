@@ -10,6 +10,7 @@ import {
 import pino from "pino";
 import { EventEmitter } from "events";
 import * as fs from "fs";
+import { randomUUID } from "crypto";
 import { ProxyManager } from "./ProxyManager";
 import { SessionManager } from "./SessionManager";
 import { Firestore } from "@google-cloud/firestore";
@@ -33,6 +34,7 @@ export interface QueuedMessage {
 }
 
 export interface WhatsAppConnection {
+  connectionId: string; // Unique ID to prevent ghost handler interference
   userId: string;
   phoneNumber: string;
   socket: WASocket;
@@ -761,6 +763,7 @@ export class ConnectionPool extends EventEmitter {
       );
 
       const connection: WhatsAppConnection = {
+        connectionId: randomUUID(), // Unique ID to prevent ghost handler interference
         userId,
         phoneNumber,
         socket,
@@ -795,7 +798,13 @@ export class ConnectionPool extends EventEmitter {
       await this.updateConnectionStatus(userId, phoneNumber, "initializing");
 
       this.logger.info(
-        { userId, phoneNumber, totalConnections: this.connections.size },
+        {
+          userId,
+          phoneNumber,
+          connectionId: connection.connectionId,
+          totalConnections: this.connections.size,
+          isRecovery
+        },
         "Added new connection to pool",
       );
 
@@ -1445,15 +1454,15 @@ export class ConnectionPool extends EventEmitter {
    * Setup event handlers for a connection
    */
   private setupConnectionHandlers(connection: WhatsAppConnection) {
-    const { socket, userId, phoneNumber } = connection;
+    const { socket, userId, phoneNumber, connectionId: connId } = connection;
 
     // Register with WebSocket manager for enhanced monitoring
-    const connectionId = this.getConnectionKey(userId, phoneNumber);
-    this.wsManager.registerConnection(connectionId, socket);
+    const connectionKey = this.getConnectionKey(userId, phoneNumber);
+    this.wsManager.registerConnection(connectionKey, socket);
 
-    this.logger.debug(
-      { userId, phoneNumber },
-      "Connection registered with WebSocket manager and memory leak prevention",
+    this.logger.info(
+      { userId, phoneNumber, connectionId: connId, createdAt: connection.createdAt },
+      "Setting up event handlers for new connection instance",
     );
 
     // Track if sync has been completed to avoid duplicate events
@@ -1472,6 +1481,7 @@ export class ConnectionPool extends EventEmitter {
         {
           userId,
           phoneNumber,
+          connectionId: connId,
           state,
           hasQR: !!qr,
           updateKeys: Object.keys(update),
@@ -1507,16 +1517,54 @@ export class ConnectionPool extends EventEmitter {
           connection.qrTimeout = undefined;
         }
 
+        // Capture connection ID to prevent ghost timeouts from killing new connections
+        const capturedConnectionId = connection.connectionId;
+
         // Set QR expiration timeout to prevent orphaned proxies
         connection.qrTimeout = setTimeout(async () => {
-          if (!connection.hasConnectedSuccessfully) {
+          // Validate this timeout is for the current connection instance
+          const connectionKey = this.getConnectionKey(userId, phoneNumber);
+          const currentConnection = this.connections.get(connectionKey);
+
+          if (!currentConnection) {
+            this.logger.debug(
+              { userId, phoneNumber, capturedConnectionId },
+              "QR timeout fired but connection no longer exists - ignoring",
+            );
+            return;
+          }
+
+          if (currentConnection.connectionId !== capturedConnectionId) {
             this.logger.warn(
-              { userId, phoneNumber },
+              {
+                userId,
+                phoneNumber,
+                ghostConnectionId: capturedConnectionId,
+                currentConnectionId: currentConnection.connectionId,
+              },
+              "Ghost QR timeout fired from old connection - ignoring to protect active connection",
+            );
+            return;
+          }
+
+          if (!currentConnection.hasConnectedSuccessfully) {
+            this.logger.warn(
+              { userId, phoneNumber, connectionId: capturedConnectionId },
               "QR code expired without connection - removing connection to prevent proxy leak",
             );
             await this.removeConnection(userId, phoneNumber);
+          } else {
+            this.logger.debug(
+              { userId, phoneNumber, connectionId: capturedConnectionId },
+              "QR timeout fired but connection is active - ignoring",
+            );
           }
         }, 90000); // 90 seconds timeout
+
+        this.logger.debug(
+          { userId, phoneNumber, connectionId: capturedConnectionId },
+          "QR timeout set for 90 seconds",
+        );
       }
 
       if (state === "open") {
@@ -1935,7 +1983,7 @@ export class ConnectionPool extends EventEmitter {
               {
                 userId,
                 phoneNumber,
-                connectionId,
+                connectionId: connId,
                 operation: "connection_update_reconnect",
                 errorCode: String(disconnectReason),
                 timestamp: new Date(),
@@ -2067,7 +2115,7 @@ export class ConnectionPool extends EventEmitter {
               await this.errorHandler.handleError(messageError as Error, {
                 userId,
                 phoneNumber,
-                connectionId,
+                connectionId: connId,
                 operation: "message_processing",
                 timestamp: new Date(),
               });
@@ -2081,7 +2129,7 @@ export class ConnectionPool extends EventEmitter {
         await this.errorHandler.handleError(error as Error, {
           userId,
           phoneNumber,
-          connectionId,
+          connectionId: connId,
           operation: "messages_upsert",
           timestamp: new Date(),
         });
@@ -2098,7 +2146,7 @@ export class ConnectionPool extends EventEmitter {
             await this.errorHandler.handleError(updateError as Error, {
               userId,
               phoneNumber,
-              connectionId,
+              connectionId: connId,
               operation: "message_update_processing",
               timestamp: new Date(),
             });
@@ -2108,7 +2156,7 @@ export class ConnectionPool extends EventEmitter {
         await this.errorHandler.handleError(error as Error, {
           userId,
           phoneNumber,
-          connectionId,
+          connectionId: connId,
           operation: "messages_update",
           timestamp: new Date(),
         });
@@ -3466,6 +3514,7 @@ export class ConnectionPool extends EventEmitter {
 
   /**
    * Process synced contacts from history
+   * Optimized to batch load contacts and batch write updates
    */
   private async processSyncedContacts(
     userId: string,
@@ -3476,6 +3525,40 @@ export class ConnectionPool extends EventEmitter {
       let syncedCount = 0;
       const userRef = this.firestore.collection("users").doc(userId);
       const currentTimestamp = admin.firestore.Timestamp.now();
+      const startTime = Date.now();
+
+      this.logger.info(
+        { userId, phoneNumber, contactCount: contacts.length },
+        "Starting optimized contact sync",
+      );
+
+      // OPTIMIZATION: Load ALL existing contacts for user in ONE query
+      const existingContactsSnapshot = await this.firestore
+        .collection("contacts")
+        .where("user", "==", userRef)
+        .get();
+
+      // Create Map for O(1) lookups by phone number
+      const existingContactsMap = new Map<string, FirebaseFirestore.QueryDocumentSnapshot>();
+      existingContactsSnapshot.docs.forEach((doc) => {
+        const phoneNum = doc.data().phone_number;
+        if (phoneNum) {
+          existingContactsMap.set(phoneNum, doc);
+        }
+      });
+
+      this.logger.info(
+        {
+          userId,
+          phoneNumber,
+          existingCount: existingContactsMap.size,
+          loadTimeMs: Date.now() - startTime
+        },
+        "Loaded existing contacts for batch processing",
+      );
+
+      // Collect batch updates
+      const batchUpdates: Array<{ docRef: FirebaseFirestore.DocumentReference; data: any }> = [];
 
       for (const contact of contacts) {
         const contactNumber = contact.id?.replace("@s.whatsapp.net", "") || "";
@@ -3501,17 +3584,11 @@ export class ConnectionPool extends EventEmitter {
           verifiedName: contact.verifiedName,
         });
 
-        // Check if contact already exists for this user
-        const existingContacts = await this.firestore
-          .collection("contacts")
-          .where("user", "==", userRef)
-          .where("phone_number", "==", formattedPhone)
-          .limit(1)
-          .get();
+        // O(1) lookup instead of Firestore query
+        const existingDoc = existingContactsMap.get(formattedPhone);
 
-        if (!existingContacts.empty) {
-          // Update existing contact with WhatsApp info
-          const existingDoc = existingContacts.docs[0];
+        if (existingDoc) {
+          // Collect update for batch processing
           const existingData = existingDoc.data();
 
           // Extract first and last name from WhatsApp name if current name is Unknown
@@ -3519,19 +3596,22 @@ export class ConnectionPool extends EventEmitter {
             contact.name || contact.notify,
           );
 
-          await existingDoc.ref.update({
-            whatsapp_name: contact.name || contact.notify || null,
-            first_name:
-              existingData.first_name === "Unknown" || !existingData.first_name
-                ? firstName || "Unknown"
-                : existingData.first_name,
-            last_name:
-              existingData.last_name === "Unknown" || !existingData.last_name
-                ? lastName || "Unknown"
-                : existingData.last_name,
-            last_modified_at: currentTimestamp,
-            last_updated_by: "whatsapp_web_sync",
-            channel: "whatsapp_web",
+          batchUpdates.push({
+            docRef: existingDoc.ref,
+            data: {
+              whatsapp_name: contact.name || contact.notify || null,
+              first_name:
+                existingData.first_name === "Unknown" || !existingData.first_name
+                  ? firstName || "Unknown"
+                  : existingData.first_name,
+              last_name:
+                existingData.last_name === "Unknown" || !existingData.last_name
+                  ? lastName || "Unknown"
+                  : existingData.last_name,
+              last_modified_at: currentTimestamp,
+              last_updated_by: "whatsapp_web_sync",
+              channel: "whatsapp_web",
+            },
           });
           syncedCount++;
         } else {
@@ -3543,8 +3623,8 @@ export class ConnectionPool extends EventEmitter {
           );
         }
 
-        // Log progress every 100 contacts
-        if (syncedCount % 100 === 0) {
+        // Log progress every 100 contacts (processed, not yet written)
+        if ((syncedCount % 100 === 0) && syncedCount > 0) {
           this.logger.info(
             { userId, phoneNumber, syncedCount },
             "Contacts sync progress",
@@ -3563,10 +3643,52 @@ export class ConnectionPool extends EventEmitter {
         }
       }
 
-      this.logger.info(
-        { userId, phoneNumber, totalSynced: syncedCount },
-        "Contacts sync completed",
-      );
+      // Execute batch writes - Firestore supports max 500 operations per batch
+      if (batchUpdates.length > 0) {
+        this.logger.info(
+          { userId, phoneNumber, updateCount: batchUpdates.length },
+          "Executing batch contact updates",
+        );
+
+        const BATCH_SIZE = 500;
+        for (let i = 0; i < batchUpdates.length; i += BATCH_SIZE) {
+          const batchSlice = batchUpdates.slice(i, i + BATCH_SIZE);
+          const batch = this.firestore.batch();
+
+          for (const update of batchSlice) {
+            batch.update(update.docRef, update.data);
+          }
+
+          await batch.commit();
+
+          this.logger.debug(
+            {
+              userId,
+              phoneNumber,
+              batchNumber: Math.floor(i / BATCH_SIZE) + 1,
+              updatesInBatch: batchSlice.length
+            },
+            "Batch committed successfully",
+          );
+        }
+
+        const totalTimeMs = Date.now() - startTime;
+        this.logger.info(
+          {
+            userId,
+            phoneNumber,
+            totalSynced: syncedCount,
+            totalTimeMs,
+            averageTimePerContact: Math.round(totalTimeMs / contacts.length)
+          },
+          "Contacts sync completed with batch optimization",
+        );
+      } else {
+        this.logger.info(
+          { userId, phoneNumber, totalSynced: syncedCount },
+          "Contacts sync completed - no updates needed",
+        );
+      }
 
       // Update sync progress in database
       if (this.connectionStateManager) {
@@ -4467,6 +4589,72 @@ export class ConnectionPool extends EventEmitter {
     const storedProxyCountry = existingConnection?.proxyCountry;
     const handshakeWasCompleted =
       existingConnection?.handshakeCompleted || false;
+
+    // Properly cleanup old connection to prevent ghost handlers
+    if (existingConnection) {
+      this.logger.info(
+        {
+          userId,
+          phoneNumber,
+          connectionId: existingConnection.connectionId
+        },
+        "Cleaning up old connection before reconnection",
+      );
+
+      // Clear QR timeout to prevent it from killing new connection
+      if (existingConnection.qrTimeout) {
+        clearTimeout(existingConnection.qrTimeout);
+        existingConnection.qrTimeout = undefined;
+        this.logger.debug(
+          { userId, phoneNumber, connectionId: existingConnection.connectionId },
+          "Cleared QR timeout from old connection",
+        );
+      }
+
+      // Remove all event listeners from old socket to prevent ghost handlers
+      try {
+        // TypeScript types require an event parameter, but EventEmitter allows calling without args
+        // to remove ALL listeners across ALL events - this is what we want for cleanup
+        (existingConnection.socket.ev.removeAllListeners as any)();
+        this.logger.debug(
+          { userId, phoneNumber, connectionId: existingConnection.connectionId },
+          "Removed all event listeners from old socket",
+        );
+      } catch (error) {
+        this.logger.warn(
+          { userId, phoneNumber, error },
+          "Failed to remove event listeners from old socket",
+        );
+      }
+
+      // Unregister from WebSocket manager
+      try {
+        this.wsManager.unregisterConnection(connectionKey);
+        this.logger.debug(
+          { userId, phoneNumber, connectionId: existingConnection.connectionId },
+          "Unregistered old connection from WebSocket manager",
+        );
+      } catch (error) {
+        this.logger.warn(
+          { userId, phoneNumber, error },
+          "Failed to unregister from WebSocket manager",
+        );
+      }
+
+      // Close old socket
+      try {
+        existingConnection.socket.end(undefined);
+        this.logger.debug(
+          { userId, phoneNumber, connectionId: existingConnection.connectionId },
+          "Closed old socket",
+        );
+      } catch (error) {
+        this.logger.warn(
+          { userId, phoneNumber, error },
+          "Failed to close old socket",
+        );
+      }
+    }
 
     // Remove old connection from pool (but keep auth state)
     this.connections.delete(connectionKey);

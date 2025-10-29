@@ -47,7 +47,7 @@ export class ReconnectionService {
   private recentAttempts: Map<string, ReconnectionAttempt[]> = new Map();
 
   // Rate limiting configuration
-  private readonly MAX_ATTEMPTS_PER_HOUR = 3;
+  private readonly MAX_ATTEMPTS_PER_HOUR = 50;
   private readonly RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000; // 1 hour
 
   constructor(
