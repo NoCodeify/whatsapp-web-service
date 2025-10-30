@@ -686,6 +686,18 @@ export class ConnectionPool extends EventEmitter {
           { userId, phoneNumber, state: existing.state.connection },
           "Connection already exists and is active, not creating duplicate",
         );
+
+        // Synchronize Firestore status with actual connection state
+        // This ensures status is correct even if connection was never marked as connected
+        if (this.connectionStateManager && existing.state.connection === "open") {
+          // Mark as connected to ensure Firestore is in sync
+          await this.connectionStateManager.markConnected(userId, phoneNumber);
+          this.logger.info(
+            { userId, phoneNumber },
+            "Synchronized Firestore status to 'connected' for existing open connection",
+          );
+        }
+
         return true;
       } else if (existing.state.connection === "close") {
         // Remove closed connection before creating new one
