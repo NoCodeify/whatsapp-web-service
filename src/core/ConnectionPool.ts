@@ -5151,7 +5151,9 @@ export class ConnectionPool extends EventEmitter {
             phoneNumber,
             status,
             previousStatus,
-            lastError: connection?.state?.lastError,
+            connectionAge: connection
+              ? Date.now() - connection.createdAt.getTime()
+              : undefined,
             timestamp: new Date().toISOString(),
           },
           `CRITICAL STATUS TRANSITION: Connection ${status === "failed" ? "FAILED" : "DISCONNECTED"}`,
