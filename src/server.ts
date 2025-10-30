@@ -15,6 +15,7 @@ import { ProxyManager } from "./core/ProxyManager";
 import { SessionManager } from "./core/SessionManager";
 import { ConnectionPool } from "./core/ConnectionPool";
 import { ConnectionStateManager } from "./services/connectionStateManager";
+import { StatusReconciliationService } from "./services/statusReconciliation";
 import { DynamicProxyService } from "./services/DynamicProxyService";
 import { SessionRecoveryService } from "./services/SessionRecoveryService";
 import { ReconnectionService } from "./services/ReconnectionService";
@@ -71,6 +72,47 @@ sessionRecoveryService = new SessionRecoveryService(
 const proxyManager = new ProxyManager(firestore, dynamicProxyService);
 const sessionManager = new SessionManager(proxyManager, firestore);
 const connectionStateManager = new ConnectionStateManager(firestore);
+
+// Initialize status reconciliation service
+const statusReconciliationService = new StatusReconciliationService(
+  firestore,
+  connectionStateManager,
+);
+
+// Set up reconciliation event listeners for monitoring
+statusReconciliationService.on("reconciliation-complete", (metrics) => {
+  logger.info(
+    {
+      duration: metrics.duration,
+      inMemoryCount: metrics.inMemoryCount,
+      firestoreCount: metrics.firestoreCount,
+      desyncsFound: metrics.desyncsFound,
+      desyncsFixed: metrics.desyncsFixed,
+      desyncsFailed: metrics.desyncsFailed,
+    },
+    "Status reconciliation completed",
+  );
+});
+
+statusReconciliationService.on("excessive-desyncs", (data) => {
+  logger.error(
+    {
+      count: data.count,
+      threshold: data.threshold,
+      desyncs: data.desyncs,
+    },
+    "ALERT: Excessive desyncs detected!",
+  );
+});
+
+statusReconciliationService.on("reconciliation-error", (data) => {
+  logger.error(
+    {
+      error: data.error,
+    },
+    "Error during reconciliation",
+  );
+});
 
 // Initialize reconnection service
 const reconnectionService = new ReconnectionService(
@@ -303,6 +345,9 @@ app.get("/health", async (_req: Request, res: Response) => {
     // Get error handler statistics
     const errorStats = errorHandler.getStats();
 
+    // Get reconciliation metrics
+    const reconciliationMetrics = statusReconciliationService.getMetrics();
+
     // Determine overall health status
     const hasOpenCircuitBreaker = errorStats.circuitBreakers.some(
       (cb) => cb.state === "open",
@@ -387,6 +432,22 @@ app.get("/health", async (_req: Request, res: Response) => {
       // Proxy metrics
       proxy: metrics.proxyMetrics,
 
+      // Reconciliation metrics (status sync monitoring)
+      reconciliation: {
+        totalChecks: reconciliationMetrics.totalChecks,
+        desyncDetected: reconciliationMetrics.desyncDetected,
+        desyncFixed: reconciliationMetrics.desyncFixed,
+        desyncFailed: reconciliationMetrics.desyncFailed,
+        lastCheckTime: reconciliationMetrics.lastCheckTime,
+        recentDesyncs: reconciliationMetrics.desyncs.slice(-10), // Last 10 desyncs
+        successRate:
+          reconciliationMetrics.desyncDetected > 0
+            ? (reconciliationMetrics.desyncFixed /
+                reconciliationMetrics.desyncDetected) *
+              100
+            : 100,
+      },
+
       // Environment info
       environment: {
         nodeEnv: process.env.NODE_ENV,
@@ -405,6 +466,94 @@ app.get("/health", async (_req: Request, res: Response) => {
       status: "error",
       timestamp: new Date().toISOString(),
       error: "Health check failed",
+    });
+  }
+});
+
+// Status verification and reconciliation endpoint
+// Allows manual triggering of reconciliation and checking for desyncs
+app.get("/status-check", async (req: Request, res: Response) => {
+  try {
+    const triggerReconciliation = req.query.reconcile === "true";
+
+    // Get current reconciliation metrics
+    const beforeMetrics = statusReconciliationService.getMetrics();
+
+    // Optionally trigger manual reconciliation
+    if (triggerReconciliation) {
+      logger.info(
+        { correlationId: req.correlationId },
+        "Manual reconciliation triggered via /status-check endpoint",
+      );
+      await statusReconciliationService.manualReconcile();
+    }
+
+    // Get updated metrics after reconciliation
+    const afterMetrics = statusReconciliationService.getMetrics();
+
+    // Get current connection counts
+    const connectionPoolMetrics = connectionPool.getMetrics();
+
+    const response = {
+      timestamp: new Date().toISOString(),
+      reconciliationTriggered: triggerReconciliation,
+
+      // Connection counts
+      connections: {
+        inMemory: connectionPoolMetrics.activeConnections,
+        total: connectionPoolMetrics.totalConnections,
+      },
+
+      // Reconciliation statistics
+      reconciliation: {
+        totalChecks: afterMetrics.totalChecks,
+        lastCheckTime: afterMetrics.lastCheckTime,
+        desyncDetected: afterMetrics.desyncDetected,
+        desyncFixed: afterMetrics.desyncFixed,
+        desyncFailed: afterMetrics.desyncFailed,
+        successRate:
+          afterMetrics.desyncDetected > 0
+            ? (afterMetrics.desyncFixed / afterMetrics.desyncDetected) * 100
+            : 100,
+        recentDesyncs: afterMetrics.desyncs.slice(-20), // Last 20 desyncs for analysis
+      },
+
+      // If reconciliation was triggered, show what changed
+      ...(triggerReconciliation && {
+        reconciliationResults: {
+          desyncsFoundThisRun:
+            afterMetrics.desyncDetected - beforeMetrics.desyncDetected,
+          desyncsFixedThisRun:
+            afterMetrics.desyncFixed - beforeMetrics.desyncFixed,
+          desyncsFailedThisRun:
+            afterMetrics.desyncFailed - beforeMetrics.desyncFailed,
+        },
+      }),
+
+      // Health status
+      status:
+        afterMetrics.desyncFailed === 0 ||
+        afterMetrics.desyncFailed / Math.max(afterMetrics.desyncDetected, 1) <
+          0.1
+          ? "healthy"
+          : "degraded",
+
+      // Instructions for manual reconciliation
+      help: {
+        trigger: "Add ?reconcile=true to URL to manually trigger reconciliation",
+        example: `${req.protocol}://${req.get("host")}/status-check?reconcile=true`,
+      },
+    };
+
+    // Return 503 if there are unresolved desyncs
+    const hasUnresolvedDesyncs = afterMetrics.desyncFailed > 0;
+    res.status(hasUnresolvedDesyncs ? 503 : 200).json(response);
+  } catch (error) {
+    logger.error({ error }, "Error in status-check endpoint");
+    res.status(500).json({
+      status: "error",
+      timestamp: new Date().toISOString(),
+      error: "Status check failed",
     });
   }
 });
@@ -517,6 +666,9 @@ const gracefulShutdown = async (signal: string) => {
     logger.info("WebSocket server closed");
   });
 
+  // Stop status reconciliation service
+  statusReconciliationService.stop();
+
   // Mark sessions for graceful shutdown
   if (sessionRecoveryService) {
     await sessionRecoveryService.shutdown();
@@ -565,6 +717,11 @@ server.listen(PORT, async () => {
           await connectionPool.initializeRecovery();
         }
       }
+
+      // Start status reconciliation service after recovery completes
+      // This ensures initial state is synced before starting periodic checks
+      logger.info("Starting status reconciliation service");
+      statusReconciliationService.start();
     } catch (error) {
       logger.error({ error }, "Failed to recover connections on startup");
     }

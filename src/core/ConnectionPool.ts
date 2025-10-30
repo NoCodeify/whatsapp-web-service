@@ -5017,22 +5017,64 @@ export class ConnectionPool extends EventEmitter {
       const connection = this.connections.get(connectionKey);
 
       // DEFENSIVE CHECK: Skip status updates during handshake phase (before disconnect code 515)
-      // Exception: Always allow qr_pending status (before handshake starts)
+      // Exceptions:
+      // 1. Always allow qr_pending status (before handshake starts)
+      // 2. Always allow disconnected/failed status (critical for cleanup)
+      // 3. Always allow updates for recovery connections (already authenticated)
+      // 4. After 30 seconds, allow updates regardless (handshake timeout)
       if (
         connection &&
         !connection.handshakeCompleted &&
-        status !== "qr_pending"
+        status !== "qr_pending" &&
+        status !== "disconnected" &&
+        status !== "failed"
       ) {
-        this.logger.info(
-          {
-            userId,
-            phoneNumber,
-            requestedStatus: status,
-            handshakeCompleted: connection.handshakeCompleted,
-          },
-          "Skipping status update during handshake phase - will write after disconnect code 515",
-        );
-        return; // Skip Firestore write during handshake
+        // For recovery connections, bypass handshake check entirely
+        if (connection.isRecovery) {
+          this.logger.info(
+            {
+              userId,
+              phoneNumber,
+              requestedStatus: status,
+              isRecovery: connection.isRecovery,
+            },
+            "Bypassing handshake check for recovery connection - allowing status update",
+          );
+          // Continue to update status
+        } else {
+          // Check if connection is older than 30 seconds (handshake timeout)
+          const connectionAge = Date.now() - connection.createdAt.getTime();
+          const handshakeTimeout = 30000; // 30 seconds
+
+          if (connectionAge > handshakeTimeout) {
+            this.logger.warn(
+              {
+                userId,
+                phoneNumber,
+                requestedStatus: status,
+                connectionAge,
+                handshakeTimeout,
+                handshakeCompleted: connection.handshakeCompleted,
+              },
+              "Handshake timeout exceeded - forcing status update despite incomplete handshake",
+            );
+            // Force handshakeCompleted to prevent future blocks
+            connection.handshakeCompleted = true;
+            // Continue to update status
+          } else {
+            this.logger.info(
+              {
+                userId,
+                phoneNumber,
+                requestedStatus: status,
+                handshakeCompleted: connection.handshakeCompleted,
+                connectionAge,
+              },
+              "Skipping status update during handshake phase - will write after disconnect code 515 or timeout",
+            );
+            return; // Skip Firestore write during handshake
+          }
+        }
       }
 
       // DEFENSIVE CHECK: Prevent premature "connected" status for connections until sync completes
@@ -5092,14 +5134,48 @@ export class ConnectionPool extends EventEmitter {
         );
       }
 
-      this.logger.info(
-        { userId, phoneNumber, status },
-        "Updated phone number status in nested structure and in-memory state",
-      );
+      // Enhanced logging: Critical status transitions logged at ERROR level for monitoring
+      const isCriticalDisconnection =
+        status === "disconnected" || status === "failed";
+      const isCriticalReconnection = status === "connected";
+
+      if (isCriticalDisconnection) {
+        // Get previous status from connection for context
+        const connectionKey = this.getConnectionKey(userId, phoneNumber);
+        const connection = this.connections.get(connectionKey);
+        const previousStatus = connection?.state?.connection || "unknown";
+
+        this.logger.error(
+          {
+            userId,
+            phoneNumber,
+            status,
+            previousStatus,
+            lastError: connection?.state?.lastError,
+            timestamp: new Date().toISOString(),
+          },
+          `CRITICAL STATUS TRANSITION: Connection ${status === "failed" ? "FAILED" : "DISCONNECTED"}`,
+        );
+      } else if (isCriticalReconnection) {
+        this.logger.info(
+          {
+            userId,
+            phoneNumber,
+            status,
+            timestamp: new Date().toISOString(),
+          },
+          "CRITICAL STATUS TRANSITION: Connection RECONNECTED",
+        );
+      } else {
+        this.logger.info(
+          { userId, phoneNumber, status },
+          "Updated phone number status in nested structure and in-memory state",
+        );
+      }
     } catch (error) {
       this.logger.error(
         { userId, phoneNumber, status, error },
-        "Failed to update phone number status",
+        "CRITICAL: Failed to update phone number status in Firestore - this WILL cause synchronization issues!",
       );
     }
   }

@@ -452,9 +452,22 @@ export class ConnectionStateManager extends EventEmitter {
   }
 
   /**
-   * Persist state to Firestore
+   * Persist state to Firestore with retry logic
    */
   private async persistState(state: ConnectionState) {
+    return this.persistStateWithRetry(state, 1);
+  }
+
+  /**
+   * Persist state to Firestore with exponential backoff retry
+   */
+  private async persistStateWithRetry(
+    state: ConnectionState,
+    attempt: number,
+  ): Promise<void> {
+    const maxAttempts = 3;
+    const retryDelays = [1000, 2000, 4000]; // 1s, 2s, 4s
+
     try {
       // Use the unified phone_numbers collection
       const phoneNumbersSnapshot = await this.firestore
@@ -466,80 +479,106 @@ export class ConnectionStateManager extends EventEmitter {
         .limit(1)
         .get();
 
-      // Don't recreate deleted documents - respect user/system deletions
+      // Handle missing document
       if (phoneNumbersSnapshot.empty) {
-        this.logger.info(
-          { userId: state.userId, phoneNumber: state.phoneNumber },
-          "Phone number document doesn't exist (was deleted), skipping state persistence to respect deletion",
-        );
+        // For disconnected states, it's OK if document was deleted (user logged out)
+        if (state.status === "disconnected" || state.status === "failed") {
+          this.logger.info(
+            { userId: state.userId, phoneNumber: state.phoneNumber, status: state.status },
+            "Phone number document doesn't exist for disconnected state - user likely logged out",
+          );
+          return;
+        }
+
+        // For active states (connecting, connected, qr_pending), verify document truly doesn't exist
+        // by doing a direct check rather than trusting the query result
+        const verifySnapshot = await this.firestore
+          .collection("users")
+          .doc(state.userId)
+          .collection("phone_numbers")
+          .where("phone_number", "==", state.phoneNumber)
+          .get();
+
+        if (verifySnapshot.empty) {
+          // Document truly doesn't exist for an active connection
+          // This indicates a synchronization issue - log at ERROR level
+          this.logger.error(
+            {
+              userId: state.userId,
+              phoneNumber: state.phoneNumber,
+              status: state.status,
+              attempt,
+            },
+            "CRITICAL: Phone number document missing for active connection - status update SKIPPED. This will cause 'no connection' errors!",
+          );
+
+          // Schedule a retry for active connections
+          if (attempt < maxAttempts) {
+            const delay = retryDelays[attempt - 1];
+            this.logger.warn(
+              { userId: state.userId, phoneNumber: state.phoneNumber, attempt, delay },
+              `Scheduling retry ${attempt}/${maxAttempts} to persist state`,
+            );
+
+            await new Promise((resolve) => setTimeout(resolve, delay));
+            return this.persistStateWithRetry(state, attempt + 1);
+          } else {
+            this.logger.error(
+              { userId: state.userId, phoneNumber: state.phoneNumber },
+              "Max retry attempts reached - state persistence FAILED. Manual intervention required!",
+            );
+          }
+
+          return;
+        }
+
+        // Query might have returned empty due to eventual consistency
+        // Use the document from verification
+        const ref = verifySnapshot.docs.find((doc) => doc.data().type === "whatsapp_web")?.ref;
+
+        if (!ref) {
+          this.logger.error(
+            { userId: state.userId, phoneNumber: state.phoneNumber },
+            "Phone number document exists but type is not whatsapp_web",
+          );
+          return;
+        }
+
+        // Proceed with update using the verified reference
+        await this.performStateUpdate(ref, state);
         return;
       }
 
-      // Update existing document only
+      // Update existing document
       const ref = phoneNumbersSnapshot.docs[0].ref;
-
-      // Prepare update data using nested field updates to avoid overwriting other fields
-      // Use dot notation (e.g., "whatsapp_web.status") instead of object replacement
-      const updateData: any = {
-        phone_number: state.phoneNumber,
-        type: "whatsapp_web",
-        status: "active",
-        updated_at: admin.firestore.Timestamp.now(),
-        last_activity: admin.firestore.Timestamp.now(),
-        // Use nested field updates instead of object replacement
-        "whatsapp_web.status": state.status, // Use status as-is from ConnectionPool (single source of truth)
-        "whatsapp_web.instance_url": state.instanceUrl,
-        "whatsapp_web.session_exists": state.sessionExists,
-        "whatsapp_web.qr_scanned": state.qrScanned,
-        "whatsapp_web.sync_completed": state.syncCompleted,
-        "whatsapp_web.message_count": state.messageCount,
-        "whatsapp_web.error_count": state.errorCount,
-        "whatsapp_web.last_error": state.lastError ?? null,
-        "whatsapp_web.last_seen": admin.firestore.Timestamp.now(),
-      };
-
-      // Add sync progress fields if available
-      if (state.syncProgress) {
-        updateData["whatsapp_web.sync_contacts_count"] =
-          state.syncProgress.contacts;
-        updateData["whatsapp_web.sync_messages_count"] =
-          state.syncProgress.messages;
-        updateData["whatsapp_web.sync_started_at"] =
-          admin.firestore.Timestamp.fromDate(state.syncProgress.startedAt);
-
-        if (state.syncProgress.completedAt) {
-          updateData["whatsapp_web.sync_completed_at"] =
-            admin.firestore.Timestamp.fromDate(state.syncProgress.completedAt);
-        }
-
-        // Add sync status based on progress
-        if (state.syncCompleted) {
-          updateData["whatsapp_web.sync_status"] = "completed";
-        } else if (state.syncProgress.messages > 0) {
-          updateData["whatsapp_web.sync_status"] = "importing_messages";
-        } else if (state.syncProgress.contacts > 0) {
-          updateData["whatsapp_web.sync_status"] = "importing_contacts";
-        } else {
-          updateData["whatsapp_web.sync_status"] = "started";
-        }
-
-        updateData["whatsapp_web.sync_last_update"] =
-          admin.firestore.Timestamp.now();
-      }
-
-      // Also update whatsapp_web_usage field for frontend compatibility
-      // Frontend expects this field to show sync progress in the QR modal
-      if (state.syncProgress) {
-        updateData.whatsapp_web_usage = {
-          contacts_synced: state.syncProgress.contacts,
-          messages_synced: state.syncProgress.messages,
-          last_sync: admin.firestore.Timestamp.now(),
-        };
-      }
-
-      // Use .update() to only modify existing documents (won't create new ones)
-      await ref.update(updateData);
+      await this.performStateUpdate(ref, state);
     } catch (error: any) {
+      // Determine if error is retryable
+      const isRetryable =
+        error?.code === "UNAVAILABLE" ||
+        error?.code === "DEADLINE_EXCEEDED" ||
+        error?.message?.includes("timeout") ||
+        error?.message?.includes("ECONNRESET");
+
+      if (isRetryable && attempt < maxAttempts) {
+        const delay = retryDelays[attempt - 1];
+        this.logger.warn(
+          {
+            error: error?.message,
+            errorCode: error?.code,
+            userId: state.userId,
+            phoneNumber: state.phoneNumber,
+            attempt,
+            delay,
+          },
+          `Retryable error during persistState, scheduling retry ${attempt}/${maxAttempts}`,
+        );
+
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        return this.persistStateWithRetry(state, attempt + 1);
+      }
+
+      // Non-retryable error or max attempts reached
       this.logger.error(
         {
           error,
@@ -549,10 +588,118 @@ export class ConnectionStateManager extends EventEmitter {
           state,
           userId: state.userId,
           phoneNumber: state.phoneNumber,
+          attempt,
+          isRetryable,
+          maxAttemptsReached: attempt >= maxAttempts,
         },
-        "Failed to persist state",
+        "CRITICAL: Failed to persist state after all retries - this WILL cause synchronization issues!",
       );
+
+      // Emit event for monitoring/alerting
+      this.emit("persist-failed", {
+        userId: state.userId,
+        phoneNumber: state.phoneNumber,
+        status: state.status,
+        error: error?.message,
+        attempts: attempt,
+      });
     }
+  }
+
+  /**
+   * Perform the actual Firestore update
+   */
+  private async performStateUpdate(
+    ref: admin.firestore.DocumentReference,
+    state: ConnectionState,
+  ): Promise<void> {
+    // Prepare update data using nested field updates to avoid overwriting other fields
+    // Use dot notation (e.g., "whatsapp_web.status") instead of object replacement
+    const updateData: any = {
+      phone_number: state.phoneNumber,
+      type: "whatsapp_web",
+      status: "active",
+      updated_at: admin.firestore.Timestamp.now(),
+      last_activity: admin.firestore.Timestamp.now(),
+      // Use nested field updates instead of object replacement
+      "whatsapp_web.status": state.status, // Use status as-is from ConnectionPool (single source of truth)
+      "whatsapp_web.instance_url": state.instanceUrl,
+      "whatsapp_web.session_exists": state.sessionExists,
+      "whatsapp_web.qr_scanned": state.qrScanned,
+      "whatsapp_web.sync_completed": state.syncCompleted,
+      "whatsapp_web.message_count": state.messageCount,
+      "whatsapp_web.error_count": state.errorCount,
+      "whatsapp_web.last_error": state.lastError ?? null,
+      "whatsapp_web.last_seen": admin.firestore.Timestamp.now(),
+    };
+
+    // Add sync progress fields if available
+    if (state.syncProgress) {
+      updateData["whatsapp_web.sync_contacts_count"] =
+        state.syncProgress.contacts;
+      updateData["whatsapp_web.sync_messages_count"] =
+        state.syncProgress.messages;
+      updateData["whatsapp_web.sync_started_at"] =
+        admin.firestore.Timestamp.fromDate(state.syncProgress.startedAt);
+
+      if (state.syncProgress.completedAt) {
+        updateData["whatsapp_web.sync_completed_at"] =
+          admin.firestore.Timestamp.fromDate(state.syncProgress.completedAt);
+      }
+
+      // Add sync status based on progress
+      if (state.syncCompleted) {
+        updateData["whatsapp_web.sync_status"] = "completed";
+      } else if (state.syncProgress.messages > 0) {
+        updateData["whatsapp_web.sync_status"] = "importing_messages";
+      } else if (state.syncProgress.contacts > 0) {
+        updateData["whatsapp_web.sync_status"] = "importing_contacts";
+      } else {
+        updateData["whatsapp_web.sync_status"] = "started";
+      }
+
+      updateData["whatsapp_web.sync_last_update"] =
+        admin.firestore.Timestamp.now();
+    }
+
+    // Add metadata fields if available
+    if (state.metadata) {
+      if (state.metadata.proxyCountry) {
+        updateData["whatsapp_web.proxy_country"] = state.metadata.proxyCountry;
+      }
+      if (state.metadata.proxyIp) {
+        updateData["whatsapp_web.proxy_ip"] = state.metadata.proxyIp;
+      }
+      if (state.metadata.whatsappVersion) {
+        updateData["whatsapp_web.whatsapp_version"] =
+          state.metadata.whatsappVersion;
+      }
+      if (state.metadata.platform) {
+        updateData["whatsapp_web.platform"] = state.metadata.platform;
+      }
+    }
+
+    // Also update whatsapp_web_usage field for frontend compatibility
+    // Frontend expects this field to show sync progress in the QR modal
+    if (state.syncProgress) {
+      updateData.whatsapp_web_usage = {
+        contacts_synced: state.syncProgress.contacts,
+        messages_synced: state.syncProgress.messages,
+        last_sync: admin.firestore.Timestamp.now(),
+      };
+    }
+
+    // Use .update() to only modify existing documents (won't create new ones)
+    await ref.update(updateData);
+
+    this.logger.debug(
+      {
+        userId: state.userId,
+        phoneNumber: state.phoneNumber,
+        status: state.status,
+      },
+      "State persisted successfully to Firestore",
+    );
   }
 
   /**
