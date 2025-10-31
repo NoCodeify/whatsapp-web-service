@@ -2,6 +2,7 @@ import { Firestore } from "@google-cloud/firestore";
 import pino from "pino";
 import { EventEmitter } from "events";
 import { ConnectionStateManager } from "./connectionStateManager";
+import type { ConnectionPool } from "../core/ConnectionPool";
 
 export interface ReconciliationMetrics {
   totalChecks: number;
@@ -22,6 +23,7 @@ export interface ReconciliationMetrics {
 export class StatusReconciliationService extends EventEmitter {
   private firestore: Firestore;
   private connectionStateManager: ConnectionStateManager;
+  private connectionPool: ConnectionPool | null = null;
   private logger = pino({ name: "StatusReconciliationService" });
   private reconciliationInterval: NodeJS.Timeout | null = null;
   private metrics: ReconciliationMetrics = {
@@ -40,10 +42,12 @@ export class StatusReconciliationService extends EventEmitter {
   constructor(
     firestore: Firestore,
     connectionStateManager: ConnectionStateManager,
+    connectionPool?: ConnectionPool,
   ) {
     super();
     this.firestore = firestore;
     this.connectionStateManager = connectionStateManager;
+    this.connectionPool = connectionPool || null;
   }
 
   /**
@@ -222,14 +226,62 @@ export class StatusReconciliationService extends EventEmitter {
         if (firestoreStatus === "connected" && !inMemoryConnections.has(key)) {
           const [userId, phoneNumber] = key.split(":");
 
+          // Double-check: verify the connection doesn't exist in the actual ConnectionPool
+          // ConnectionStateManager might be out of sync but the actual connection could exist
+          const hasActualConnection =
+            this.connectionPool?.hasConnection(userId, phoneNumber) || false;
+
+          if (hasActualConnection) {
+            this.logger.warn(
+              {
+                userId,
+                phoneNumber,
+                firestoreStatus,
+                inMemoryState: false,
+                actualConnection: true,
+              },
+              "DESYNC DETECTED: ConnectionStateManager missing but actual connection exists - re-syncing state",
+            );
+
+            // Connection exists but ConnectionStateManager doesn't know about it
+            // Force a state sync by updating the state
+            try {
+              await this.connectionStateManager.updateState(userId, phoneNumber, {
+                status: "connected",
+              });
+
+              this.logger.info(
+                {
+                  userId,
+                  phoneNumber,
+                },
+                "Re-synchronized ConnectionStateManager with actual connection",
+              );
+
+              this.metrics.desyncFixed++;
+            } catch (error) {
+              this.logger.error(
+                {
+                  userId,
+                  phoneNumber,
+                  error,
+                },
+                "Failed to re-sync ConnectionStateManager",
+              );
+              this.metrics.desyncFailed++;
+            }
+            continue; // Skip marking as disconnected
+          }
+
           this.logger.warn(
             {
               userId,
               phoneNumber,
               firestoreStatus,
               inMemory: false,
+              actualConnection: false,
             },
-            "DESYNC DETECTED: Firestore shows 'connected' but no in-memory connection exists (stale data)",
+            "DESYNC DETECTED: Firestore shows 'connected' but no actual connection exists (stale data)",
           );
 
           // Fix by marking as disconnected in Firestore
@@ -238,7 +290,7 @@ export class StatusReconciliationService extends EventEmitter {
             await this.connectionStateManager.markDisconnected(
               userId,
               phoneNumber,
-              "Reconciliation: No active in-memory connection found",
+              "Reconciliation: No active connection found",
             );
 
             this.logger.info(
@@ -465,5 +517,13 @@ export class StatusReconciliationService extends EventEmitter {
   async manualReconcile(): Promise<void> {
     this.logger.info("Manual reconciliation triggered");
     await this.reconcile();
+  }
+
+  /**
+   * Set the connection pool reference (called after ConnectionPool is initialized)
+   */
+  setConnectionPool(connectionPool: ConnectionPool): void {
+    this.connectionPool = connectionPool;
+    this.logger.info("ConnectionPool reference set for reconciliation service");
   }
 }

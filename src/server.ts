@@ -143,6 +143,9 @@ if (sessionRecoveryService) {
   sessionRecoveryService.setInstanceCoordinator(instanceCoordinator);
 }
 
+// Set connection pool reference for status reconciliation service
+statusReconciliationService.setConnectionPool(connectionPool);
+
 // Set connection pool reference for reconnection service
 (reconnectionService as any).connectionPool = connectionPool;
 // const sessionOptimizer = new CloudRunSessionOptimizer(storage, firestore); // Commented out - not currently used

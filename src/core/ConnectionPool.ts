@@ -985,6 +985,14 @@ export class ConnectionPool extends EventEmitter {
   }
 
   /**
+   * Check if a connection exists in the pool
+   */
+  hasConnection(userId: string, phoneNumber: string): boolean {
+    const connectionKey = this.getConnectionKey(userId, phoneNumber);
+    return this.connections.has(connectionKey);
+  }
+
+  /**
    * Get the media service instance
    */
   getMediaService(): MediaService {
