@@ -275,6 +275,95 @@ export class StatusReconciliationService extends EventEmitter {
         }
       }
 
+      // Check for stuck importing states (both in-memory and Firestore agree but stuck in transitional state)
+      const stuckImportTimeout = 60000; // 1 minute
+      const now = Date.now();
+
+      for (const userDoc of usersSnapshot.docs) {
+        const userId = userDoc.id;
+
+        const phoneNumbersSnapshot = await userDoc.ref
+          .collection("phone_numbers")
+          .where("type", "==", "whatsapp_web")
+          .get();
+
+        for (const phoneDoc of phoneNumbersSnapshot.docs) {
+          const data = phoneDoc.data();
+          const phoneNumber = data.phone_number;
+          const whatsappData = data.whatsapp_web || {};
+          const status = whatsappData.status;
+          const lastUpdated = whatsappData.last_updated?.toDate();
+
+          // Check if stuck in importing state
+          if (
+            phoneNumber &&
+            (status === "importing_contacts" ||
+              status === "importing_messages") &&
+            lastUpdated
+          ) {
+            const timeSinceUpdate = now - lastUpdated.getTime();
+
+            if (timeSinceUpdate > stuckImportTimeout) {
+              this.logger.warn(
+                {
+                  userId,
+                  phoneNumber,
+                  status,
+                  timeSinceUpdateMs: timeSinceUpdate,
+                  lastUpdated: lastUpdated.toISOString(),
+                },
+                "STUCK IMPORT DETECTED: Connection stuck in importing state, forcing to connected",
+              );
+
+              // Force completion by updating to "connected"
+              let fixed = false;
+              try {
+                await this.connectionStateManager.updateState(
+                  userId,
+                  phoneNumber,
+                  {
+                    status: "connected",
+                  },
+                );
+
+                this.logger.info(
+                  {
+                    userId,
+                    phoneNumber,
+                    previousStatus: status,
+                    newStatus: "connected",
+                    stuckDurationMs: timeSinceUpdate,
+                  },
+                  "Successfully recovered stuck import by forcing to connected",
+                );
+
+                fixed = true;
+                this.metrics.desyncFixed++;
+              } catch (error) {
+                this.logger.error(
+                  {
+                    userId,
+                    phoneNumber,
+                    error,
+                  },
+                  "Failed to fix stuck import",
+                );
+                this.metrics.desyncFailed++;
+              }
+
+              desyncsFound.push({
+                userId,
+                phoneNumber,
+                inMemoryStatus: status,
+                firestoreStatus: status,
+                fixedAt: new Date(),
+                fixed,
+              });
+            }
+          }
+        }
+      }
+
       // Update metrics
       this.metrics.totalChecks++;
       this.metrics.desyncDetected += desyncsFound.length;
