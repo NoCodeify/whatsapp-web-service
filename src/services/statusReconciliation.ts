@@ -315,7 +315,7 @@ export class StatusReconciliationService extends EventEmitter {
                 "STUCK IMPORT DETECTED: Connection stuck in importing state, forcing to connected",
               );
 
-              // Force completion by updating to "connected"
+              // Force completion by updating to "connected" and marking sync as completed
               let fixed = false;
               try {
                 await this.connectionStateManager.updateState(
@@ -323,6 +323,7 @@ export class StatusReconciliationService extends EventEmitter {
                   phoneNumber,
                   {
                     status: "connected",
+                    syncCompleted: true, // This will set sync_status to "completed"
                   },
                 );
 
