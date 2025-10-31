@@ -49,8 +49,7 @@ export interface LimitCheckResult {
   error?: string;
 }
 
-// Constants
-const DAILY_MESSAGE_LIMIT = 250;
+// Constants removed - daily message limit now comes from database
 
 export class LimitChecker {
   private db: admin.firestore.Firestore;
@@ -188,8 +187,8 @@ export class LimitChecker {
         },
         totalMessagesUsage: {
           used: 0,
-          limit: DAILY_MESSAGE_LIMIT,
-          remaining: DAILY_MESSAGE_LIMIT,
+          limit: 250, // Use hardcoded fallback since we can't access phone doc
+          remaining: 250,
           percentage: 0,
         },
         totalMessageLimitReached: false,
@@ -221,8 +220,8 @@ export class LimitChecker {
         },
         totalMessagesUsage: {
           used: 0,
-          limit: DAILY_MESSAGE_LIMIT,
-          remaining: DAILY_MESSAGE_LIMIT,
+          limit: 250, // Use hardcoded fallback since we haven't fetched phone doc yet
+          remaining: 250,
           percentage: 0,
         },
         totalMessageLimitReached: false,
@@ -276,6 +275,12 @@ export class LimitChecker {
         );
         const monthlyLimit = dailyLimit * 20; // Approximate monthly limit based on daily
 
+        // Get daily message limit from phone document (BUG #5 fix - make it database-driven)
+        const dailyMessageLimit = Math.max(
+          1,
+          this.sanitizeCounter(phoneData?.daily_message_limit) || 250,
+        );
+
         // Reset daily counters if needed
         usage = this.resetDailyCountersIfNeeded(usage);
 
@@ -295,7 +300,7 @@ export class LimitChecker {
             // Calculate total message usage even when new contact limit reached
             const totalMessagesUsed = usage.total_messages_today || 0;
             const totalMessageLimitReached =
-              totalMessagesUsed >= DAILY_MESSAGE_LIMIT;
+              totalMessagesUsed >= dailyMessageLimit;
 
             return {
               allowed: false,
@@ -310,11 +315,11 @@ export class LimitChecker {
               },
               totalMessagesUsage: {
                 used: totalMessagesUsed,
-                limit: DAILY_MESSAGE_LIMIT,
-                remaining: Math.max(0, DAILY_MESSAGE_LIMIT - totalMessagesUsed),
+                limit: dailyMessageLimit,
+                remaining: Math.max(0, dailyMessageLimit - totalMessagesUsed),
                 percentage: Math.min(
                   100,
-                  (totalMessagesUsed / DAILY_MESSAGE_LIMIT) * 100,
+                  (totalMessagesUsed / dailyMessageLimit) * 100,
                 ),
               },
               totalMessageLimitReached,
@@ -337,7 +342,7 @@ export class LimitChecker {
             // Calculate total message usage even when monthly limit reached
             const totalMessagesUsed = usage.total_messages_today || 0;
             const totalMessageLimitReached =
-              totalMessagesUsed >= DAILY_MESSAGE_LIMIT;
+              totalMessagesUsed >= dailyMessageLimit;
 
             return {
               allowed: false,
@@ -352,11 +357,11 @@ export class LimitChecker {
               },
               totalMessagesUsage: {
                 used: totalMessagesUsed,
-                limit: DAILY_MESSAGE_LIMIT,
-                remaining: Math.max(0, DAILY_MESSAGE_LIMIT - totalMessagesUsed),
+                limit: dailyMessageLimit,
+                remaining: Math.max(0, dailyMessageLimit - totalMessagesUsed),
                 percentage: Math.min(
                   100,
-                  (totalMessagesUsed / DAILY_MESSAGE_LIMIT) * 100,
+                  (totalMessagesUsed / dailyMessageLimit) * 100,
                 ),
               },
               totalMessageLimitReached,
@@ -391,16 +396,16 @@ export class LimitChecker {
         // Calculate total message usage stats
         const totalMessagesUsed = usage.total_messages_today;
         const totalMessageLimitReached =
-          totalMessagesUsed >= DAILY_MESSAGE_LIMIT;
+          totalMessagesUsed >= dailyMessageLimit;
         const shouldSendEmail =
           totalMessageLimitReached && !usage.limit_email_sent_today;
         const totalMessagesRemaining = Math.max(
           0,
-          DAILY_MESSAGE_LIMIT - totalMessagesUsed,
+          dailyMessageLimit - totalMessagesUsed,
         );
         const totalMessagesPercentage = Math.min(
           100,
-          (totalMessagesUsed / DAILY_MESSAGE_LIMIT) * 100,
+          (totalMessagesUsed / dailyMessageLimit) * 100,
         );
 
         logger.info(
@@ -428,7 +433,7 @@ export class LimitChecker {
           },
           totalMessagesUsage: {
             used: totalMessagesUsed,
-            limit: DAILY_MESSAGE_LIMIT,
+            limit: dailyMessageLimit,
             remaining: totalMessagesRemaining,
             percentage: totalMessagesPercentage,
           },
@@ -458,8 +463,8 @@ export class LimitChecker {
           },
           totalMessagesUsage: {
             used: 0,
-            limit: DAILY_MESSAGE_LIMIT,
-            remaining: DAILY_MESSAGE_LIMIT,
+            limit: 250, // Use hardcoded fallback since we can't access phone doc
+            remaining: 250,
             percentage: 0,
           },
           totalMessageLimitReached: false,
