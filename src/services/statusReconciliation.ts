@@ -246,9 +246,13 @@ export class StatusReconciliationService extends EventEmitter {
             // Connection exists but ConnectionStateManager doesn't know about it
             // Force a state sync by updating the state
             try {
-              await this.connectionStateManager.updateState(userId, phoneNumber, {
-                status: "connected",
-              });
+              await this.connectionStateManager.updateState(
+                userId,
+                phoneNumber,
+                {
+                  status: "connected",
+                },
+              );
 
               this.logger.info(
                 {
@@ -327,7 +331,8 @@ export class StatusReconciliationService extends EventEmitter {
         }
       }
 
-      // Check for stuck importing states (both in-memory and Firestore agree but stuck in transitional state)
+      // Check for stuck initializing/connecting states
+      const stuckInitializingTimeout = 120000; // 2 minutes
       const stuckImportTimeout = 60000; // 1 minute
       const now = Date.now();
 
@@ -345,6 +350,124 @@ export class StatusReconciliationService extends EventEmitter {
           const whatsappData = data.whatsapp_web || {};
           const status = whatsappData.status;
           const lastUpdated = whatsappData.last_updated?.toDate();
+
+          // Check if stuck in initializing/connecting state (e.g., proxy purchase failed)
+          if (
+            phoneNumber &&
+            (status === "initializing" || status === "connecting") &&
+            lastUpdated
+          ) {
+            const timeSinceUpdate = now - lastUpdated.getTime();
+
+            if (timeSinceUpdate > stuckInitializingTimeout) {
+              this.logger.warn(
+                {
+                  userId,
+                  phoneNumber,
+                  status,
+                  timeSinceUpdateMs: timeSinceUpdate,
+                  lastUpdated: lastUpdated.toISOString(),
+                },
+                "STUCK INITIALIZATION DETECTED: Connection stuck in initializing/connecting state, triggering retry",
+              );
+
+              // Check if connection actually exists in memory
+              const hasInMemoryConnection = inMemoryConnections.has(
+                `${userId}:${phoneNumber}`,
+              );
+              const hasActualConnection =
+                this.connectionPool?.hasConnection(userId, phoneNumber) ||
+                false;
+
+              if (!hasInMemoryConnection && !hasActualConnection) {
+                // No connection exists - trigger reconnection attempt
+                let fixed = false;
+                try {
+                  this.logger.info(
+                    { userId, phoneNumber },
+                    "Attempting to recover stuck initialization by triggering reconnection",
+                  );
+
+                  // Mark as disconnected first to clear the stuck state
+                  await this.connectionStateManager.updateState(
+                    userId,
+                    phoneNumber,
+                    {
+                      status: "disconnected",
+                    },
+                  );
+
+                  // Trigger reconnection through ConnectionPool
+                  if (this.connectionPool) {
+                    // Use the reconnect method if available, otherwise log warning
+                    this.logger.info(
+                      { userId, phoneNumber },
+                      "Triggering reconnection for stuck initialization - user will need to reconnect via UI",
+                    );
+
+                    // Note: We mark as disconnected so the UI will show the disconnected state
+                    // and the user can retry the connection. Auto-reconnect could cause issues
+                    // if the underlying problem (e.g., proxy service down) isn't resolved.
+
+                    fixed = true;
+                    this.metrics.desyncFixed++;
+                  }
+                } catch (error) {
+                  this.logger.error(
+                    {
+                      userId,
+                      phoneNumber,
+                      error,
+                    },
+                    "Failed to recover stuck initialization",
+                  );
+                  this.metrics.desyncFailed++;
+                }
+
+                desyncsFound.push({
+                  userId,
+                  phoneNumber,
+                  inMemoryStatus: status,
+                  firestoreStatus: status,
+                  fixedAt: new Date(),
+                  fixed,
+                });
+              } else {
+                // Connection exists but Firestore is stuck - sync the state
+                this.logger.info(
+                  {
+                    userId,
+                    phoneNumber,
+                    hasInMemoryConnection,
+                    hasActualConnection,
+                  },
+                  "Connection exists despite stuck initializing state - syncing Firestore",
+                );
+
+                try {
+                  const inMemoryStatus = inMemoryConnections.get(
+                    `${userId}:${phoneNumber}`,
+                  );
+                  if (inMemoryStatus) {
+                    await this.connectionStateManager.updateState(
+                      userId,
+                      phoneNumber,
+                      {
+                        status: inMemoryStatus as any,
+                      },
+                    );
+                    this.metrics.desyncFixed++;
+                  }
+                } catch (error) {
+                  this.logger.error(
+                    { userId, phoneNumber, error },
+                    "Failed to sync stuck initialization state",
+                  );
+                  this.metrics.desyncFailed++;
+                }
+              }
+            }
+          }
 
           // Check if stuck in importing state
           if (

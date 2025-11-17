@@ -135,80 +135,163 @@ export class DynamicProxyService {
    * Purchase a new proxy for the specified country
    */
   async purchaseProxy(country: string): Promise<ProxyInfo> {
-    try {
-      // Purchase new proxy from BrightData
-      this.logger.info({ country }, "Purchasing new proxy");
+    const MAX_RETRIES = 3;
+    const RETRY_DELAYS = [5000, 10000, 20000]; // 5s, 10s, 20s exponential backoff
 
-      // Ensure credentials are initialized
-      await this.ensureInitialized();
-
-      if (!this.customerId) {
-        throw new Error("Customer ID not initialized - cannot purchase proxy");
-      }
-
-      // Validate customer ID is not a placeholder value
-      if (
-        this.customerId.includes("your_") ||
-        this.customerId.includes("placeholder")
-      ) {
-        throw new Error(
-          "Customer ID contains placeholder value - configure valid credentials",
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        // Purchase new proxy from BrightData
+        this.logger.info(
+          { country, attempt: attempt + 1, maxAttempts: MAX_RETRIES + 1 },
+          attempt === 0
+            ? "Purchasing new proxy"
+            : `Retrying proxy purchase (attempt ${attempt + 1}/${MAX_RETRIES + 1})`,
         );
-      }
 
-      const response = await this.apiClient.post<ProxyPurchaseResponse>(
-        "/zone/ips",
-        {
-          customer: this.customerId,
-          zone: this.config.zone,
-          count: 1,
+        // Ensure credentials are initialized
+        await this.ensureInitialized();
+
+        if (!this.customerId) {
+          throw new Error(
+            "Customer ID not initialized - cannot purchase proxy",
+          );
+        }
+
+        // Validate customer ID is not a placeholder value
+        if (
+          this.customerId.includes("your_") ||
+          this.customerId.includes("placeholder")
+        ) {
+          throw new Error(
+            "Customer ID contains placeholder value - configure valid credentials",
+          );
+        }
+
+        const response = await this.apiClient.post<ProxyPurchaseResponse>(
+          "/zone/ips",
+          {
+            customer: this.customerId,
+            zone: this.config.zone,
+            count: 1,
+            country: country.toLowerCase(),
+          },
+        );
+
+        if (!response.data.new_ips || response.data.new_ips.length === 0) {
+          throw new Error(`No proxies available for country: ${country}`);
+        }
+
+        const proxyIp = response.data.new_ips[0];
+
+        const proxyInfo: ProxyInfo = {
+          ip: proxyIp,
+          port: this.config.port,
           country: country.toLowerCase(),
-        },
-      );
+        };
 
-      if (!response.data.new_ips || response.data.new_ips.length === 0) {
-        throw new Error(`No proxies available for country: ${country}`);
+        this.logger.info(
+          { country, ip: proxyIp, attempt: attempt + 1 },
+          "Successfully purchased proxy",
+        );
+        return proxyInfo;
+      } catch (error: any) {
+        const errorInfo: any = {
+          message: error.message,
+          country,
+          attempt: attempt + 1,
+          maxAttempts: MAX_RETRIES + 1,
+          customerId: this.customerId ? "present" : "missing",
+        };
+
+        if (axios.isAxiosError(error) && error.response) {
+          errorInfo.status = error.response.status;
+          errorInfo.statusText = error.response.statusText;
+          errorInfo.apiError = error.response.data;
+          errorInfo.headers = error.response.headers;
+        }
+
+        // Check if this is a retriable error (timeout or network issue)
+        const isTimeout =
+          error.code === "ECONNABORTED" ||
+          error.code === "ETIMEDOUT" ||
+          error.message?.includes("timeout") ||
+          error.message?.includes("ETIMEDOUT") ||
+          error.message?.includes("ECONNABORTED");
+
+        const isNetworkError =
+          error.code === "ECONNRESET" ||
+          error.code === "ENOTFOUND" ||
+          error.code === "ECONNREFUSED";
+
+        const isRetriable = isTimeout || isNetworkError;
+
+        // Check if this is a permanent error
+        const isPermanentError =
+          error.response?.status === 400 ||
+          error.response?.status === 401 ||
+          error.response?.status === 403 ||
+          error.message.includes("No proxies available") ||
+          error.message.includes("Customer ID") ||
+          error.message.includes("placeholder");
+
+        this.logger.error(
+          {
+            ...errorInfo,
+            isTimeout,
+            isNetworkError,
+            isRetriable,
+            isPermanentError,
+          },
+          "Proxy purchase attempt failed",
+        );
+
+        // Handle permanent errors - don't retry
+        if (isPermanentError) {
+          if (
+            error.response?.status === 400 ||
+            error.message.includes("No proxies available")
+          ) {
+            // Country not available, will trigger fallback
+            throw new Error(`NO_PROXY_AVAILABLE:${country}`);
+          }
+          throw error;
+        }
+
+        // If this is the last attempt, throw the error
+        if (attempt === MAX_RETRIES) {
+          this.logger.error(
+            { country, attempts: MAX_RETRIES + 1 },
+            "All proxy purchase attempts failed",
+          );
+          throw error;
+        }
+
+        // Retry on timeout/network errors
+        if (isRetriable) {
+          const delay = RETRY_DELAYS[attempt];
+          this.logger.warn(
+            {
+              country,
+              attempt: attempt + 1,
+              nextAttempt: attempt + 2,
+              delayMs: delay,
+              errorType: isTimeout ? "timeout" : "network",
+            },
+            `Proxy purchase failed with retriable error, retrying after ${delay}ms`,
+          );
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          // Continue to next iteration
+        } else {
+          // Non-retriable error, throw immediately
+          throw error;
+        }
       }
-
-      const proxyIp = response.data.new_ips[0];
-
-      const proxyInfo: ProxyInfo = {
-        ip: proxyIp,
-        port: this.config.port,
-        country: country.toLowerCase(),
-      };
-
-      this.logger.info(
-        { country, ip: proxyIp },
-        "Successfully purchased proxy",
-      );
-      return proxyInfo;
-    } catch (error: any) {
-      const errorInfo: any = {
-        message: error.message,
-        country,
-        customerId: this.customerId ? "present" : "missing",
-      };
-
-      if (axios.isAxiosError(error) && error.response) {
-        errorInfo.status = error.response.status;
-        errorInfo.statusText = error.response.statusText;
-        errorInfo.apiError = error.response.data;
-        errorInfo.headers = error.response.headers;
-      }
-
-      this.logger.error(errorInfo, "Failed to purchase proxy");
-
-      if (
-        error.response?.status === 400 ||
-        error.message.includes("No proxies available")
-      ) {
-        // Country not available, will trigger fallback
-        throw new Error(`NO_PROXY_AVAILABLE:${country}`);
-      }
-
-      throw error;
     }
+
+    // This should never be reached, but TypeScript requires it
+    throw new Error(
+      `Failed to purchase proxy for ${country} after ${MAX_RETRIES + 1} attempts`,
+    );
   }
 
   /**
