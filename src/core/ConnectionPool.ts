@@ -85,6 +85,7 @@ export class ConnectionPool extends EventEmitter {
   > = new Map(); // Store contact info from contacts.upsert
   private sentMessageIds: Map<string, Date> = new Map(); // Track API-sent message IDs
   private processedContactsCache: Map<string, Set<string>> = new Map(); // Session-based contact deduplication
+  private reconnectionInProgress: Map<string, boolean> = new Map(); // Track ongoing reconnections to prevent conflicts
 
   private readonly config: ConnectionPoolConfig = {
     maxConnections: parseInt(process.env.MAX_CONNECTIONS || "50"),
@@ -689,7 +690,18 @@ export class ConnectionPool extends EventEmitter {
 
         // Synchronize Firestore status with actual connection state
         // This ensures status is correct even if connection was never marked as connected
-        if (this.connectionStateManager && existing.state.connection === "open") {
+        if (
+          this.connectionStateManager &&
+          existing.state.connection === "open"
+        ) {
+          // Ensure state exists in memory before marking as connected
+          await this.connectionStateManager.ensureStateForConnection(
+            userId,
+            phoneNumber,
+            this.config.instanceUrl,
+            "connected",
+          );
+
           // Mark as connected to ensure Firestore is in sync
           await this.connectionStateManager.markConnected(userId, phoneNumber);
           this.logger.info(
@@ -815,7 +827,7 @@ export class ConnectionPool extends EventEmitter {
           phoneNumber,
           connectionId: connection.connectionId,
           totalConnections: this.connections.size,
-          isRecovery
+          isRecovery,
         },
         "Added new connection to pool",
       );
@@ -1481,7 +1493,12 @@ export class ConnectionPool extends EventEmitter {
     this.wsManager.registerConnection(connectionKey, socket);
 
     this.logger.info(
-      { userId, phoneNumber, connectionId: connId, createdAt: connection.createdAt },
+      {
+        userId,
+        phoneNumber,
+        connectionId: connId,
+        createdAt: connection.createdAt,
+      },
       "Setting up event handlers for new connection instance",
     );
 
@@ -1601,6 +1618,14 @@ export class ConnectionPool extends EventEmitter {
         // For recovery connections, mark as connected immediately
         // For first-time connections, defer until sync completes
         if (this.connectionStateManager && connection.isRecovery) {
+          // Ensure state exists in memory before marking as connected
+          await this.connectionStateManager.ensureStateForConnection(
+            userId,
+            phoneNumber,
+            this.config.instanceUrl,
+            "connected",
+          );
+
           await this.connectionStateManager.markConnected(userId, phoneNumber);
           this.logger.info(
             { userId, phoneNumber },
@@ -1845,8 +1870,10 @@ export class ConnectionPool extends EventEmitter {
               disconnectReason,
               pairingTimestamp,
               errorMessage: disconnectError?.message,
-              errorStack:
-                disconnectError?.stack?.split("\n").slice(0, 3).join(" | "),
+              errorStack: disconnectError?.stack
+                ?.split("\n")
+                .slice(0, 3)
+                .join(" | "),
               proxyCountry: connection.proxyCountry,
               proxyActive: !!connection.proxyCountry,
             },
@@ -1888,8 +1915,8 @@ export class ConnectionPool extends EventEmitter {
           });
 
           // Wait for session save and network stabilization before reconnecting
-          // This prevents "stream errored out" during reconnection
-          const stabilizationDelay = 1500; // 1.5 seconds for Cloud Storage upload + network stabilization
+          // This prevents "stream errored out" and "conflict" errors during reconnection
+          const stabilizationDelay = 5000; // 5 seconds for Cloud Storage upload + network stabilization + WhatsApp server processing
           this.logger.info(
             { userId, phoneNumber, delayMs: stabilizationDelay },
             `Waiting ${stabilizationDelay}ms for session save and network stabilization before reconnection`,
@@ -1898,6 +1925,25 @@ export class ConnectionPool extends EventEmitter {
           await new Promise((resolve) =>
             setTimeout(resolve, stabilizationDelay),
           );
+
+          // Verify old connection is fully closed
+          const connectionKey = this.getConnectionKey(userId, phoneNumber);
+          const existingConnection = this.connections.get(connectionKey);
+          if (existingConnection?.socket) {
+            try {
+              // Ensure socket is properly closed
+              existingConnection.socket.end(undefined);
+              this.logger.info(
+                { userId, phoneNumber },
+                "Explicitly closed old socket before reconnection",
+              );
+            } catch (error) {
+              this.logger.warn(
+                { userId, phoneNumber, error },
+                "Failed to close old socket, continuing with reconnection",
+              );
+            }
+          }
 
           // Log post-stabilization state
           this.logger.info(
@@ -2492,6 +2538,14 @@ export class ConnectionPool extends EventEmitter {
 
                 // Mark as connected in ConnectionStateManager now that sync is complete
                 if (this.connectionStateManager) {
+                  // Ensure state exists in memory before marking as connected
+                  await this.connectionStateManager.ensureStateForConnection(
+                    userId,
+                    phoneNumber,
+                    this.config.instanceUrl,
+                    "connected",
+                  );
+
                   await this.connectionStateManager.markConnected(
                     userId,
                     phoneNumber,
@@ -3607,7 +3661,10 @@ export class ConnectionPool extends EventEmitter {
         .get();
 
       // Create Map for O(1) lookups by phone number
-      const existingContactsMap = new Map<string, FirebaseFirestore.QueryDocumentSnapshot>();
+      const existingContactsMap = new Map<
+        string,
+        FirebaseFirestore.QueryDocumentSnapshot
+      >();
       existingContactsSnapshot.docs.forEach((doc) => {
         const phoneNum = doc.data().phone_number;
         if (phoneNum) {
@@ -3620,13 +3677,16 @@ export class ConnectionPool extends EventEmitter {
           userId,
           phoneNumber,
           existingCount: existingContactsMap.size,
-          loadTimeMs: Date.now() - startTime
+          loadTimeMs: Date.now() - startTime,
         },
         "Loaded existing contacts for batch processing",
       );
 
       // Collect batch updates
-      const batchUpdates: Array<{ docRef: FirebaseFirestore.DocumentReference; data: any }> = [];
+      const batchUpdates: Array<{
+        docRef: FirebaseFirestore.DocumentReference;
+        data: any;
+      }> = [];
 
       for (const contact of contacts) {
         const contactNumber = contact.id?.replace("@s.whatsapp.net", "") || "";
@@ -3669,7 +3729,8 @@ export class ConnectionPool extends EventEmitter {
             data: {
               whatsapp_name: contact.name || contact.notify || null,
               first_name:
-                existingData.first_name === "Unknown" || !existingData.first_name
+                existingData.first_name === "Unknown" ||
+                !existingData.first_name
                   ? firstName || "Unknown"
                   : existingData.first_name,
               last_name:
@@ -3692,7 +3753,7 @@ export class ConnectionPool extends EventEmitter {
         }
 
         // Log progress every 100 contacts (processed, not yet written)
-        if ((syncedCount % 100 === 0) && syncedCount > 0) {
+        if (syncedCount % 100 === 0 && syncedCount > 0) {
           this.logger.info(
             { userId, phoneNumber, syncedCount },
             "Contacts sync progress",
@@ -3734,7 +3795,7 @@ export class ConnectionPool extends EventEmitter {
               userId,
               phoneNumber,
               batchNumber: Math.floor(i / BATCH_SIZE) + 1,
-              updatesInBatch: batchSlice.length
+              updatesInBatch: batchSlice.length,
             },
             "Batch committed successfully",
           );
@@ -3747,7 +3808,7 @@ export class ConnectionPool extends EventEmitter {
             phoneNumber,
             totalSynced: syncedCount,
             totalTimeMs,
-            averageTimePerContact: Math.round(totalTimeMs / contacts.length)
+            averageTimePerContact: Math.round(totalTimeMs / contacts.length),
           },
           "Contacts sync completed with batch optimization",
         );
@@ -4652,114 +4713,144 @@ export class ConnectionPool extends EventEmitter {
     const maxAttempts = 5;
     const baseDelay = 5000;
 
-    // Get existing connection's state BEFORE deleting
-    const existingConnection = this.connections.get(connectionKey);
-    const storedProxyCountry = existingConnection?.proxyCountry;
-    const handshakeWasCompleted =
-      existingConnection?.handshakeCompleted || false;
-
-    // Properly cleanup old connection to prevent ghost handlers
-    if (existingConnection) {
-      this.logger.info(
-        {
-          userId,
-          phoneNumber,
-          connectionId: existingConnection.connectionId
-        },
-        "Cleaning up old connection before reconnection",
+    // Check if reconnection already in progress for this connection
+    if (this.reconnectionInProgress.get(connectionKey)) {
+      this.logger.warn(
+        { userId, phoneNumber, attempt },
+        "Reconnection already in progress for this connection, skipping duplicate attempt to prevent conflict",
       );
-
-      // Clear QR timeout to prevent it from killing new connection
-      if (existingConnection.qrTimeout) {
-        clearTimeout(existingConnection.qrTimeout);
-        existingConnection.qrTimeout = undefined;
-        this.logger.debug(
-          { userId, phoneNumber, connectionId: existingConnection.connectionId },
-          "Cleared QR timeout from old connection",
-        );
-      }
-
-      // Remove all event listeners from old socket to prevent ghost handlers
-      try {
-        // TypeScript types require an event parameter, but EventEmitter allows calling without args
-        // to remove ALL listeners across ALL events - this is what we want for cleanup
-        (existingConnection.socket.ev.removeAllListeners as any)();
-        this.logger.debug(
-          { userId, phoneNumber, connectionId: existingConnection.connectionId },
-          "Removed all event listeners from old socket",
-        );
-      } catch (error) {
-        this.logger.warn(
-          { userId, phoneNumber, error },
-          "Failed to remove event listeners from old socket",
-        );
-      }
-
-      // Unregister from WebSocket manager
-      try {
-        this.wsManager.unregisterConnection(connectionKey);
-        this.logger.debug(
-          { userId, phoneNumber, connectionId: existingConnection.connectionId },
-          "Unregistered old connection from WebSocket manager",
-        );
-      } catch (error) {
-        this.logger.warn(
-          { userId, phoneNumber, error },
-          "Failed to unregister from WebSocket manager",
-        );
-      }
-
-      // Close old socket
-      try {
-        existingConnection.socket.end(undefined);
-        this.logger.debug(
-          { userId, phoneNumber, connectionId: existingConnection.connectionId },
-          "Closed old socket",
-        );
-      } catch (error) {
-        this.logger.warn(
-          { userId, phoneNumber, error },
-          "Failed to close old socket",
-        );
-      }
-    }
-
-    // Remove old connection from pool (but keep auth state)
-    this.connections.delete(connectionKey);
-
-    // Skip attempt check for immediate reconnect (attempt = 0)
-    if (attempt > 0 && attempt > maxAttempts) {
-      this.logger.error(
-        { userId, phoneNumber },
-        "Max reconnection attempts reached, giving up",
-      );
-      await this.updateConnectionStatus(userId, phoneNumber, "failed");
       return;
     }
 
-    // No delay for immediate reconnect (attempt = 0), otherwise exponential backoff
-    if (attempt > 0) {
-      const delay = baseDelay * Math.pow(2, attempt - 1);
-      this.logger.info(
-        { userId, phoneNumber, attempt, delay },
-        "Waiting before reconnection attempt",
-      );
-      await new Promise((resolve) => setTimeout(resolve, delay));
-    } else {
-      this.logger.info(
-        { userId, phoneNumber },
-        "Immediate reconnection after pairing",
-      );
-    }
+    // Mark reconnection as in progress
+    this.reconnectionInProgress.set(connectionKey, true);
 
     try {
-      // Defensive checks before reconnection attempt
+      // Get existing connection's state BEFORE deleting
+      const existingConnection = this.connections.get(connectionKey);
+      const storedProxyCountry = existingConnection?.proxyCountry;
+      const handshakeWasCompleted =
+        existingConnection?.handshakeCompleted || false;
+
+      // Properly cleanup old connection to prevent ghost handlers
+      if (existingConnection) {
+        this.logger.info(
+          {
+            userId,
+            phoneNumber,
+            connectionId: existingConnection.connectionId,
+          },
+          "Cleaning up old connection before reconnection",
+        );
+
+        // Clear QR timeout to prevent it from killing new connection
+        if (existingConnection.qrTimeout) {
+          clearTimeout(existingConnection.qrTimeout);
+          existingConnection.qrTimeout = undefined;
+          this.logger.debug(
+            {
+              userId,
+              phoneNumber,
+              connectionId: existingConnection.connectionId,
+            },
+            "Cleared QR timeout from old connection",
+          );
+        }
+
+        // Remove all event listeners from old socket to prevent ghost handlers
+        try {
+          // TypeScript types require an event parameter, but EventEmitter allows calling without args
+          // to remove ALL listeners across ALL events - this is what we want for cleanup
+          (existingConnection.socket.ev.removeAllListeners as any)();
+          this.logger.debug(
+            {
+              userId,
+              phoneNumber,
+              connectionId: existingConnection.connectionId,
+            },
+            "Removed all event listeners from old socket",
+          );
+        } catch (error) {
+          this.logger.warn(
+            { userId, phoneNumber, error },
+            "Failed to remove event listeners from old socket",
+          );
+        }
+
+        // Unregister from WebSocket manager
+        try {
+          this.wsManager.unregisterConnection(connectionKey);
+          this.logger.debug(
+            {
+              userId,
+              phoneNumber,
+              connectionId: existingConnection.connectionId,
+            },
+            "Unregistered old connection from WebSocket manager",
+          );
+        } catch (error) {
+          this.logger.warn(
+            { userId, phoneNumber, error },
+            "Failed to unregister from WebSocket manager",
+          );
+        }
+
+        // Close old socket
+        try {
+          existingConnection.socket.end(undefined);
+          this.logger.debug(
+            {
+              userId,
+              phoneNumber,
+              connectionId: existingConnection.connectionId,
+            },
+            "Closed old socket",
+          );
+        } catch (error) {
+          this.logger.warn(
+            { userId, phoneNumber, error },
+            "Failed to close old socket",
+          );
+        }
+      }
+
+      // Remove old connection from pool (but keep auth state)
+      this.connections.delete(connectionKey);
+
+      // Skip attempt check for immediate reconnect (attempt = 0)
+      if (attempt > 0 && attempt > maxAttempts) {
+        this.logger.error(
+          { userId, phoneNumber },
+          "Max reconnection attempts reached, giving up",
+        );
+        await this.updateConnectionStatus(userId, phoneNumber, "failed");
+        return;
+      }
+
+      // No delay for immediate reconnect (attempt = 0), otherwise exponential backoff
+      if (attempt > 0) {
+        const delay = baseDelay * Math.pow(2, attempt - 1);
+        this.logger.info(
+          { userId, phoneNumber, attempt, delay },
+          "Waiting before reconnection attempt",
+        );
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      } else {
+        this.logger.info(
+          { userId, phoneNumber },
+          "Immediate reconnection after pairing",
+        );
+      }
+
+      // Defensive checks before reconnection attempt (moved out of inner try block)
       let hasValidSession = false;
 
       if (this.sessionManager) {
         try {
-          hasValidSession =
-            await this.sessionManager.sessionExists(userId, phoneNumber);
+          hasValidSession = await this.sessionManager.sessionExists(
+            userId,
+            phoneNumber,
+          );
 
           this.logger.info(
             {
@@ -4815,6 +4906,9 @@ export class ConnectionPool extends EventEmitter {
       // No need to manually restore it after the fact
 
       if (!success) {
+        // Clear mutex before retry to allow new reconnection attempt
+        this.reconnectionInProgress.delete(connectionKey);
+
         // If addConnection failed, try again (only increment if not immediate reconnect)
         const nextAttempt = attempt === 0 ? 1 : attempt + 1;
         this.logger.warn(
@@ -4838,9 +4932,16 @@ export class ConnectionPool extends EventEmitter {
         },
         "Reconnection attempt failed with exception",
       );
+
+      // Clear mutex before retry to allow new reconnection attempt
+      this.reconnectionInProgress.delete(connectionKey);
+
       // Only increment attempt if not immediate reconnect
       const nextAttempt = attempt === 0 ? 1 : attempt + 1;
       await this.reconnect(userId, phoneNumber, nextAttempt);
+    } finally {
+      // Ensure mutex is cleared even if we don't retry
+      this.reconnectionInProgress.delete(connectionKey);
     }
   }
 

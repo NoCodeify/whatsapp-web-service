@@ -325,6 +325,66 @@ export class ConnectionStateManager extends EventEmitter {
   }
 
   /**
+   * Ensure state exists for a connection, initializing if missing
+   * This prevents desync between ConnectionPool and ConnectionStateManager
+   */
+  async ensureStateForConnection(
+    userId: string,
+    phoneNumber: string,
+    instanceUrl: string,
+    currentStatus?: string,
+  ): Promise<ConnectionState> {
+    const key = this.getStateKey(userId, phoneNumber);
+    let state = this.states.get(key);
+
+    if (!state) {
+      this.logger.warn(
+        { userId, phoneNumber },
+        "State missing for active connection - initializing to prevent desync",
+      );
+
+      // Initialize state for this connection
+      state = {
+        userId,
+        phoneNumber,
+        status: (currentStatus as any) || "connecting",
+        instanceUrl,
+        createdAt: new Date(),
+        lastActivity: new Date(),
+        lastHeartbeat: new Date(),
+        messageCount: 0,
+        sessionExists: true, // Assume true if connection exists
+        qrScanned: true, // Assume true if connection exists
+        syncCompleted: false,
+        errorCount: 0,
+      };
+
+      this.states.set(key, state);
+
+      // Also update Firestore to persist the state
+      try {
+        await this.updateState(userId, phoneNumber, {
+          status: state.status,
+          sessionExists: true,
+          qrScanned: true,
+        });
+
+        this.logger.info(
+          { userId, phoneNumber, status: state.status },
+          "Initialized missing state for active connection",
+        );
+      } catch (error) {
+        this.logger.error(
+          { userId, phoneNumber, error },
+          "Failed to persist initialized state to Firestore",
+        );
+      }
+    }
+
+    return state;
+  }
+
+  /**
    * Mark connection as connected
    */
   async markConnected(userId: string, phoneNumber: string) {
@@ -484,7 +544,11 @@ export class ConnectionStateManager extends EventEmitter {
         // For disconnected states, it's OK if document was deleted (user logged out)
         if (state.status === "disconnected" || state.status === "failed") {
           this.logger.info(
-            { userId: state.userId, phoneNumber: state.phoneNumber, status: state.status },
+            {
+              userId: state.userId,
+              phoneNumber: state.phoneNumber,
+              status: state.status,
+            },
             "Phone number document doesn't exist for disconnected state - user likely logged out",
           );
           return;
@@ -516,7 +580,12 @@ export class ConnectionStateManager extends EventEmitter {
           if (attempt < maxAttempts) {
             const delay = retryDelays[attempt - 1];
             this.logger.warn(
-              { userId: state.userId, phoneNumber: state.phoneNumber, attempt, delay },
+              {
+                userId: state.userId,
+                phoneNumber: state.phoneNumber,
+                attempt,
+                delay,
+              },
               `Scheduling retry ${attempt}/${maxAttempts} to persist state`,
             );
 
@@ -534,7 +603,9 @@ export class ConnectionStateManager extends EventEmitter {
 
         // Query might have returned empty due to eventual consistency
         // Use the document from verification
-        const ref = verifySnapshot.docs.find((doc) => doc.data().type === "whatsapp_web")?.ref;
+        const ref = verifySnapshot.docs.find(
+          (doc) => doc.data().type === "whatsapp_web",
+        )?.ref;
 
         if (!ref) {
           this.logger.error(

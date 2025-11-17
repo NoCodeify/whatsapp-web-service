@@ -245,26 +245,17 @@ export class CloudRunWebSocketManager extends EventEmitter {
       ? now.getTime() - health.lastPongTime.getTime()
       : Number.MAX_SAFE_INTEGER;
 
-    const isStale = timeSinceLastPong > this.config.healthCheckInterval * 2;
+    // Increased threshold from 2x to 4x health check interval (60s → 120s)
+    // to prevent false positives for idle but healthy connections
+    const isStale = timeSinceLastPong > this.config.healthCheckInterval * 4;
 
-    if (isStale && health.isConnected) {
-      this.logger.warn(
-        {
-          connectionId,
-          timeSinceLastPong: Math.round(timeSinceLastPong / 1000),
-          threshold: Math.round((this.config.healthCheckInterval * 2) / 1000),
-        },
-        "Connection appears stale - no recent activity",
-      );
-
-      this.handleConnectionError(connectionId, new Error("Connection stale"));
-    }
-
-    // Check WebSocket readyState if available
+    // Check WebSocket readyState first to verify connection is actually closed
+    let websocketActuallyClosed = false;
     if (socket.ws) {
       const readyState = (socket.ws as any).readyState;
       if (readyState === 2 || readyState === 3) {
         // CLOSING or CLOSED
+        websocketActuallyClosed = true;
         this.logger.warn(
           { connectionId, readyState },
           "WebSocket is closing or closed",
@@ -275,6 +266,35 @@ export class CloudRunWebSocketManager extends EventEmitter {
           new Error(`WebSocket readyState: ${readyState}`),
         );
       }
+    }
+
+    // Only mark as stale if BOTH conditions are met:
+    // 1. No pong received for extended period
+    // 2. WebSocket is actually closed or in closing state
+    // This prevents false positives where connection is idle but still open
+    if (isStale && health.isConnected && !websocketActuallyClosed) {
+      // Connection appears stale but WebSocket is still open
+      // Log warning but don't trigger error yet - may just be idle
+      this.logger.info(
+        {
+          connectionId,
+          timeSinceLastPong: Math.round(timeSinceLastPong / 1000),
+          threshold: Math.round((this.config.healthCheckInterval * 4) / 1000),
+        },
+        "Connection appears idle but WebSocket is open - monitoring",
+      );
+    } else if (isStale && health.isConnected && websocketActuallyClosed) {
+      // Both stale AND WebSocket closed - definitely an issue
+      this.logger.warn(
+        {
+          connectionId,
+          timeSinceLastPong: Math.round(timeSinceLastPong / 1000),
+          threshold: Math.round((this.config.healthCheckInterval * 4) / 1000),
+        },
+        "Connection is stale and WebSocket is closed - triggering error",
+      );
+
+      this.handleConnectionError(connectionId, new Error("Connection stale"));
     }
   }
 
