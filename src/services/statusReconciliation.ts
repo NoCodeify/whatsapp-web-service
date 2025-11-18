@@ -445,18 +445,49 @@ export class StatusReconciliationService extends EventEmitter {
                 );
 
                 try {
-                  const inMemoryStatus = inMemoryConnections.get(
-                    `${userId}:${phoneNumber}`,
+                  // Get actual connection state from ConnectionPool
+                  const actualConnection = this.connectionPool?.getConnection(
+                    userId,
+                    phoneNumber,
                   );
-                  if (inMemoryStatus) {
+
+                  if (actualConnection) {
+                    // Map Baileys connection state to our status
+                    const actualStatus =
+                      actualConnection.state.connection === "open"
+                        ? "connected"
+                        : actualConnection.state.connection === "close"
+                          ? "disconnected"
+                          : "connecting";
+
+                    this.logger.info(
+                      {
+                        userId,
+                        phoneNumber,
+                        baileysState: actualConnection.state.connection,
+                        mappedStatus: actualStatus,
+                      },
+                      "Syncing Firestore to match actual ConnectionPool state",
+                    );
+
                     await this.connectionStateManager.updateState(
                       userId,
                       phoneNumber,
                       {
-                        status: inMemoryStatus as any,
+                        status: actualStatus as any,
                       },
                     );
                     this.metrics.desyncFixed++;
+
+                    this.logger.info(
+                      { userId, phoneNumber, newStatus: actualStatus },
+                      "Successfully synced stuck connection to actual state",
+                    );
+                  } else {
+                    this.logger.warn(
+                      { userId, phoneNumber },
+                      "hasConnection returned true but getConnection returned null - race condition?",
+                    );
                   }
                 } catch (error) {
                   this.logger.error(
