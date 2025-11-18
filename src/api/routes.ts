@@ -72,7 +72,7 @@ export function createApiRoutes(
     "/sessions/initialize",
     async (req: AuthenticatedRequest, res: Response): Promise<any> => {
       try {
-        const { phoneNumber, proxyCountry, countryCode, browserName } =
+        const { phoneNumber, proxyCountry, countryCode, browserName, forceNew } =
           req.body;
         const userId = req.user!.userId;
 
@@ -117,6 +117,7 @@ export function createApiRoutes(
           countryCode,
           false,
           browserName,
+          forceNew,
         );
 
         if (!added) {

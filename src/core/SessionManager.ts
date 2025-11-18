@@ -105,6 +105,7 @@ export class SessionManager {
     proxyCountry?: string,
     browserName?: string,
     skipProxy?: boolean, // Skip proxy creation during recovery
+    forceNew?: boolean, // Force fresh connection, delete existing sessions
   ): Promise<{ socket: WASocket; sessionExists: boolean }> {
     // Validate userId to prevent directory traversal
     this.validateUserId(userId);
@@ -115,6 +116,15 @@ export class SessionManager {
       throw new Error(`Invalid phone number format: ${phoneNumber}`);
     }
     phoneNumber = formattedPhone;
+
+    // If forceNew is true, delete any existing sessions first
+    if (forceNew) {
+      this.logger.info(
+        { userId, phoneNumber },
+        "Force new connection requested - deleting existing sessions",
+      );
+      await this.deleteSession(userId, phoneNumber, false);
+    }
 
     const sessionKey = this.getSessionKey(userId, phoneNumber);
 
@@ -134,6 +144,7 @@ export class SessionManager {
       const { state, saveCreds, sessionExists } = await this.getAuthState(
         userId,
         phoneNumber,
+        forceNew,
       );
 
       // Get proxy agent if configured with country (skip during recovery)
@@ -245,6 +256,7 @@ export class SessionManager {
   private async getAuthState(
     userId: string,
     phoneNumber: string,
+    forceNew?: boolean,
   ): Promise<{
     state: AuthenticationState;
     saveCreds: () => Promise<void>;
@@ -257,7 +269,9 @@ export class SessionManager {
     let sessionRestoredFromCloud = false;
 
     // In hybrid or cloud mode, try to restore from Cloud Storage if local doesn't exist
+    // Skip Cloud Storage restoration if forceNew is true
     if (
+      !forceNew &&
       !localSessionExists &&
       (this.storageType === "hybrid" || this.storageType === "cloud") &&
       this.storage

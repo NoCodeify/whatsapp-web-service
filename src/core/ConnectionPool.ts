@@ -618,6 +618,7 @@ export class ConnectionPool extends EventEmitter {
     countryCode?: string,
     isRecovery: boolean = false,
     browserName?: string,
+    forceNew?: boolean,
   ): Promise<boolean> {
     // 🟢 BUG #4 FIX: Check if pool is shutting down before adding connection
     if (this.isShuttingDown) {
@@ -765,6 +766,7 @@ export class ConnectionPool extends EventEmitter {
           proxyCountry,
           browserName,
           isRecovery, // Skip proxy creation if this is a recovery
+          forceNew, // Force fresh connection, delete existing sessions
         );
 
       // Determine if handshake should be skipped:
