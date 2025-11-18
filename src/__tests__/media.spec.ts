@@ -1,6 +1,6 @@
 import { MediaService, MediaFile } from "../services/MediaService";
 import { Storage } from "@google-cloud/storage";
-import Jimp from "jimp";
+import { Jimp } from "jimp";
 
 // Mock dependencies
 jest.mock("@google-cloud/storage");
@@ -114,16 +114,15 @@ describe("MediaService", () => {
 
     it("should compress large images", async () => {
       const mockJimpInstance = {
-        getWidth: jest.fn().mockReturnValue(2000),
-        getHeight: jest.fn().mockReturnValue(1500),
-        scaleToFit: jest.fn().mockReturnThis(),
-        quality: jest.fn().mockReturnThis(),
-        getBufferAsync: jest
+        width: 2000,
+        height: 1500,
+        contain: jest.fn().mockReturnThis(),
+        getBuffer: jest
           .fn()
           .mockResolvedValue(Buffer.from("compressed image")),
       };
 
-      (Jimp.read as jest.Mock).mockResolvedValue(mockJimpInstance);
+      (Jimp.fromBuffer as jest.Mock).mockResolvedValue(mockJimpInstance);
 
       const largeImageFile: MediaFile = {
         buffer: Buffer.alloc(2 * 1024 * 1024), // 2MB image
@@ -134,9 +133,9 @@ describe("MediaService", () => {
 
       await mediaService.uploadMedia(largeImageFile, userId, phoneNumber);
 
-      expect(Jimp.read).toHaveBeenCalledWith(largeImageFile.buffer);
-      expect(mockJimpInstance.scaleToFit).toHaveBeenCalledWith(1920, 1920);
-      expect(mockJimpInstance.quality).toHaveBeenCalledWith(85);
+      expect(Jimp.fromBuffer).toHaveBeenCalledWith(largeImageFile.buffer);
+      expect(mockJimpInstance.contain).toHaveBeenCalledWith({ w: 1920, h: 1920 });
+      expect(mockJimpInstance.getBuffer).toHaveBeenCalledWith("image/jpeg", { quality: 85 });
       expect(mockStorageFile.save).toHaveBeenCalledWith(
         Buffer.from("compressed image"),
         expect.any(Object),
@@ -297,16 +296,15 @@ describe("MediaService Integration", () => {
 
     // Mock a complete workflow with realistic data
     const mockJimpInstance = {
-      getWidth: jest.fn().mockReturnValue(800),
-      getHeight: jest.fn().mockReturnValue(600),
-      scaleToFit: jest.fn().mockReturnThis(),
-      quality: jest.fn().mockReturnThis(),
-      getBufferAsync: jest
+      width: 800,
+      height: 600,
+      contain: jest.fn().mockReturnThis(),
+      getBuffer: jest
         .fn()
         .mockResolvedValue(Buffer.from("processed image")),
     };
 
-    (Jimp.read as jest.Mock).mockResolvedValue(mockJimpInstance);
+    (Jimp.fromBuffer as jest.Mock).mockResolvedValue(mockJimpInstance);
 
     const mediaService = new MediaService();
 
@@ -333,6 +331,6 @@ describe("MediaService Integration", () => {
     });
 
     // Verify no compression was attempted for small image
-    expect(Jimp.read).not.toHaveBeenCalled();
+    expect(Jimp.fromBuffer).not.toHaveBeenCalled();
   });
 });
