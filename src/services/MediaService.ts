@@ -1,6 +1,6 @@
 import { Storage } from "@google-cloud/storage";
 import { v4 as uuidv4 } from "uuid";
-import Jimp from "jimp";
+import { Jimp } from "jimp";
 import pino from "pino";
 
 const logger = pino({ name: "MediaService" });
@@ -221,19 +221,21 @@ export class MediaService {
     mimetype: string,
   ): Promise<Buffer> {
     try {
-      const image = await Jimp.read(buffer);
+      const image = await Jimp.fromBuffer(buffer);
 
       // Resize if too large (max 1920px width/height)
-      if (image.getWidth() > 1920 || image.getHeight() > 1920) {
-        image.scaleToFit(1920, 1920);
+      if (image.width > 1920 || image.height > 1920) {
+        image.contain({ w: 1920, h: 1920 });
       }
 
       // Compress based on format
       if (mimetype === "image/jpeg" || mimetype === "image/jpg") {
-        image.quality(85); // JPEG quality
+        // Quality is set during encode in jimp 1.6+
+        const encoded = await image.getBuffer(mimetype as any, { quality: 85 });
+        return encoded;
       }
 
-      return await image.getBufferAsync(mimetype as any);
+      return await image.getBuffer(mimetype as any);
     } catch (error) {
       logger.warn(
         { error, mimetype },
