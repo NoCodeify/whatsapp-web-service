@@ -167,7 +167,7 @@ export class SessionManager {
         },
         version,
         logger: this.logger.child({ userId, phoneNumber }),
-        browser: [browserName || "DM Champ", "Chrome", "120.0.0.0"],
+        browser: [browserName || "Chrome", "Chrome", "131.0.0.0"],
         printQRInTerminal: false,
 
         // Connection settings
