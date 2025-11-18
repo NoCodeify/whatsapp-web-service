@@ -300,6 +300,7 @@ describe("ConnectionPool", () => {
         "nl",
         undefined,
         false,
+        undefined,
       );
       expect(
         mockInstanceCoordinator.updateSessionActivity,
@@ -320,6 +321,7 @@ describe("ConnectionPool", () => {
         "nl",
         undefined,
         false,
+        undefined,
       );
     });
 
@@ -396,6 +398,7 @@ describe("ConnectionPool", () => {
         "nl",
         undefined,
         true, // Skip proxy creation in recovery
+        undefined,
       );
       // Should not update session activity in recovery mode
       expect(
@@ -856,6 +859,7 @@ describe("ConnectionPool", () => {
         "nl",
         undefined,
         true,
+        undefined,
       );
       expect(mockSessionManager.createConnection).toHaveBeenCalledWith(
         "user456",
@@ -863,6 +867,7 @@ describe("ConnectionPool", () => {
         "us",
         undefined,
         true,
+        undefined,
       );
     });
 
@@ -903,6 +908,7 @@ describe("ConnectionPool", () => {
         "us",
         undefined,
         true,
+        undefined,
       );
     });
 
