@@ -223,7 +223,11 @@ export class DynamicProxyService {
           error.code === "ENOTFOUND" ||
           error.code === "ECONNREFUSED";
 
-        const isRetriable = isTimeout || isNetworkError;
+        // Check if this is a server error (5xx) - these are typically temporary
+        const isServerError =
+          error.response?.status >= 500 && error.response?.status < 600;
+
+        const isRetriable = isTimeout || isNetworkError || isServerError;
 
         // Check if this is a permanent error
         const isPermanentError =
@@ -239,6 +243,7 @@ export class DynamicProxyService {
             ...errorInfo,
             isTimeout,
             isNetworkError,
+            isServerError,
             isRetriable,
             isPermanentError,
           },
@@ -266,16 +271,21 @@ export class DynamicProxyService {
           throw error;
         }
 
-        // Retry on timeout/network errors
+        // Retry on timeout/network/server errors
         if (isRetriable) {
           const delay = RETRY_DELAYS[attempt];
+          const errorType = isTimeout
+            ? "timeout"
+            : isNetworkError
+              ? "network"
+              : "server";
           this.logger.warn(
             {
               country,
               attempt: attempt + 1,
               nextAttempt: attempt + 2,
               delayMs: delay,
-              errorType: isTimeout ? "timeout" : "network",
+              errorType,
             },
             `Proxy purchase failed with retriable error, retrying after ${delay}ms`,
           );
