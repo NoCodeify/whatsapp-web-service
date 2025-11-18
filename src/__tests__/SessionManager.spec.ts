@@ -278,7 +278,7 @@ describe("SessionManager", () => {
 
       expect(baileys.makeWASocket).toHaveBeenCalledWith(
         expect.objectContaining({
-          browser: ["Custom Browser", "Chrome", "120.0.0.0"],
+          browser: ["Custom Browser", "Chrome", "131.0.0.0"],
         }),
       );
     });

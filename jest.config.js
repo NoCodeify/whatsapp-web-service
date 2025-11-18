@@ -4,7 +4,18 @@ module.exports = {
   roots: ["<rootDir>/src"],
   testMatch: ["**/__tests__/**/*.spec.ts", "**/__tests__/**/*.test.ts"],
   transform: {
-    "^.+\\.ts$": "ts-jest",
+    "^.+\\.ts$": ["ts-jest", {
+      useESM: false,
+    }],
+    "^.+\\.js$": ["ts-jest", {
+      useESM: false,
+    }],
+  },
+  transformIgnorePatterns: [
+    "node_modules/(?!(@whiskeysockets/baileys)/)",
+  ],
+  moduleNameMapper: {
+    "^(\\.{1,2}/.*)\\.js$": "$1",
   },
   collectCoverageFrom: ["src/**/*.ts", "!src/**/*.d.ts", "!src/__tests__/**"],
   coverageDirectory: "coverage",
