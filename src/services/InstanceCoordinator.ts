@@ -50,17 +50,12 @@ export class InstanceCoordinator extends EventEmitter {
   private instanceRegistry: Map<string, InstanceInfo> = new Map();
 
   private readonly config: CoordinatorConfig = {
-    heartbeatInterval: parseInt(
-      process.env.INSTANCE_HEARTBEAT_INTERVAL || "15000",
-    ), // 15 seconds
+    heartbeatInterval: parseInt(process.env.INSTANCE_HEARTBEAT_INTERVAL || "15000"), // 15 seconds
     instanceTimeout: parseInt(process.env.INSTANCE_TIMEOUT || "60000"), // 60 seconds
     sessionTimeout: parseInt(process.env.SESSION_TIMEOUT || "300000"), // 5 minutes
-    maxConnectionsPerInstance: parseInt(
-      process.env.MAX_CONNECTIONS_PER_INSTANCE || "20",
-    ),
+    maxConnectionsPerInstance: parseInt(process.env.MAX_CONNECTIONS_PER_INSTANCE || "20"),
     enableSessionMigration: process.env.ENABLE_SESSION_MIGRATION !== "false",
-    loadBalanceStrategy:
-      (process.env.LOAD_BALANCE_STRATEGY as any) || "least_connections",
+    loadBalanceStrategy: (process.env.LOAD_BALANCE_STRATEGY as any) || "least_connections",
   };
 
   constructor(firestore: Firestore, instanceId?: string) {
@@ -68,10 +63,7 @@ export class InstanceCoordinator extends EventEmitter {
     this.firestore = firestore;
     this.instanceId = instanceId || this.generateInstanceId();
 
-    this.logger.info(
-      { instanceId: this.instanceId, config: this.config },
-      "InstanceCoordinator initialized",
-    );
+    this.logger.info({ instanceId: this.instanceId, config: this.config }, "InstanceCoordinator initialized");
   }
 
   /**
@@ -94,10 +86,7 @@ export class InstanceCoordinator extends EventEmitter {
       // Start monitoring other instances
       this.startInstanceMonitoring();
 
-      this.logger.info(
-        { instanceId: this.instanceId },
-        "Instance coordinator started",
-      );
+      this.logger.info({ instanceId: this.instanceId }, "Instance coordinator started");
     } catch (error) {
       this.logger.error({ error }, "Failed to start instance coordinator");
       throw error;
@@ -107,10 +96,7 @@ export class InstanceCoordinator extends EventEmitter {
   /**
    * Request ownership of a session
    */
-  async requestSessionOwnership(
-    userId: string,
-    phoneNumber: string,
-  ): Promise<boolean> {
+  async requestSessionOwnership(userId: string, phoneNumber: string): Promise<boolean> {
     const sessionKey = `${userId}:${phoneNumber}`;
 
     try {
@@ -124,35 +110,21 @@ export class InstanceCoordinator extends EventEmitter {
 
       // Check if another instance owns this session
       const existingOwnership = await this.getSessionOwnership(sessionKey);
-      if (
-        existingOwnership &&
-        existingOwnership.instanceId !== this.instanceId
-      ) {
+      if (existingOwnership && existingOwnership.instanceId !== this.instanceId) {
         // Check if the owning instance is still healthy
-        const owningInstance = await this.getInstanceInfo(
-          existingOwnership.instanceId,
-        );
+        const owningInstance = await this.getInstanceInfo(existingOwnership.instanceId);
         if (owningInstance && this.isInstanceHealthy(owningInstance)) {
-          this.logger.info(
-            { sessionKey, owningInstance: existingOwnership.instanceId },
-            "Session is owned by another healthy instance",
-          );
+          this.logger.info({ sessionKey, owningInstance: existingOwnership.instanceId }, "Session is owned by another healthy instance");
           return false;
         } else {
-          this.logger.warn(
-            { sessionKey, owningInstance: existingOwnership.instanceId },
-            "Session owned by unhealthy instance, attempting takeover",
-          );
+          this.logger.warn({ sessionKey, owningInstance: existingOwnership.instanceId }, "Session owned by unhealthy instance, attempting takeover");
           // Fall through to acquire ownership
         }
       }
 
       // Check if we can accept more connections
       if (this.ownedSessions.size >= this.config.maxConnectionsPerInstance) {
-        this.logger.warn(
-          { sessionKey, currentSessions: this.ownedSessions.size },
-          "Instance at capacity, cannot accept new session",
-        );
+        this.logger.warn({ sessionKey, currentSessions: this.ownedSessions.size }, "Instance at capacity, cannot accept new session");
         return false;
       }
 
@@ -171,10 +143,7 @@ export class InstanceCoordinator extends EventEmitter {
       this.logger.info({ sessionKey }, "Session ownership acquired");
       return true;
     } catch (error) {
-      this.logger.error(
-        { sessionKey, error },
-        "Failed to request session ownership",
-      );
+      this.logger.error({ sessionKey, error }, "Failed to request session ownership");
       return false;
     }
   }
@@ -182,10 +151,7 @@ export class InstanceCoordinator extends EventEmitter {
   /**
    * Release ownership of a session
    */
-  async releaseSessionOwnership(
-    userId: string,
-    phoneNumber: string,
-  ): Promise<void> {
+  async releaseSessionOwnership(userId: string, phoneNumber: string): Promise<void> {
     const sessionKey = `${userId}:${phoneNumber}`;
 
     try {
@@ -203,27 +169,18 @@ export class InstanceCoordinator extends EventEmitter {
       this.ownedSessions.delete(sessionKey);
 
       // Delete from Firestore
-      await this.firestore
-        .collection("session_ownership")
-        .doc(sessionKey)
-        .delete();
+      await this.firestore.collection("session_ownership").doc(sessionKey).delete();
 
       this.logger.info({ sessionKey }, "Session ownership released");
     } catch (error) {
-      this.logger.error(
-        { sessionKey, error },
-        "Failed to release session ownership",
-      );
+      this.logger.error({ sessionKey, error }, "Failed to release session ownership");
     }
   }
 
   /**
    * Update session activity
    */
-  async updateSessionActivity(
-    userId: string,
-    phoneNumber: string,
-  ): Promise<void> {
+  async updateSessionActivity(userId: string, phoneNumber: string): Promise<void> {
     const sessionKey = `${userId}:${phoneNumber}`;
     const ownership = this.ownedSessions.get(sessionKey);
 
@@ -236,19 +193,14 @@ export class InstanceCoordinator extends EventEmitter {
   /**
    * Get the best instance for a new session
    */
-  async getBestInstanceForSession(
-    userId: string,
-    phoneNumber: string,
-  ): Promise<string | null> {
+  async getBestInstanceForSession(userId: string, phoneNumber: string): Promise<string | null> {
     try {
       const sessionKey = `${userId}:${phoneNumber}`;
 
       // Check if session already has an owner
       const existingOwnership = await this.getSessionOwnership(sessionKey);
       if (existingOwnership) {
-        const owningInstance = await this.getInstanceInfo(
-          existingOwnership.instanceId,
-        );
+        const owningInstance = await this.getInstanceInfo(existingOwnership.instanceId);
         if (owningInstance && this.isInstanceHealthy(owningInstance)) {
           return existingOwnership.instanceId;
         }
@@ -274,10 +226,7 @@ export class InstanceCoordinator extends EventEmitter {
   /**
    * Check if this instance should handle a session
    */
-  async shouldHandleSession(
-    userId: string,
-    phoneNumber: string,
-  ): Promise<boolean> {
+  async shouldHandleSession(userId: string, phoneNumber: string): Promise<boolean> {
     const sessionKey = `${userId}:${phoneNumber}`;
 
     // Check if we already own the session
@@ -347,9 +296,7 @@ export class InstanceCoordinator extends EventEmitter {
    */
   private async sendHeartbeat(): Promise<void> {
     const memUsage = process.memoryUsage();
-    const memTotal = process.env.MEMORY_LIMIT
-      ? parseInt(process.env.MEMORY_LIMIT.replace(/[^0-9]/g, "")) * 1024 * 1024
-      : memUsage.heapTotal;
+    const memTotal = process.env.MEMORY_LIMIT ? parseInt(process.env.MEMORY_LIMIT.replace(/[^0-9]/g, "")) * 1024 * 1024 : memUsage.heapTotal;
 
     const instanceInfo: Partial<InstanceInfo> = {
       lastHeartbeat: new Date(),
@@ -481,10 +428,7 @@ export class InstanceCoordinator extends EventEmitter {
    */
   private async loadOwnedSessions(): Promise<void> {
     try {
-      const sessionsSnapshot = await this.firestore
-        .collection("session_ownership")
-        .where("instanceId", "==", this.instanceId)
-        .get();
+      const sessionsSnapshot = await this.firestore.collection("session_ownership").where("instanceId", "==", this.instanceId).get();
 
       for (const doc of sessionsSnapshot.docs) {
         const data = doc.data();
@@ -499,10 +443,7 @@ export class InstanceCoordinator extends EventEmitter {
         this.ownedSessions.set(doc.id, ownership);
       }
 
-      this.logger.info(
-        { sessionCount: this.ownedSessions.size },
-        "Loaded owned sessions",
-      );
+      this.logger.info({ sessionCount: this.ownedSessions.size }, "Loaded owned sessions");
     } catch (error) {
       this.logger.error({ error }, "Failed to load owned sessions");
     }
@@ -534,14 +475,9 @@ export class InstanceCoordinator extends EventEmitter {
   /**
    * Helper methods
    */
-  private async getSessionOwnership(
-    sessionKey: string,
-  ): Promise<SessionOwnership | null> {
+  private async getSessionOwnership(sessionKey: string): Promise<SessionOwnership | null> {
     try {
-      const doc = await this.firestore
-        .collection("session_ownership")
-        .doc(sessionKey)
-        .get();
+      const doc = await this.firestore.collection("session_ownership").doc(sessionKey).get();
 
       if (!doc.exists) return null;
 
@@ -554,17 +490,12 @@ export class InstanceCoordinator extends EventEmitter {
         status: data.status,
       };
     } catch (error) {
-      this.logger.error(
-        { sessionKey, error },
-        "Failed to get session ownership",
-      );
+      this.logger.error({ sessionKey, error }, "Failed to get session ownership");
       return null;
     }
   }
 
-  private async acquireSessionOwnership(
-    ownership: SessionOwnership,
-  ): Promise<void> {
+  private async acquireSessionOwnership(ownership: SessionOwnership): Promise<void> {
     await this.firestore
       .collection("session_ownership")
       .doc(ownership.sessionKey)
@@ -576,9 +507,7 @@ export class InstanceCoordinator extends EventEmitter {
       });
   }
 
-  private async updateSessionOwnership(
-    ownership: SessionOwnership,
-  ): Promise<void> {
+  private async updateSessionOwnership(ownership: SessionOwnership): Promise<void> {
     await this.firestore
       .collection("session_ownership")
       .doc(ownership.sessionKey)
@@ -588,14 +517,9 @@ export class InstanceCoordinator extends EventEmitter {
       });
   }
 
-  private async getInstanceInfo(
-    instanceId: string,
-  ): Promise<InstanceInfo | null> {
+  private async getInstanceInfo(instanceId: string): Promise<InstanceInfo | null> {
     try {
-      const doc = await this.firestore
-        .collection("instance_registry")
-        .doc(instanceId)
-        .get();
+      const doc = await this.firestore.collection("instance_registry").doc(instanceId).get();
 
       if (!doc.exists) return null;
 
@@ -613,16 +537,11 @@ export class InstanceCoordinator extends EventEmitter {
 
   private isInstanceHealthy(instance: InstanceInfo): boolean {
     const timeSinceHeartbeat = Date.now() - instance.lastHeartbeat.getTime();
-    return (
-      instance.status === "healthy" &&
-      timeSinceHeartbeat < this.config.instanceTimeout
-    );
+    return instance.status === "healthy" && timeSinceHeartbeat < this.config.instanceTimeout;
   }
 
   private async getHealthyInstances(): Promise<InstanceInfo[]> {
-    return Array.from(this.instanceRegistry.values()).filter((instance) =>
-      this.isInstanceHealthy(instance),
-    );
+    return Array.from(this.instanceRegistry.values()).filter((instance) => this.isInstanceHealthy(instance));
   }
 
   private selectBestInstance(instances: InstanceInfo[]): InstanceInfo | null {
@@ -630,14 +549,11 @@ export class InstanceCoordinator extends EventEmitter {
 
     switch (this.config.loadBalanceStrategy) {
       case "least_connections":
-        return instances.reduce((best, current) =>
-          current.connections < best.connections ? current : best,
-        );
+        return instances.reduce((best, current) => (current.connections < best.connections ? current : best));
 
       case "resource_based":
         return instances.reduce((best, current) => {
-          const currentScore =
-            (1 - current.memoryUsage) * (1 - current.cpuUsage);
+          const currentScore = (1 - current.memoryUsage) * (1 - current.cpuUsage);
           const bestScore = (1 - best.memoryUsage) * (1 - best.cpuUsage);
           return currentScore > bestScore ? current : best;
         });
@@ -645,9 +561,7 @@ export class InstanceCoordinator extends EventEmitter {
       case "round_robin":
       default:
         // Simple round-robin based on instance start time
-        return instances.sort(
-          (a, b) => a.startedAt.getTime() - b.startedAt.getTime(),
-        )[0];
+        return instances.sort((a, b) => a.startedAt.getTime() - b.startedAt.getTime())[0];
     }
   }
 
@@ -655,9 +569,7 @@ export class InstanceCoordinator extends EventEmitter {
    * Get coordinator statistics
    */
   getStats() {
-    const healthyInstances = Array.from(this.instanceRegistry.values()).filter(
-      (instance) => this.isInstanceHealthy(instance),
-    );
+    const healthyInstances = Array.from(this.instanceRegistry.values()).filter((instance) => this.isInstanceHealthy(instance));
 
     return {
       instanceId: this.instanceId,
@@ -691,24 +603,19 @@ export class InstanceCoordinator extends EventEmitter {
     }
 
     // Release all owned sessions
-    const sessionReleases = Array.from(this.ownedSessions.keys()).map(
-      (sessionKey) => {
-        const [userId, phoneNumber] = sessionKey.split(":");
-        return this.releaseSessionOwnership(userId, phoneNumber);
-      },
-    );
+    const sessionReleases = Array.from(this.ownedSessions.keys()).map((sessionKey) => {
+      const [userId, phoneNumber] = sessionKey.split(":");
+      return this.releaseSessionOwnership(userId, phoneNumber);
+    });
 
     await Promise.all(sessionReleases);
 
     // Mark instance as shutting down
     try {
-      await this.firestore
-        .collection("instance_registry")
-        .doc(this.instanceId)
-        .update({
-          status: "shutting_down",
-          lastHeartbeat: Timestamp.now(),
-        });
+      await this.firestore.collection("instance_registry").doc(this.instanceId).update({
+        status: "shutting_down",
+        lastHeartbeat: Timestamp.now(),
+      });
     } catch (error) {
       this.logger.error({ error }, "Failed to update shutdown status");
     }

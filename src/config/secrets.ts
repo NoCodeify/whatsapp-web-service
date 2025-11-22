@@ -5,8 +5,7 @@ const logger = pino({ name: "SecretManager" });
 
 export class SecretManager {
   private client: SecretManagerServiceClient;
-  private secretCache: Map<string, { value: string; expiresAt: Date }> =
-    new Map();
+  private secretCache: Map<string, { value: string; expiresAt: Date }> = new Map();
   private readonly CACHE_TTL = 3600000; // 1 hour cache
 
   constructor() {
@@ -17,18 +16,11 @@ export class SecretManager {
    * Get BrightData API key from Secret Manager
    */
   async getBrightDataApiKey(): Promise<string> {
-    const secretName =
-      process.env.BRIGHT_DATA_API_KEY_SECRET ||
-      `projects/${process.env.GOOGLE_CLOUD_PROJECT}/secrets/BRIGHT_DATA_API_KEY/versions/latest`;
+    const secretName = process.env.BRIGHT_DATA_API_KEY_SECRET || `projects/${process.env.GOOGLE_CLOUD_PROJECT}/secrets/BRIGHT_DATA_API_KEY/versions/latest`;
 
     // Check if we have a hardcoded key (for local dev)
-    if (
-      process.env.BRIGHT_DATA_API_KEY &&
-      process.env.NODE_ENV === "development"
-    ) {
-      logger.warn(
-        "Using hardcoded API key from environment variable - only for development!",
-      );
+    if (process.env.BRIGHT_DATA_API_KEY && process.env.NODE_ENV === "development") {
+      logger.warn("Using hardcoded API key from environment variable - only for development!");
       return process.env.BRIGHT_DATA_API_KEY;
     }
 
@@ -40,8 +32,7 @@ export class SecretManager {
    */
   async getBrightDataCustomerId(): Promise<string> {
     const secretName =
-      process.env.BRIGHT_DATA_CUSTOMER_ID_SECRET ||
-      `projects/${process.env.GOOGLE_CLOUD_PROJECT}/secrets/BRIGHT_DATA_CUSTOMER_ID/versions/latest`;
+      process.env.BRIGHT_DATA_CUSTOMER_ID_SECRET || `projects/${process.env.GOOGLE_CLOUD_PROJECT}/secrets/BRIGHT_DATA_CUSTOMER_ID/versions/latest`;
 
     // Check if we have a hardcoded customer ID (for local dev)
     // Validate it's not a placeholder value
@@ -51,9 +42,7 @@ export class SecretManager {
       !process.env.BRIGHT_DATA_CUSTOMER_ID.includes("your_") &&
       !process.env.BRIGHT_DATA_CUSTOMER_ID.includes("placeholder")
     ) {
-      logger.warn(
-        "Using hardcoded Customer ID from environment variable - only for development!",
-      );
+      logger.warn("Using hardcoded Customer ID from environment variable - only for development!");
       return process.env.BRIGHT_DATA_CUSTOMER_ID;
     }
 
@@ -65,18 +54,11 @@ export class SecretManager {
    * Uses the same API key as Cloud Functions
    */
   async getAnthropicApiKey(): Promise<string> {
-    const secretName =
-      process.env.ANTHROPIC_API_KEY_SECRET ||
-      `projects/${process.env.GOOGLE_CLOUD_PROJECT}/secrets/ANTHROPIC_API_KEY/versions/latest`;
+    const secretName = process.env.ANTHROPIC_API_KEY_SECRET || `projects/${process.env.GOOGLE_CLOUD_PROJECT}/secrets/ANTHROPIC_API_KEY/versions/latest`;
 
     // Check if we have a hardcoded key (for local dev)
-    if (
-      process.env.ANTHROPIC_API_KEY &&
-      process.env.NODE_ENV === "development"
-    ) {
-      logger.warn(
-        "Using hardcoded Anthropic API key from environment variable - only for development!",
-      );
+    if (process.env.ANTHROPIC_API_KEY && process.env.NODE_ENV === "development") {
+      logger.warn("Using hardcoded Anthropic API key from environment variable - only for development!");
       return process.env.ANTHROPIC_API_KEY;
     }
 
@@ -113,49 +95,25 @@ export class SecretManager {
         expiresAt: new Date(Date.now() + this.CACHE_TTL),
       });
 
-      logger.info(
-        { secretName },
-        "Successfully retrieved secret from Secret Manager",
-      );
+      logger.info({ secretName }, "Successfully retrieved secret from Secret Manager");
       return secretValue;
     } catch (error: any) {
-      logger.error(
-        { error: error.message, secretName },
-        "Failed to retrieve secret",
-      );
+      logger.error({ error: error.message, secretName }, "Failed to retrieve secret");
 
       // Fallback to environment variable based on secret type
-      if (
-        secretName.includes("BRIGHT_DATA_API_KEY") &&
-        process.env.BRIGHT_DATA_API_KEY
-      ) {
-        logger.warn(
-          "Falling back to environment variable for BrightData API key",
-        );
+      if (secretName.includes("BRIGHT_DATA_API_KEY") && process.env.BRIGHT_DATA_API_KEY) {
+        logger.warn("Falling back to environment variable for BrightData API key");
         return process.env.BRIGHT_DATA_API_KEY;
-      } else if (
-        secretName.includes("BRIGHT_DATA_CUSTOMER_ID") &&
-        process.env.BRIGHT_DATA_CUSTOMER_ID
-      ) {
+      } else if (secretName.includes("BRIGHT_DATA_CUSTOMER_ID") && process.env.BRIGHT_DATA_CUSTOMER_ID) {
         // Validate that the customer ID is not a placeholder
-        if (
-          !process.env.BRIGHT_DATA_CUSTOMER_ID.includes("your_") &&
-          !process.env.BRIGHT_DATA_CUSTOMER_ID.includes("placeholder")
-        ) {
+        if (!process.env.BRIGHT_DATA_CUSTOMER_ID.includes("your_") && !process.env.BRIGHT_DATA_CUSTOMER_ID.includes("placeholder")) {
           logger.warn("Falling back to environment variable for customer ID");
           return process.env.BRIGHT_DATA_CUSTOMER_ID;
         } else {
-          logger.error(
-            "Environment variable BRIGHT_DATA_CUSTOMER_ID contains placeholder value",
-          );
+          logger.error("Environment variable BRIGHT_DATA_CUSTOMER_ID contains placeholder value");
         }
-      } else if (
-        secretName.includes("ANTHROPIC_API_KEY") &&
-        process.env.ANTHROPIC_API_KEY
-      ) {
-        logger.warn(
-          "Falling back to environment variable for Anthropic API key",
-        );
+      } else if (secretName.includes("ANTHROPIC_API_KEY") && process.env.ANTHROPIC_API_KEY) {
+        logger.warn("Falling back to environment variable for Anthropic API key");
         return process.env.ANTHROPIC_API_KEY;
       }
 

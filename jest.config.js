@@ -4,16 +4,20 @@ module.exports = {
   roots: ["<rootDir>/src"],
   testMatch: ["**/__tests__/**/*.spec.ts", "**/__tests__/**/*.test.ts"],
   transform: {
-    "^.+\\.ts$": ["ts-jest", {
-      useESM: false,
-    }],
-    "^.+\\.js$": ["ts-jest", {
-      useESM: false,
-    }],
+    "^.+\\.ts$": [
+      "ts-jest",
+      {
+        useESM: false,
+      },
+    ],
+    "^.+\\.js$": [
+      "ts-jest",
+      {
+        useESM: false,
+      },
+    ],
   },
-  transformIgnorePatterns: [
-    "node_modules/(?!(@whiskeysockets/baileys)/)",
-  ],
+  transformIgnorePatterns: ["node_modules/(?!(@whiskeysockets/baileys)/)"],
   moduleNameMapper: {
     "^(\\.{1,2}/.*)\\.js$": "$1",
   },

@@ -39,9 +39,7 @@ describe("phoneNumber Security & Validation", () => {
 
     // ===== BUG #2: XSS prevention (character whitelist) =====
     it("should reject phone numbers with script tags", () => {
-      expect(
-        formatPhoneNumberSafe("+1234<script>alert(1)</script>"),
-      ).toBeNull();
+      expect(formatPhoneNumberSafe("+1234<script>alert(1)</script>")).toBeNull();
     });
 
     it("should reject phone numbers with HTML tags", () => {
@@ -49,9 +47,7 @@ describe("phoneNumber Security & Validation", () => {
     });
 
     it("should reject phone numbers with img tags", () => {
-      expect(
-        formatPhoneNumberSafe("+1234<img src=x onerror=alert(1)>"),
-      ).toBeNull();
+      expect(formatPhoneNumberSafe("+1234<img src=x onerror=alert(1)>")).toBeNull();
     });
 
     it("should reject phone numbers with special chars (except allowed)", () => {
@@ -355,6 +351,167 @@ describe("phoneNumber Security & Validation", () => {
     });
   });
 
+  describe("Mexican Phone Numbers - Post-2019 Numbering Plan Fix", () => {
+    // Tests for the Mexican phone number formatting bug fix
+    // Mexico removed the '1' digit after +52 in August 2019
+    // libphonenumber-js < 1.12.x has outdated metadata
+
+    it("should preserve correct Mexican mobile format (+52XXXXXXXXXX)", () => {
+      const correct = "+529982350197";
+      const result = formatPhoneNumber(correct);
+      expect(result).toBe("+529982350197");
+      expect(result).not.toContain("+521");
+    });
+
+    it("should fix incorrect Mexican mobile format (+521XXXXXXXXXX -> +52XXXXXXXXXX)", () => {
+      const incorrect = "+5219982350197"; // 14 chars with '1'
+      const result = formatPhoneNumber(incorrect);
+      expect(result).toBe("+529982350197"); // 13 chars without '1'
+    });
+
+    it("should handle Mexican number with spaces (correct format)", () => {
+      const withSpaces = "+52 998 235 0197";
+      const result = formatPhoneNumber(withSpaces);
+      expect(result).toBe("+529982350197");
+    });
+
+    it("should handle Mexican number with spaces (incorrect format with 1)", () => {
+      const withSpacesIncorrect = "+52 1 998 235 0197";
+      const result = formatPhoneNumberSafe(withSpacesIncorrect);
+      expect(result).toBe("+529982350197");
+    });
+
+    it("should handle Mexican number with dashes (incorrect format)", () => {
+      const withDashes = "+52-1-998-235-0197";
+      const result = formatPhoneNumber(withDashes);
+      expect(result).toBe("+529982350197");
+    });
+
+    it("should handle multiple Mexican numbers consistently", () => {
+      const numbers = [
+        "+529982350197", // Correct format
+        "+5219982350197", // Incorrect format with 1
+        "+52 998 235 0197", // Correct with spaces
+        "+52 1 998 235 0197", // Incorrect with spaces and 1
+      ];
+
+      const expected = "+529982350197";
+      numbers.forEach((number) => {
+        const result = formatPhoneNumberSafe(number);
+        expect(result).toBe(expected);
+      });
+    });
+
+    it("should preprocess Mexican numbers to remove '1' after country code", () => {
+      const input = "+52 19982350197"; // With space and 1
+      const preprocessed = preprocessPhoneNumber(input);
+      // Should match the pattern and remove the 1 after +52
+      expect(preprocessed).toMatch(/^\+52\d{10}$/);
+      expect(preprocessed).not.toMatch(/^\+521/); // Should not start with +521
+    });
+
+    it("should validate corrected Mexican numbers", () => {
+      const incorrect = "+5219982350197";
+      const formatted = formatPhoneNumber(incorrect);
+      expect(isValidPhoneNumber(formatted!)).toBe(true);
+    });
+
+    it("should parse corrected Mexican number with details", () => {
+      const incorrect = "+5219982350197";
+      const parsed = parsePhoneNumber(incorrect);
+      expect(parsed).toBeTruthy();
+      expect(parsed?.e164).toBe("+529982350197");
+      expect(parsed?.countryCode).toBe("52");
+      expect(parsed?.country).toBe("MX");
+      expect(parsed?.nationalNumber).toBe("9982350197");
+      expect(parsed?.isValid).toBe(true);
+    });
+
+    it("should format Mexican number to WhatsApp JID correctly", () => {
+      const incorrect = "+5219982350197";
+      const jid = formatWhatsAppJid(incorrect);
+      expect(jid).toBe("529982350197@s.whatsapp.net");
+      expect(jid).not.toContain("521");
+    });
+
+    it("should extract Mexico country code", () => {
+      const numbers = ["+529982350197", "+5219982350197"];
+      numbers.forEach((number) => {
+        const country = getCountryCode(number);
+        expect(country).toBe("MX");
+      });
+    });
+
+    it("should NOT modify Mexican numbers without incorrect '1'", () => {
+      const alreadyCorrect = "+529982350197";
+      const result = formatPhoneNumber(alreadyCorrect);
+      expect(result).toBe("+529982350197");
+    });
+
+    it("should only fix 14-character Mexican numbers (not landlines)", () => {
+      // Mexican landlines have different formats and shouldn't be affected
+      const landline = "+525512345678"; // Different format
+      const result = formatPhoneNumber(landline);
+      // Should not strip digits if not matching the mobile pattern
+      expect(result).toBeTruthy();
+      expect(result?.length).toBeLessThan(14); // Not matching the bug pattern
+    });
+
+    it("should handle edge case: +521 with wrong digit count", () => {
+      // Only fix if exactly 14 chars (+521 + 10 digits)
+      const wrongLength = "+521998235"; // Too short
+      const result = formatPhoneNumber(wrongLength);
+      // Should not apply fix since length != 14
+      expect(result === null || !result.includes("+5219982350197")).toBe(true);
+    });
+
+    it("should handle production case from logs: +529981927305", () => {
+      const correctFormat = "+529981927305";
+      const result = formatPhoneNumber(correctFormat);
+      expect(result).toBe("+529981927305");
+    });
+
+    it("should handle production case from logs: +5219982350197 -> +529982350197", () => {
+      const incorrectFormat = "+5219982350197";
+      const result = formatPhoneNumber(incorrectFormat);
+      expect(result).toBe("+529982350197");
+    });
+
+    it("should process Mexican numbers through full pipeline", () => {
+      const incorrect = "+52 1 998 235 0197";
+      const safe = formatPhoneNumberSafe(incorrect);
+      expect(safe).toBe("+529982350197");
+
+      const parsed = parsePhoneNumber(safe!);
+      expect(parsed?.country).toBe("MX");
+      expect(parsed?.nationalNumber).toBe("9982350197");
+
+      const jid = formatWhatsAppJid(safe!);
+      expect(jid).toBe("529982350197@s.whatsapp.net");
+
+      const isValid = isValidPhoneNumber(safe!);
+      expect(isValid).toBe(true);
+    });
+
+    it("should handle Mexican numbers in mixed format arrays", () => {
+      const mixedNumbers = [
+        "+12025551234", // US
+        "+5219982350197", // Mexico (incorrect)
+        "+31658015937", // Netherlands
+        "+529981927305", // Mexico (correct)
+      ];
+
+      mixedNumbers.forEach((number) => {
+        const result = formatPhoneNumber(number);
+        expect(result).not.toBeNull();
+        // Verify no Mexican number has the '1' after +52
+        if (result?.startsWith("+52")) {
+          expect(result).not.toMatch(/^\+521\d{10}$/);
+        }
+      });
+    });
+  });
+
   describe("formatWhatsAppJid - WhatsApp Integration", () => {
     it("should format phone to WhatsApp JID", () => {
       const result = formatWhatsAppJid("+12025551234");
@@ -398,12 +555,8 @@ describe("phoneNumber Security & Validation", () => {
     });
 
     it("should format international numbers correctly", () => {
-      expect(formatWhatsAppJid("+442071234567")).toBe(
-        "442071234567@s.whatsapp.net",
-      );
-      expect(formatWhatsAppJid("+49301234567")).toBe(
-        "49301234567@s.whatsapp.net",
-      );
+      expect(formatWhatsAppJid("+442071234567")).toBe("442071234567@s.whatsapp.net");
+      expect(formatWhatsAppJid("+49301234567")).toBe("49301234567@s.whatsapp.net");
     });
 
     it("should end with @s.whatsapp.net suffix", () => {
@@ -605,13 +758,7 @@ describe("phoneNumber Security & Validation", () => {
     });
 
     it("should process through all functions without errors", () => {
-      const numbers = [
-        "+12025551234",
-        "+31658015937",
-        "+442071234567",
-        "+49301234567",
-        "+33612345678",
-      ];
+      const numbers = ["+12025551234", "+31658015937", "+442071234567", "+49301234567", "+33612345678"];
 
       numbers.forEach((number) => {
         const safe = formatPhoneNumberSafe(number);
@@ -774,13 +921,7 @@ describe("phoneNumber Security & Validation", () => {
     // Edge case: formatted number that might re-parse as null
     it("should handle parsePhoneNumber with edge case formatted number", () => {
       // Try various edge cases
-      const edgeCases = [
-        "+0",
-        "+00",
-        "+000",
-        "+" + "0".repeat(15),
-        "+" + "9".repeat(15),
-      ];
+      const edgeCases = ["+0", "+00", "+000", "+" + "0".repeat(15), "+" + "9".repeat(15)];
 
       edgeCases.forEach((testCase) => {
         const result = parsePhoneNumber(testCase);

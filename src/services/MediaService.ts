@@ -33,22 +33,13 @@ export class MediaService {
     // Determine which bucket to use with fallback logic
     if (process.env.MEDIA_BUCKET) {
       this.bucket = process.env.MEDIA_BUCKET;
-      logger.info(
-        { bucket: this.bucket, source: "MEDIA_BUCKET" },
-        "Using dedicated media storage bucket",
-      );
+      logger.info({ bucket: this.bucket, source: "MEDIA_BUCKET" }, "Using dedicated media storage bucket");
     } else if (process.env.STORAGE_BUCKET) {
       this.bucket = process.env.STORAGE_BUCKET;
-      logger.warn(
-        { bucket: this.bucket },
-        "MEDIA_BUCKET not set, using STORAGE_BUCKET for media files. Consider setting MEDIA_BUCKET for better separation.",
-      );
+      logger.warn({ bucket: this.bucket }, "MEDIA_BUCKET not set, using STORAGE_BUCKET for media files. Consider setting MEDIA_BUCKET for better separation.");
     } else {
       this.bucket = "whatzai-whatsapp-media";
-      logger.warn(
-        { bucket: this.bucket },
-        "No bucket configured, using default bucket. Set MEDIA_BUCKET or STORAGE_BUCKET environment variable.",
-      );
+      logger.warn({ bucket: this.bucket }, "No bucket configured, using default bucket. Set MEDIA_BUCKET or STORAGE_BUCKET environment variable.");
     }
 
     this.maxFileSizeMB = parseInt(process.env.MAX_FILE_SIZE_MB || "16");
@@ -59,27 +50,21 @@ export class MediaService {
         projectId: process.env.GOOGLE_CLOUD_PROJECT,
         maxFileSizeMB: this.maxFileSizeMB,
       },
-      "MediaService initialized",
+      "MediaService initialized"
     );
   }
 
   /**
    * Upload media file to Cloud Storage
    */
-  async uploadMedia(
-    file: MediaFile,
-    userId: string,
-    phoneNumber: string,
-  ): Promise<MediaUploadResult> {
+  async uploadMedia(file: MediaFile, userId: string, phoneNumber: string): Promise<MediaUploadResult> {
     const uploadStartTime = Date.now();
 
     try {
       // Validate file size
       const maxSizeBytes = this.maxFileSizeMB * 1024 * 1024;
       if (file.size > maxSizeBytes) {
-        throw new Error(
-          `File size ${file.size} exceeds maximum ${maxSizeBytes} bytes`,
-        );
+        throw new Error(`File size ${file.size} exceeds maximum ${maxSizeBytes} bytes`);
       }
 
       // Generate unique filename
@@ -99,7 +84,7 @@ export class MediaService {
             compressedSize: processedBuffer.length,
             compressionRatio: (file.size - processedBuffer.length) / file.size,
           },
-          "Image compressed for storage",
+          "Image compressed for storage"
         );
       }
 
@@ -143,7 +128,7 @@ export class MediaService {
           size: processedBuffer.length,
           uploadDuration: Date.now() - uploadStartTime,
         },
-        "Media uploaded successfully",
+        "Media uploaded successfully"
       );
 
       return result;
@@ -164,7 +149,7 @@ export class MediaService {
           bucketName: this.bucket,
           projectId: process.env.GOOGLE_CLOUD_PROJECT,
         },
-        "Failed to upload media",
+        "Failed to upload media"
       );
       throw error;
     }
@@ -177,13 +162,10 @@ export class MediaService {
     downloadFunction: () => Promise<Buffer>,
     mimetype: string,
     userId: string,
-    phoneNumber: string,
+    phoneNumber: string
   ): Promise<MediaUploadResult> {
     try {
-      logger.info(
-        { userId, phoneNumber, mimetype },
-        "Downloading media from WhatsApp",
-      );
+      logger.info({ userId, phoneNumber, mimetype }, "Downloading media from WhatsApp");
 
       const buffer = await downloadFunction();
 
@@ -207,7 +189,7 @@ export class MediaService {
           phoneNumber,
           mimetype,
         },
-        "Failed to download and upload WhatsApp media",
+        "Failed to download and upload WhatsApp media"
       );
       throw error;
     }
@@ -216,10 +198,7 @@ export class MediaService {
   /**
    * Compress image for storage optimization
    */
-  private async compressImage(
-    buffer: Buffer,
-    mimetype: string,
-  ): Promise<Buffer> {
+  private async compressImage(buffer: Buffer, mimetype: string): Promise<Buffer> {
     try {
       const image = await Jimp.fromBuffer(buffer);
 
@@ -237,10 +216,7 @@ export class MediaService {
 
       return await image.getBuffer(mimetype as any);
     } catch (error) {
-      logger.warn(
-        { error, mimetype },
-        "Failed to compress image, using original",
-      );
+      logger.warn({ error, mimetype }, "Failed to compress image, using original");
       return buffer;
     }
   }
@@ -283,12 +259,9 @@ export class MediaService {
       "audio/x-wav": ".wav",
       // Documents
       "application/pdf": ".pdf",
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-        ".docx",
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
-        ".xlsx",
-      "application/vnd.openxmlformats-officedocument.presentationml.presentation":
-        ".pptx",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
       "application/msword": ".doc",
       "application/vnd.ms-excel": ".xls",
       "text/plain": ".txt",
@@ -326,7 +299,7 @@ export class MediaService {
           filename,
           bucketName: this.bucket,
         },
-        "Failed to delete media file",
+        "Failed to delete media file"
       );
       throw error;
     }

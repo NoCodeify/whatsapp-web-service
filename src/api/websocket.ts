@@ -11,11 +11,7 @@ interface AuthenticatedSocket extends Socket {
   phoneNumber?: string;
 }
 
-export function createWebSocketHandlers(
-  io: SocketServer,
-  connectionPool: ConnectionPool,
-  _sessionManager: SessionManager,
-) {
+export function createWebSocketHandlers(io: SocketServer, connectionPool: ConnectionPool, _sessionManager: SessionManager) {
   // Authentication middleware
   io.use((socket: AuthenticatedSocket, next) => {
     const token = socket.handshake.auth.token;
@@ -49,10 +45,7 @@ export function createWebSocketHandlers(
   io.on("connection", (socket: AuthenticatedSocket) => {
     const { userId, phoneNumber } = socket;
 
-    logger.info(
-      { userId, phoneNumber, socketId: socket.id },
-      "WebSocket client connected",
-    );
+    logger.info({ userId, phoneNumber, socketId: socket.id }, "WebSocket client connected");
 
     // Join user-specific room
     if (userId) {
@@ -73,10 +66,7 @@ export function createWebSocketHandlers(
       // Format phone number properly
       const phone = formatPhoneNumberSafe(phoneNumber);
       if (!phone) {
-        logger.warn(
-          { userId, phoneNumber, socketId: socket.id },
-          "Invalid phone number format",
-        );
+        logger.warn({ userId, phoneNumber, socketId: socket.id }, "Invalid phone number format");
         socket.emit("error", { message: "Invalid phone number format" });
         return;
       }
@@ -87,7 +77,7 @@ export function createWebSocketHandlers(
           phoneNumber: phone,
           socketId: socket.id,
         },
-        "Client subscribing to connection updates",
+        "Client subscribing to connection updates"
       );
 
       if (phone && userId) {
@@ -101,7 +91,7 @@ export function createWebSocketHandlers(
             roomName,
             roomsJoined: Array.from(socket.rooms),
           },
-          "Client joined session room",
+          "Client joined session room"
         );
 
         // Add a small delay to ensure client is ready to receive
@@ -126,7 +116,7 @@ export function createWebSocketHandlers(
                 qrLength: connection.qrCode.length,
                 socketId: socket.id,
               },
-              "Sending existing QR code to newly subscribed client",
+              "Sending existing QR code to newly subscribed client"
             );
 
             socket.emit("qr:code", {
@@ -148,7 +138,7 @@ export function createWebSocketHandlers(
                 connectionState: connection?.state?.connection,
                 socketId: socket.id,
               },
-              "No QR code available for newly subscribed client",
+              "No QR code available for newly subscribed client"
             );
           }
         }, 100); // 100ms delay to ensure socket is fully ready
@@ -215,7 +205,7 @@ export function createWebSocketHandlers(
           mediaType: media?.type,
           event: "websocket_message_received",
         },
-        "WebSocket message send request received",
+        "WebSocket message send request received"
       );
 
       if (!phone || !toNumber || !message || !userId) {
@@ -231,7 +221,7 @@ export function createWebSocketHandlers(
               userId: !userId,
             },
           },
-          "Invalid WebSocket message data",
+          "Invalid WebSocket message data"
         );
         socket.emit("error", { message: "Invalid message data" });
         return;
@@ -252,7 +242,7 @@ export function createWebSocketHandlers(
               mediaType: media.type,
               hasCaption: !!message,
             },
-            "Preparing media message",
+            "Preparing media message"
           );
         } else {
           content = { text: message };
@@ -265,15 +255,10 @@ export function createWebSocketHandlers(
             userId,
             contentType: content.text ? "text" : Object.keys(content)[0],
           },
-          "Sending message via connection pool",
+          "Sending message via connection pool"
         );
 
-        const messageKey = await connectionPool.sendMessage(
-          userId,
-          phone,
-          toNumber,
-          content,
-        );
+        const messageKey = await connectionPool.sendMessage(userId, phone, toNumber, content);
 
         const sendDuration = Date.now() - sendStart;
 
@@ -293,7 +278,7 @@ export function createWebSocketHandlers(
               success: true,
               event: "websocket_message_sent",
             },
-            "WebSocket message sent successfully",
+            "WebSocket message sent successfully"
           );
 
           socket.emit("message:sent", {
@@ -313,7 +298,7 @@ export function createWebSocketHandlers(
               duration: Date.now() - startTime,
               error: "no_message_key",
             },
-            "WebSocket message failed - no key returned",
+            "WebSocket message failed - no key returned"
           );
 
           socket.emit("message:failed", {
@@ -338,15 +323,14 @@ export function createWebSocketHandlers(
             duration: errorDuration,
             event: "websocket_message_error",
           },
-          "Failed to send message via WebSocket",
+          "Failed to send message via WebSocket"
         );
 
         socket.emit("message:failed", {
           toNumber,
           error: "Failed to send message",
           wsMessageId,
-          errorMessage:
-            process.env.NODE_ENV === "development" ? error.message : undefined,
+          errorMessage: process.env.NODE_ENV === "development" ? error.message : undefined,
         });
       }
     });
@@ -396,7 +380,7 @@ export function createWebSocketHandlers(
             remoteJid: chatJid,
             id,
             participant: undefined,
-          })),
+          }))
         );
 
         socket.emit("messages:marked_read", {
@@ -410,10 +394,7 @@ export function createWebSocketHandlers(
      * Handle disconnection
      */
     socket.on("disconnect", () => {
-      logger.info(
-        { userId, socketId: socket.id },
-        "WebSocket client disconnected",
-      );
+      logger.info({ userId, socketId: socket.id }, "WebSocket client disconnected");
     });
 
     /**
@@ -437,13 +418,11 @@ export function createWebSocketHandlers(
         event: "qr_code_broadcast",
         timestamp: new Date().toISOString(),
       },
-      "Broadcasting QR code to WebSocket clients",
+      "Broadcasting QR code to WebSocket clients"
     );
 
     // Emit to specific session room
-    const roomClients = io.sockets.adapter.rooms.get(
-      `session:${userId}:${phoneNumber}`,
-    );
+    const roomClients = io.sockets.adapter.rooms.get(`session:${userId}:${phoneNumber}`);
     const clientCount = roomClients ? roomClients.size : 0;
 
     logger.info(
@@ -453,7 +432,7 @@ export function createWebSocketHandlers(
         clientCount,
         rooms: Array.from(io.sockets.adapter.rooms.keys()),
       },
-      "Room status before QR broadcast",
+      "Room status before QR broadcast"
     );
 
     io.to(`session:${userId}:${phoneNumber}`).emit("qr:code", {
@@ -479,7 +458,7 @@ export function createWebSocketHandlers(
         event: "connection_status_update",
         timestamp: new Date().toISOString(),
       },
-      "Broadcasting connection status update",
+      "Broadcasting connection status update"
     );
 
     // Emit to specific session room
@@ -503,16 +482,14 @@ export function createWebSocketHandlers(
           status,
           event: "auto_subscribe_clients",
         },
-        "Auto-subscribing clients to session updates",
+        "Auto-subscribing clients to session updates"
       );
 
       // Get all sockets in the user room and auto-subscribe them to session updates
       const userRoomSockets = io.sockets.adapter.rooms.get(`user:${userId}`);
       if (userRoomSockets) {
         userRoomSockets.forEach((socketId) => {
-          const socket = io.sockets.sockets.get(
-            socketId,
-          ) as AuthenticatedSocket;
+          const socket = io.sockets.sockets.get(socketId) as AuthenticatedSocket;
           if (socket && socket.userId === userId) {
             // Auto-join the session room for sync updates
             const sessionRoomName = `session:${userId}:${phoneNumber}`;
@@ -526,7 +503,7 @@ export function createWebSocketHandlers(
                 sessionRoomName,
                 roomsJoined: Array.from(socket.rooms),
               },
-              "Auto-subscribed client to session room",
+              "Auto-subscribed client to session room"
             );
 
             // Send current connection status to newly subscribed client
@@ -563,7 +540,7 @@ export function createWebSocketHandlers(
         event: "message_received_broadcast",
         timestamp: new Date().toISOString(),
       },
-      "Broadcasting received message to clients",
+      "Broadcasting received message to clients"
     );
 
     // Emit to specific session room
@@ -610,10 +587,7 @@ export function createWebSocketHandlers(
   connectionPool.on("history-synced", (data: any) => {
     const { userId, phoneNumber, contacts, messages } = data;
 
-    logger.info(
-      { userId, phoneNumber, contacts, messages },
-      "History sync completed",
-    );
+    logger.info({ userId, phoneNumber, contacts, messages }, "History sync completed");
 
     // Emit to specific session room
     io.to(`session:${userId}:${phoneNumber}`).emit("sync:completed", {

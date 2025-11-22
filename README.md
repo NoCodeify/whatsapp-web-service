@@ -275,7 +275,7 @@ logger.info(
     phoneNumber: "+1234567890",
     action: "message-sent",
   },
-  "WhatsApp message sent successfully",
+  "WhatsApp message sent successfully"
 );
 ```
 

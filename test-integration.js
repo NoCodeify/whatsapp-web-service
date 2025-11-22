@@ -40,7 +40,7 @@ async function testInitialization() {
           "X-API-Key": API_KEY,
           "X-User-Id": USER_ID,
         },
-      },
+      }
     );
 
     console.log("✅ API Initialization successful");
@@ -98,10 +98,7 @@ async function testWebSocketConnection() {
         console.log("\n   ⚠️  Open WhatsApp on your phone");
         console.log("   ⚠️  Go to Settings → Linked Devices");
         console.log('   ⚠️  Tap "Link a Device" and scan the QR code');
-        console.log(
-          "\n   QR Code (first 50 chars):",
-          data.qr.substring(0, 50) + "...",
-        );
+        console.log("\n   QR Code (first 50 chars):", data.qr.substring(0, 50) + "...");
       }
     });
 
@@ -130,16 +127,13 @@ async function testWebSocketConnection() {
 async function checkStatus() {
   console.log("\n3️⃣  Checking Connection Status...");
   try {
-    const response = await axios.get(
-      `${API_URL}/api/sessions/${USER_ID}/status`,
-      {
-        params: { phoneNumber: PHONE_NUMBER },
-        headers: {
-          "X-API-Key": API_KEY,
-          "X-User-Id": USER_ID,
-        },
+    const response = await axios.get(`${API_URL}/api/sessions/${USER_ID}/status`, {
+      params: { phoneNumber: PHONE_NUMBER },
+      headers: {
+        "X-API-Key": API_KEY,
+        "X-User-Id": USER_ID,
       },
-    );
+    });
 
     console.log("✅ Status check successful");
     console.log("   Status:", response.data.status);

@@ -37,12 +37,7 @@ const testCases = [
   },
   {
     name: "US number variations",
-    numbers: [
-      "+12133734253",
-      "12133734253",
-      "+1 213 373 4253",
-      "1 (213) 373-4253",
-    ],
+    numbers: ["+12133734253", "12133734253", "+1 213 373 4253", "1 (213) 373-4253"],
     expected: "+12133734253",
   },
 ];
@@ -66,37 +61,29 @@ async function testInitialization(phoneNumber, shouldSucceed = true) {
           "X-API-Key": API_KEY,
           "X-User-Id": USER_ID,
         },
-      },
+      }
     );
 
     const status = response.data.status;
     const formattedPhone = response.data.phoneNumber;
 
     if (shouldSucceed) {
-      console.log(
-        `  ✅ Accepted: "${phoneNumber}" → "${formattedPhone}" (${status})`,
-      );
+      console.log(`  ✅ Accepted: "${phoneNumber}" → "${formattedPhone}" (${status})`);
       return { success: true, status, formatted: formattedPhone };
     } else {
       // If we expected failure but it succeeded, that's an error
-      console.log(
-        `  ❌ ERROR: Should have been rejected but was accepted: "${phoneNumber}"`,
-      );
+      console.log(`  ❌ ERROR: Should have been rejected but was accepted: "${phoneNumber}"`);
       return { success: false, error: "Should have been rejected" };
     }
   } catch (error) {
     if (!shouldSucceed) {
       // Expected to fail
       const errorMessage = error.response?.data?.error || error.message;
-      console.log(
-        `  ✅ Rejected (as expected): "${phoneNumber}" - ${errorMessage}`,
-      );
+      console.log(`  ✅ Rejected (as expected): "${phoneNumber}" - ${errorMessage}`);
       return { success: true, rejected: true };
     } else {
       // Unexpected failure
-      console.log(
-        `  ❌ ERROR: "${phoneNumber}" - ${error.response?.data?.error || error.message}`,
-      );
+      console.log(`  ❌ ERROR: "${phoneNumber}" - ${error.response?.data?.error || error.message}`);
       return { success: false, error: error.message };
     }
   }
@@ -138,9 +125,7 @@ async function runDuplicateTests() {
 
         // Verify it formatted correctly
         if (firstSuccess !== testCase.expected) {
-          console.log(
-            `  ⚠️  Warning: Formatted to "${firstSuccess}" instead of expected "${testCase.expected}"`,
-          );
+          console.log(`  ⚠️  Warning: Formatted to "${firstSuccess}" instead of expected "${testCase.expected}"`);
         }
       }
 

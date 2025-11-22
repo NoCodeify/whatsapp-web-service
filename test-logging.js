@@ -29,7 +29,7 @@ async function testMessageSendLogging() {
           "x-correlation-id": "test-correlation-123",
         },
         validateStatus: () => true, // Don't throw on any status code
-      },
+      }
     );
 
     console.log("📍 Response Status:", response.status);
@@ -61,7 +61,7 @@ async function testInvalidRequest() {
           "x-user-id": USER_ID,
         },
         validateStatus: () => true,
-      },
+      }
     );
 
     console.log("📍 Response Status:", response.status);
@@ -95,12 +95,8 @@ async function runTests() {
   console.log("========================================");
   console.log("   WhatsApp Web Service Logging Test   ");
   console.log("========================================\n");
-  console.log(
-    "📝 Check your service logs to verify the enhanced logging output",
-  );
-  console.log(
-    "📝 Look for correlation IDs, performance metrics, and structured data\n",
-  );
+  console.log("📝 Check your service logs to verify the enhanced logging output");
+  console.log("📝 Look for correlation IDs, performance metrics, and structured data\n");
 
   await testMessageSendLogging();
   await testInvalidRequest();

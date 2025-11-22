@@ -15,14 +15,7 @@ export interface ReconnectionAttempt {
 
 export interface ReconnectionResult {
   success: boolean;
-  status:
-    | "connected"
-    | "needs_qr"
-    | "failed"
-    | "rate_limited"
-    | "session_not_found"
-    | "timeout"
-    | "connection_failed";
+  status: "connected" | "needs_qr" | "failed" | "rate_limited" | "session_not_found" | "timeout" | "connection_failed";
   qrCode?: string;
   qrExpiresAt?: Date;
   proxy?: {
@@ -52,11 +45,7 @@ export class ReconnectionService {
   private readonly MAX_ATTEMPTS_PER_HOUR = 50;
   private readonly RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000; // 1 hour
 
-  constructor(
-    sessionManager: SessionManager,
-    connectionPool: ConnectionPool,
-    firestore: Firestore,
-  ) {
+  constructor(sessionManager: SessionManager, connectionPool: ConnectionPool, firestore: Firestore) {
     this.sessionManager = sessionManager;
     this.connectionPool = connectionPool;
     this.firestore = firestore;
@@ -70,10 +59,7 @@ export class ReconnectionService {
   /**
    * Check if a user can reconnect to their session
    */
-  async canReconnect(
-    userId: string,
-    phoneNumber: string,
-  ): Promise<CanReconnectResult> {
+  async canReconnect(userId: string, phoneNumber: string): Promise<CanReconnectResult> {
     try {
       // Format phone number
       const formattedPhone = formatPhoneNumberSafe(phoneNumber);
@@ -100,10 +86,7 @@ export class ReconnectionService {
       }
 
       // Check if session exists
-      const sessionExists = await this.sessionManager.sessionExists(
-        userId,
-        phoneNumber,
-      );
+      const sessionExists = await this.sessionManager.sessionExists(userId, phoneNumber);
 
       if (!sessionExists) {
         return {
@@ -115,10 +98,7 @@ export class ReconnectionService {
       }
 
       // Check if user has active connection already
-      const existingConnection = this.connectionPool.getConnection(
-        userId,
-        phoneNumber,
-      );
+      const existingConnection = this.connectionPool.getConnection(userId, phoneNumber);
       if (existingConnection) {
         return {
           canReconnect: false,
@@ -134,10 +114,7 @@ export class ReconnectionService {
         rateLimited: false,
       };
     } catch (error) {
-      logger.error(
-        { error, userId, phoneNumber },
-        "Error checking if reconnection is possible",
-      );
+      logger.error({ error, userId, phoneNumber }, "Error checking if reconnection is possible");
       return {
         canReconnect: false,
         reason: "Internal error checking reconnection status",
@@ -150,11 +127,7 @@ export class ReconnectionService {
   /**
    * Attempt to reconnect a user to their WhatsApp Web session
    */
-  async reconnect(
-    userId: string,
-    phoneNumber: string,
-    forceNew = false,
-  ): Promise<ReconnectionResult> {
+  async reconnect(userId: string, phoneNumber: string, forceNew = false): Promise<ReconnectionResult> {
     try {
       // Format phone number
       const formattedPhone = formatPhoneNumberSafe(phoneNumber);
@@ -167,10 +140,7 @@ export class ReconnectionService {
       }
       phoneNumber = formattedPhone;
 
-      logger.info(
-        { userId, phoneNumber, forceNew },
-        "Starting reconnection attempt",
-      );
+      logger.info({ userId, phoneNumber, forceNew }, "Starting reconnection attempt");
 
       // Record this attempt for rate limiting
       this.recordAttempt(userId, phoneNumber);
@@ -187,15 +157,11 @@ export class ReconnectionService {
       }
 
       // Check if session exists
-      if (
-        !forceNew &&
-        !(await this.sessionManager.sessionExists(userId, phoneNumber))
-      ) {
+      if (!forceNew && !(await this.sessionManager.sessionExists(userId, phoneNumber))) {
         return {
           success: false,
           status: "session_not_found",
-          message:
-            "No session found. Use forceNew=true to create a new session.",
+          message: "No session found. Use forceNew=true to create a new session.",
         };
       }
 
@@ -204,17 +170,10 @@ export class ReconnectionService {
 
       // Create new connection through the connection pool
       // This will reuse existing session files and create a new connection
-      const success = await this.connectionPool.addConnection(
-        userId,
-        phoneNumber,
-        userCountry,
-      );
+      const success = await this.connectionPool.addConnection(userId, phoneNumber, userCountry);
 
       if (!success) {
-        logger.warn(
-          { userId, phoneNumber },
-          "Failed to create connection in pool",
-        );
+        logger.warn({ userId, phoneNumber }, "Failed to create connection in pool");
 
         return {
           success: false,
@@ -224,22 +183,16 @@ export class ReconnectionService {
       }
 
       // Wait for connection to actually reach "open" state before returning success
-      logger.info(
-        { userId, phoneNumber },
-        "Connection created, waiting for establishment...",
-      );
+      logger.info({ userId, phoneNumber }, "Connection created, waiting for establishment...");
 
       const connectionResult = await this.connectionPool.waitForConnectionState(
         userId,
         phoneNumber,
-        30000, // 30 second timeout
+        30000 // 30 second timeout
       );
 
       if (connectionResult.success) {
-        logger.info(
-          { userId, phoneNumber, state: connectionResult.state },
-          "Successfully reconnected WhatsApp Web session",
-        );
+        logger.info({ userId, phoneNumber, state: connectionResult.state }, "Successfully reconnected WhatsApp Web session");
 
         return {
           success: true,
@@ -254,7 +207,7 @@ export class ReconnectionService {
             state: connectionResult.state,
             error: connectionResult.error,
           },
-          "Connection failed during establishment",
+          "Connection failed during establishment"
         );
 
         // Determine appropriate status based on failure reason
@@ -272,10 +225,7 @@ export class ReconnectionService {
         };
       }
     } catch (error: any) {
-      logger.error(
-        { error, userId, phoneNumber },
-        "Failed to reconnect WhatsApp Web session",
-      );
+      logger.error({ error, userId, phoneNumber }, "Failed to reconnect WhatsApp Web session");
 
       // Check if this is a QR code needed scenario
       if (error.message?.includes("QR") || error.message?.includes("pairing")) {
@@ -317,9 +267,7 @@ export class ReconnectionService {
   /**
    * Validate a reconnection token
    */
-  validateReconnectionToken(
-    token: string,
-  ): { userId: string; phoneNumber: string } | null {
+  validateReconnectionToken(token: string): { userId: string; phoneNumber: string } | null {
     try {
       const [tokenData, hash] = token.split(".");
 
@@ -352,25 +300,14 @@ export class ReconnectionService {
   /**
    * Get user's country from Firestore
    */
-  private async getUserCountry(
-    userId: string,
-    phoneNumber: string,
-  ): Promise<string | undefined> {
+  private async getUserCountry(userId: string, phoneNumber: string): Promise<string | undefined> {
     try {
-      const phoneDoc = await this.firestore
-        .collection("users")
-        .doc(userId)
-        .collection("phone_numbers")
-        .doc(phoneNumber)
-        .get();
+      const phoneDoc = await this.firestore.collection("users").doc(userId).collection("phone_numbers").doc(phoneNumber).get();
 
       const phoneData = phoneDoc.data();
       return phoneData?.country_code || phoneData?.proxy_country;
     } catch (error) {
-      logger.debug(
-        { error, userId, phoneNumber },
-        "Failed to get user country, using default",
-      );
+      logger.debug({ error, userId, phoneNumber }, "Failed to get user country, using default");
       return undefined;
     }
   }
@@ -378,26 +315,15 @@ export class ReconnectionService {
   /**
    * Check if user is rate limited
    */
-  private checkRateLimit(
-    userId: string,
-    phoneNumber: string,
-  ): { isLimited: boolean; retryAfter?: number } {
+  private checkRateLimit(userId: string, phoneNumber: string): { isLimited: boolean; retryAfter?: number } {
     const key = `${userId}:${phoneNumber}`;
     const attempts = this.recentAttempts.get(key) || [];
 
-    const recentAttempts = attempts.filter(
-      (attempt) =>
-        Date.now() - attempt.timestamp.getTime() < this.RATE_LIMIT_WINDOW_MS,
-    );
+    const recentAttempts = attempts.filter((attempt) => Date.now() - attempt.timestamp.getTime() < this.RATE_LIMIT_WINDOW_MS);
 
     if (recentAttempts.length >= this.MAX_ATTEMPTS_PER_HOUR) {
       const oldestAttempt = recentAttempts[0];
-      const retryAfter = Math.ceil(
-        (oldestAttempt.timestamp.getTime() +
-          this.RATE_LIMIT_WINDOW_MS -
-          Date.now()) /
-          1000,
-      );
+      const retryAfter = Math.ceil((oldestAttempt.timestamp.getTime() + this.RATE_LIMIT_WINDOW_MS - Date.now()) / 1000);
 
       return { isLimited: true, retryAfter };
     }
@@ -419,10 +345,7 @@ export class ReconnectionService {
     });
 
     // Keep only recent attempts
-    const recentAttempts = attempts.filter(
-      (attempt) =>
-        Date.now() - attempt.timestamp.getTime() < this.RATE_LIMIT_WINDOW_MS,
-    );
+    const recentAttempts = attempts.filter((attempt) => Date.now() - attempt.timestamp.getTime() < this.RATE_LIMIT_WINDOW_MS);
 
     this.recentAttempts.set(key, recentAttempts);
   }
@@ -434,9 +357,7 @@ export class ReconnectionService {
     const cutoffTime = Date.now() - this.RATE_LIMIT_WINDOW_MS;
 
     for (const [key, attempts] of this.recentAttempts.entries()) {
-      const recentAttempts = attempts.filter(
-        (attempt) => attempt.timestamp.getTime() > cutoffTime,
-      );
+      const recentAttempts = attempts.filter((attempt) => attempt.timestamp.getTime() > cutoffTime);
 
       if (recentAttempts.length === 0) {
         this.recentAttempts.delete(key);
@@ -445,10 +366,7 @@ export class ReconnectionService {
       }
     }
 
-    logger.debug(
-      { keys: this.recentAttempts.size },
-      "Cleaned up old reconnection attempts",
-    );
+    logger.debug({ keys: this.recentAttempts.size }, "Cleaned up old reconnection attempts");
   }
 
   /**

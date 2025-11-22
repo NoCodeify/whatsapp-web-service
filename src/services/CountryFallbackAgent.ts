@@ -32,21 +32,14 @@ export class CountryFallbackAgent {
         timeout: 30000, // 30 second timeout
       });
 
-      this.logger.info(
-        "Anthropic client initialized successfully from Secret Manager",
-      );
+      this.logger.info("Anthropic client initialized successfully from Secret Manager");
     } catch (error: any) {
-      this.logger.error(
-        { error: error.message },
-        "Failed to initialize from Secret Manager, trying environment variable",
-      );
+      this.logger.error({ error: error.message }, "Failed to initialize from Secret Manager, trying environment variable");
 
       // Fallback to environment variable
       const apiKey = process.env.ANTHROPIC_API_KEY;
       if (!apiKey) {
-        throw new Error(
-          "No Anthropic API key available in Secret Manager or environment",
-        );
+        throw new Error("No Anthropic API key available in Secret Manager or environment");
       }
 
       this.anthropicClient = new Anthropic({
@@ -54,9 +47,7 @@ export class CountryFallbackAgent {
         timeout: 30000,
       });
 
-      this.logger.warn(
-        "Anthropic client initialized from environment variable",
-      );
+      this.logger.warn("Anthropic client initialized from environment variable");
     }
   }
 
@@ -84,15 +75,9 @@ export class CountryFallbackAgent {
       } catch (error: any) {
         if (error.response?.data?.error) {
           const { type, message } = error.response.data.error;
-          this.logger.error(
-            { attempt, maxRetries: MAX_RETRIES, type, message },
-            `Anthropic API error (attempt ${attempt}/${MAX_RETRIES})`,
-          );
+          this.logger.error({ attempt, maxRetries: MAX_RETRIES, type, message }, `Anthropic API error (attempt ${attempt}/${MAX_RETRIES})`);
         } else {
-          this.logger.error(
-            { attempt, maxRetries: MAX_RETRIES, error: error.message },
-            `Unexpected error (attempt ${attempt}/${MAX_RETRIES})`,
-          );
+          this.logger.error({ attempt, maxRetries: MAX_RETRIES, error: error.message }, `Unexpected error (attempt ${attempt}/${MAX_RETRIES})`);
         }
 
         if (attempt === MAX_RETRIES) {
@@ -115,22 +100,13 @@ export class CountryFallbackAgent {
    * @param unavailableCountries List of country codes that are already known to be unavailable
    * @returns The 2-letter country code for the best alternative
    */
-  async getNextBestCountry(
-    originalCountry: string,
-    unavailableCountries: string[] = [],
-  ): Promise<string> {
+  async getNextBestCountry(originalCountry: string, unavailableCountries: string[] = []): Promise<string> {
     await this.ensureInitialized();
 
-    this.logger.info(
-      { originalCountry, unavailableCountries },
-      "Requesting country fallback from AI agent",
-    );
+    this.logger.info({ originalCountry, unavailableCountries }, "Requesting country fallback from AI agent");
 
     return this.retryAnthropicCall(async () => {
-      const unavailableList =
-        unavailableCountries.length > 0
-          ? unavailableCountries.join(", ")
-          : "None";
+      const unavailableList = unavailableCountries.length > 0 ? unavailableCountries.join(", ") : "None";
 
       const response = await this.anthropicClient!.messages.create({
         model: "claude-haiku-4-5-20251001",
@@ -180,19 +156,13 @@ export class CountryFallbackAgent {
 
       // Validate it's a 2-letter code
       if (!/^[A-Z]{2}$/.test(countryCode)) {
-        this.logger.error(
-          { countryCode, originalCountry },
-          "Invalid country code received from AI",
-        );
+        this.logger.error({ countryCode, originalCountry }, "Invalid country code received from AI");
         throw new Error(`Invalid country code received: ${countryCode}`);
       }
 
       // Ensure it's not in the unavailable list
       if (unavailableCountries.includes(countryCode.toLowerCase())) {
-        this.logger.error(
-          { countryCode, unavailableCountries },
-          "AI suggested an unavailable country",
-        );
+        this.logger.error({ countryCode, unavailableCountries }, "AI suggested an unavailable country");
         throw new Error(`AI suggested unavailable country: ${countryCode}`);
       }
 
@@ -202,7 +172,7 @@ export class CountryFallbackAgent {
           suggestedCountry: countryCode,
           unavailableCountries,
         },
-        "AI agent suggested country fallback",
+        "AI agent suggested country fallback"
       );
 
       return countryCode.toLowerCase();

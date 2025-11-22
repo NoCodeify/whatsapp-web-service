@@ -37,15 +37,10 @@ export class SessionManager {
   private sessionsDir: string;
   private sessions: Map<string, SessionData> = new Map();
 
-  private readonly encryptionKey =
-    process.env.SESSION_ENCRYPTION_KEY ||
-    crypto.randomBytes(32).toString("hex");
-  private readonly bucketName =
-    process.env.STORAGE_BUCKET || "whatsapp-web-sessions";
+  private readonly encryptionKey = process.env.SESSION_ENCRYPTION_KEY || crypto.randomBytes(32).toString("hex");
+  private readonly bucketName = process.env.STORAGE_BUCKET || "whatsapp-web-sessions";
   private readonly storageType = process.env.SESSION_STORAGE_TYPE || "local";
-  private readonly backupInterval = parseInt(
-    process.env.SESSION_BACKUP_INTERVAL || "300000",
-  ); // 5 minutes default
+  private readonly backupInterval = parseInt(process.env.SESSION_BACKUP_INTERVAL || "300000"); // 5 minutes default
   private backupTimers: Map<string, NodeJS.Timeout> = new Map();
 
   constructor(proxyManager: ProxyManager, firestore: Firestore) {
@@ -60,23 +55,17 @@ export class SessionManager {
           storageType: this.storageType,
           bucketName: this.bucketName,
         },
-        "Initialized Google Cloud Storage for session backup",
+        "Initialized Google Cloud Storage for session backup"
       );
 
       // Initialize CloudRunSessionOptimizer for cloud mode
       if (this.storageType === "cloud") {
-        this.cloudOptimizer = new CloudRunSessionOptimizer(
-          this.storage,
-          this.firestore,
-        );
-        this.logger.info(
-          "Initialized CloudRunSessionOptimizer for enhanced Cloud Storage performance",
-        );
+        this.cloudOptimizer = new CloudRunSessionOptimizer(this.storage, this.firestore);
+        this.logger.info("Initialized CloudRunSessionOptimizer for enhanced Cloud Storage performance");
       }
     }
 
-    this.sessionsDir =
-      process.env.SESSION_STORAGE_PATH || path.join(process.cwd(), "sessions");
+    this.sessionsDir = process.env.SESSION_STORAGE_PATH || path.join(process.cwd(), "sessions");
 
     this.initializeSessionsDirectory();
   }
@@ -87,10 +76,7 @@ export class SessionManager {
   private async initializeSessionsDirectory() {
     try {
       await mkdir(this.sessionsDir, { recursive: true });
-      this.logger.info(
-        { dir: this.sessionsDir },
-        "Sessions directory initialized",
-      );
+      this.logger.info({ dir: this.sessionsDir }, "Sessions directory initialized");
     } catch (error) {
       this.logger.error({ error }, "Failed to create sessions directory");
     }
@@ -105,7 +91,7 @@ export class SessionManager {
     proxyCountry?: string,
     browserName?: string,
     skipProxy?: boolean, // Skip proxy creation during recovery
-    forceNew?: boolean, // Force fresh connection, delete existing sessions
+    forceNew?: boolean // Force fresh connection, delete existing sessions
   ): Promise<{ socket: WASocket; sessionExists: boolean }> {
     // Validate userId to prevent directory traversal
     this.validateUserId(userId);
@@ -119,10 +105,7 @@ export class SessionManager {
 
     // If forceNew is true, delete any existing sessions first
     if (forceNew) {
-      this.logger.info(
-        { userId, phoneNumber },
-        "Force new connection requested - deleting existing sessions",
-      );
+      this.logger.info({ userId, phoneNumber }, "Force new connection requested - deleting existing sessions");
       await this.deleteSession(userId, phoneNumber, false);
     }
 
@@ -132,29 +115,16 @@ export class SessionManager {
       // Check for existing session in memory
       const existingSession = this.sessions.get(sessionKey);
       if (existingSession) {
-        this.logger.info(
-          { userId, phoneNumber },
-          "Found existing session in memory, reusing credentials",
-        );
+        this.logger.info({ userId, phoneNumber }, "Found existing session in memory, reusing credentials");
         // Don't delete the session or credentials - just proceed with existing auth
         // The session files contain the pairing data we need to reconnect
       }
 
       // Get or create auth state
-      const { state, saveCreds, sessionExists } = await this.getAuthState(
-        userId,
-        phoneNumber,
-        forceNew,
-      );
+      const { state, saveCreds, sessionExists } = await this.getAuthState(userId, phoneNumber, forceNew);
 
       // Get proxy agent if configured with country (skip during recovery)
-      const proxyAgent = skipProxy
-        ? null
-        : await this.proxyManager.createProxyAgent(
-            userId,
-            phoneNumber,
-            proxyCountry,
-          );
+      const proxyAgent = skipProxy ? null : await this.proxyManager.createProxyAgent(userId, phoneNumber, proxyCountry);
 
       // Get latest Baileys version
       const { version } = await fetchLatestBaileysVersion();
@@ -211,7 +181,7 @@ export class SessionManager {
             proxyType,
             proxyCountry: proxyCountry || "auto",
           },
-          `Using ${proxyType} proxy for WhatsApp connection`,
+          `Using ${proxyType} proxy for WhatsApp connection`
         );
       }
 
@@ -234,17 +204,11 @@ export class SessionManager {
       };
       this.sessions.set(sessionKey, sessionData);
 
-      this.logger.info(
-        { userId, phoneNumber, sessionExists },
-        "WhatsApp connection created",
-      );
+      this.logger.info({ userId, phoneNumber, sessionExists }, "WhatsApp connection created");
 
       return { socket, sessionExists };
     } catch (error) {
-      this.logger.error(
-        { userId, phoneNumber, error },
-        "Failed to create connection",
-      );
+      this.logger.error({ userId, phoneNumber, error }, "Failed to create connection");
       throw error;
     }
   }
@@ -256,7 +220,7 @@ export class SessionManager {
   private async getAuthState(
     userId: string,
     phoneNumber: string,
-    forceNew?: boolean,
+    forceNew?: boolean
   ): Promise<{
     state: AuthenticationState;
     saveCreds: () => Promise<void>;
@@ -270,29 +234,16 @@ export class SessionManager {
 
     // In hybrid or cloud mode, try to restore from Cloud Storage if local doesn't exist
     // Skip Cloud Storage restoration if forceNew is true
-    if (
-      !forceNew &&
-      !localSessionExists &&
-      (this.storageType === "hybrid" || this.storageType === "cloud") &&
-      this.storage
-    ) {
+    if (!forceNew && !localSessionExists && (this.storageType === "hybrid" || this.storageType === "cloud") && this.storage) {
       try {
         let restored = false;
 
         // Use CloudRunSessionOptimizer for cloud mode (better performance)
         if (this.storageType === "cloud" && this.cloudOptimizer) {
-          restored = await this.cloudOptimizer.downloadSession(
-            userId,
-            phoneNumber,
-            sessionPath,
-          );
+          restored = await this.cloudOptimizer.downloadSession(userId, phoneNumber, sessionPath);
         } else {
           // Fallback to original method for hybrid mode
-          restored = await this.restoreFromCloudStorage(
-            userId,
-            phoneNumber,
-            sessionPath,
-          );
+          restored = await this.restoreFromCloudStorage(userId, phoneNumber, sessionPath);
         }
 
         if (restored) {
@@ -303,14 +254,11 @@ export class SessionManager {
               phoneNumber,
               method: this.cloudOptimizer ? "optimized" : "standard",
             },
-            "Session restored from Cloud Storage",
+            "Session restored from Cloud Storage"
           );
         }
       } catch (error) {
-        this.logger.debug(
-          { userId, phoneNumber, error },
-          "No existing session in Cloud Storage",
-        );
+        this.logger.debug({ userId, phoneNumber, error }, "No existing session in Cloud Storage");
       }
     }
 
@@ -359,15 +307,9 @@ export class SessionManager {
     const timer = setInterval(async () => {
       try {
         await this.backupToCloudStorage(userId, phoneNumber);
-        this.logger.debug(
-          { userId, phoneNumber },
-          "Automatic session backup completed",
-        );
+        this.logger.debug({ userId, phoneNumber }, "Automatic session backup completed");
       } catch (error) {
-        this.logger.warn(
-          { userId, phoneNumber, error },
-          "Automatic backup failed",
-        );
+        this.logger.warn({ userId, phoneNumber, error }, "Automatic backup failed");
       }
     }, this.backupInterval);
 
@@ -379,18 +321,14 @@ export class SessionManager {
         phoneNumber,
         backupInterval: this.backupInterval,
       },
-      "Automatic backup scheduled for session",
+      "Automatic backup scheduled for session"
     );
   }
 
   /**
    * Save authentication state to Cloud Storage
    */
-  private async saveAuthState(
-    userId: string,
-    phoneNumber: string,
-    authState: AuthenticationState,
-  ) {
+  private async saveAuthState(userId: string, phoneNumber: string, authState: AuthenticationState) {
     const sessionKey = this.getSessionKey(userId, phoneNumber);
 
     try {
@@ -402,19 +340,12 @@ export class SessionManager {
       }
 
       // Save to Cloud Storage in hybrid or cloud mode
-      if (
-        (this.storageType === "hybrid" || this.storageType === "cloud") &&
-        this.storage
-      ) {
+      if ((this.storageType === "hybrid" || this.storageType === "cloud") && this.storage) {
         try {
           // Use CloudRunSessionOptimizer for cloud mode (better performance with queuing)
           if (this.storageType === "cloud" && this.cloudOptimizer) {
             const sessionPath = this.getSessionPath(userId, phoneNumber);
-            await this.cloudOptimizer.uploadSession(
-              userId,
-              phoneNumber,
-              sessionPath,
-            );
+            await this.cloudOptimizer.uploadSession(userId, phoneNumber, sessionPath);
           } else {
             // Fallback to original method for hybrid mode
             await this.backupToCloudStorage(userId, phoneNumber);
@@ -442,11 +373,7 @@ export class SessionManager {
             });
           } else {
             // Create new phone number document if it doesn't exist
-            const sessionRef = this.firestore
-              .collection("users")
-              .doc(userId)
-              .collection("phone_numbers")
-              .doc();
+            const sessionRef = this.firestore.collection("users").doc(userId).collection("phone_numbers").doc();
 
             await sessionRef.set({
               phone_number: phoneNumber,
@@ -473,7 +400,7 @@ export class SessionManager {
               phoneNumber,
               storageType: this.storageType,
             },
-            "Session backed up to Cloud Storage",
+            "Session backed up to Cloud Storage"
           );
         } catch (error) {
           this.logger.warn(
@@ -482,7 +409,7 @@ export class SessionManager {
               phoneNumber,
               error,
             },
-            "Failed to backup to Cloud Storage, continuing with local storage",
+            "Failed to backup to Cloud Storage, continuing with local storage"
           );
         }
       }
@@ -493,13 +420,10 @@ export class SessionManager {
           phoneNumber,
           storageType: this.storageType,
         },
-        "Auth state saved",
+        "Auth state saved"
       );
     } catch (error) {
-      this.logger.error(
-        { userId, phoneNumber, error },
-        "Failed to save auth state",
-      );
+      this.logger.error({ userId, phoneNumber, error }, "Failed to save auth state");
     }
   }
 
@@ -508,10 +432,7 @@ export class SessionManager {
    */
   private async backupToCloudStorage(userId: string, phoneNumber: string) {
     if (!this.storage) {
-      this.logger.debug(
-        { userId, phoneNumber },
-        "Cloud Storage not configured, skipping backup",
-      );
+      this.logger.debug({ userId, phoneNumber }, "Cloud Storage not configured, skipping backup");
       return;
     }
 
@@ -524,10 +445,7 @@ export class SessionManager {
       const tempPrefix = `sessions/${userId}/${phoneNumber}/.tmp-${timestamp}/`;
       const finalPrefix = `sessions/${userId}/${phoneNumber}/`;
 
-      this.logger.debug(
-        { userId, phoneNumber, fileCount: files.length },
-        "Starting atomic backup to Cloud Storage",
-      );
+      this.logger.debug({ userId, phoneNumber, fileCount: files.length }, "Starting atomic backup to Cloud Storage");
 
       // PHASE 1: Upload all files to temporary location
       // This ensures either ALL files upload or NONE (on failure, temp is discarded)
@@ -559,8 +477,8 @@ export class SessionManager {
         oldFiles.map((file) =>
           file.delete().catch(() => {
             // Ignore delete errors - old files may not exist
-          }),
-        ),
+          })
+        )
       );
 
       // Move temp files to final location (rename)
@@ -569,18 +487,12 @@ export class SessionManager {
         tempFiles.map(async (file) => {
           const newName = file.name.replace(tempPrefix, finalPrefix);
           await file.move(newName);
-        }),
+        })
       );
 
-      this.logger.debug(
-        { userId, phoneNumber, files: files.length },
-        "Session backed up atomically to Cloud Storage",
-      );
+      this.logger.debug({ userId, phoneNumber, files: files.length }, "Session backed up atomically to Cloud Storage");
     } catch (error) {
-      this.logger.error(
-        { userId, phoneNumber, error },
-        "Failed to backup session to Cloud Storage",
-      );
+      this.logger.error({ userId, phoneNumber, error }, "Failed to backup session to Cloud Storage");
 
       // CLEANUP: Delete any partial temp files on failure
       try {
@@ -599,16 +511,9 @@ export class SessionManager {
   /**
    * Restore session from Cloud Storage
    */
-  private async restoreFromCloudStorage(
-    userId: string,
-    phoneNumber: string,
-    sessionPath: string,
-  ): Promise<boolean> {
+  private async restoreFromCloudStorage(userId: string, phoneNumber: string, sessionPath: string): Promise<boolean> {
     if (!this.storage) {
-      this.logger.debug(
-        { userId, phoneNumber },
-        "Cloud Storage not configured, skipping restore",
-      );
+      this.logger.debug({ userId, phoneNumber }, "Cloud Storage not configured, skipping restore");
       return false;
     }
 
@@ -640,16 +545,10 @@ export class SessionManager {
         await writeFile(filePath, decrypted);
       }
 
-      this.logger.info(
-        { userId, phoneNumber, files: files.length },
-        "Session restored from Cloud Storage",
-      );
+      this.logger.info({ userId, phoneNumber, files: files.length }, "Session restored from Cloud Storage");
       return true;
     } catch (error) {
-      this.logger.error(
-        { userId, phoneNumber, error },
-        "Failed to restore session",
-      );
+      this.logger.error({ userId, phoneNumber, error }, "Failed to restore session");
       return false;
     }
   }
@@ -657,9 +556,7 @@ export class SessionManager {
   /**
    * Get message from database (for message retries)
    */
-  private async getMessage(
-    _key: proto.IMessageKey,
-  ): Promise<proto.IMessage | undefined> {
+  private async getMessage(_key: proto.IMessageKey): Promise<proto.IMessage | undefined> {
     // This is used for message retries
     // In production, you'd fetch from your message database
     // For now, return undefined to let Baileys handle it
@@ -671,11 +568,7 @@ export class SessionManager {
    */
   private encrypt(data: Buffer): Buffer {
     const iv = crypto.randomBytes(16);
-    const cipher = crypto.createCipheriv(
-      "aes-256-cbc",
-      Buffer.from(this.encryptionKey.slice(0, 64), "hex"),
-      iv,
-    );
+    const cipher = crypto.createCipheriv("aes-256-cbc", Buffer.from(this.encryptionKey.slice(0, 64), "hex"), iv);
 
     const encrypted = Buffer.concat([iv, cipher.update(data), cipher.final()]);
 
@@ -689,16 +582,9 @@ export class SessionManager {
     const iv = data.slice(0, 16);
     const encrypted = data.slice(16);
 
-    const decipher = crypto.createDecipheriv(
-      "aes-256-cbc",
-      Buffer.from(this.encryptionKey.slice(0, 64), "hex"),
-      iv,
-    );
+    const decipher = crypto.createDecipheriv("aes-256-cbc", Buffer.from(this.encryptionKey.slice(0, 64), "hex"), iv);
 
-    const decrypted = Buffer.concat([
-      decipher.update(encrypted),
-      decipher.final(),
-    ]);
+    const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
 
     return decrypted;
   }
@@ -707,11 +593,7 @@ export class SessionManager {
    * Delete a session
    * @param permanentDelete - If true, deletes the phone number from Firestore (triggers full cleanup). If false, only disconnects the session.
    */
-  async deleteSession(
-    userId: string,
-    phoneNumber: string,
-    permanentDelete: boolean = false,
-  ) {
+  async deleteSession(userId: string, phoneNumber: string, permanentDelete: boolean = false) {
     // Format phone number for consistency
     const formattedPhone = formatPhoneNumberSafe(phoneNumber);
     if (formattedPhone) {
@@ -727,10 +609,7 @@ export class SessionManager {
       if (backupTimer) {
         clearInterval(backupTimer);
         this.backupTimers.delete(sessionKey);
-        this.logger.debug(
-          { userId, phoneNumber },
-          "Cleared backup timer for session",
-        );
+        this.logger.debug({ userId, phoneNumber }, "Cleared backup timer for session");
       }
 
       // Remove from memory
@@ -743,17 +622,11 @@ export class SessionManager {
           await unlink(path.join(sessionPath, file));
         }
       } catch (error) {
-        this.logger.debug(
-          { userId, phoneNumber, error },
-          "No local session files to delete",
-        );
+        this.logger.debug({ userId, phoneNumber, error }, "No local session files to delete");
       }
 
       // Delete from Cloud Storage if configured
-      if (
-        this.storage &&
-        (this.storageType === "hybrid" || this.storageType === "cloud")
-      ) {
+      if (this.storage && (this.storageType === "hybrid" || this.storageType === "cloud")) {
         try {
           // Use CloudRunSessionOptimizer for cloud mode (better error handling)
           if (this.storageType === "cloud" && this.cloudOptimizer) {
@@ -774,14 +647,11 @@ export class SessionManager {
                 phoneNumber,
                 deletedFiles: cloudFiles.length,
               },
-              "Deleted session files from Cloud Storage",
+              "Deleted session files from Cloud Storage"
             );
           }
         } catch (error) {
-          this.logger.debug(
-            { userId, phoneNumber, error },
-            "Error deleting from Cloud Storage",
-          );
+          this.logger.debug({ userId, phoneNumber, error }, "Error deleting from Cloud Storage");
         }
       }
 
@@ -800,34 +670,20 @@ export class SessionManager {
         if (permanentDelete) {
           // Permanent deletion: Remove document entirely (triggers onPhoneNumberDeleted)
           await sessionRef.delete();
-          this.logger.info(
-            { userId, phoneNumber },
-            "Phone number permanently deleted from Firestore",
-          );
+          this.logger.info({ userId, phoneNumber }, "Phone number permanently deleted from Firestore");
         } else {
           // Soft disconnect: Just update status, preserve phone number registration
           await sessionRef.update({
             status: "disconnected",
             updated_at: new Date().toISOString(),
           });
-          this.logger.info(
-            { userId, phoneNumber },
-            "Session disconnected, phone number preserved for reconnection",
-          );
+          this.logger.info({ userId, phoneNumber }, "Session disconnected, phone number preserved for reconnection");
         }
       }
 
-      this.logger.info(
-        { userId, phoneNumber, permanentDelete },
-        permanentDelete
-          ? "Session permanently deleted"
-          : "Session disconnected",
-      );
+      this.logger.info({ userId, phoneNumber, permanentDelete }, permanentDelete ? "Session permanently deleted" : "Session disconnected");
     } catch (error) {
-      this.logger.error(
-        { userId, phoneNumber, error },
-        "Failed to delete session",
-      );
+      this.logger.error({ userId, phoneNumber, error }, "Failed to delete session");
       throw error;
     }
   }
@@ -857,10 +713,7 @@ export class SessionManager {
 
           return files.length > 0;
         } catch (error) {
-          this.logger.debug(
-            { userId, phoneNumber, error },
-            "Error checking Cloud Storage for session",
-          );
+          this.logger.debug({ userId, phoneNumber, error }, "Error checking Cloud Storage for session");
         }
       }
       return false;
@@ -870,9 +723,7 @@ export class SessionManager {
   /**
    * List all sessions from the filesystem
    */
-  async listAllSessions(): Promise<
-    Array<{ userId: string; phoneNumber: string }>
-  > {
+  async listAllSessions(): Promise<Array<{ userId: string; phoneNumber: string }>> {
     const sessions: Array<{ userId: string; phoneNumber: string }> = [];
 
     try {
@@ -907,14 +758,11 @@ export class SessionManager {
                 phoneNumber,
                 dir,
               },
-              "Found valid session directory",
+              "Found valid session directory"
             );
           } catch {
             // No creds.json, skip this directory
-            this.logger.debug(
-              { dir },
-              "Session directory missing creds.json, skipping",
-            );
+            this.logger.debug({ dir }, "Session directory missing creds.json, skipping");
           }
         } else {
           this.logger.debug({ dir }, "Invalid session directory name format");
@@ -925,7 +773,7 @@ export class SessionManager {
         {
           count: sessions.length,
         },
-        "Listed all sessions from filesystem",
+        "Listed all sessions from filesystem"
       );
 
       return sessions;
@@ -943,26 +791,15 @@ export class SessionManager {
 
     return {
       totalSessions: this.sessions.size,
-      averageSessionAge:
-        sessions.length > 0
-          ? sessions.reduce(
-              (sum, s) => sum + (Date.now() - s.createdAt.getTime()),
-              0,
-            ) / sessions.length
-          : 0,
-      oldestSession: sessions.reduce(
-        (oldest, s) => (!oldest || s.createdAt < oldest.createdAt ? s : oldest),
-        null as SessionData | null,
-      ),
+      averageSessionAge: sessions.length > 0 ? sessions.reduce((sum, s) => sum + (Date.now() - s.createdAt.getTime()), 0) / sessions.length : 0,
+      oldestSession: sessions.reduce((oldest, s) => (!oldest || s.createdAt < oldest.createdAt ? s : oldest), null as SessionData | null),
     };
   }
 
   /**
    * Cleanup old sessions
    */
-  async cleanupSessions(
-    maxAge: number = 30 * 24 * 60 * 60 * 1000,
-  ): Promise<number> {
+  async cleanupSessions(maxAge: number = 30 * 24 * 60 * 60 * 1000): Promise<number> {
     const now = Date.now();
     let cleanedLocal = 0;
     let cleanedCloud = 0;
@@ -978,10 +815,7 @@ export class SessionManager {
           await this.deleteSession(userId, phoneNumber, false);
           cleanedLocal++;
         } catch (error) {
-          this.logger.error(
-            { userId, phoneNumber, error },
-            "Failed to cleanup session",
-          );
+          this.logger.error({ userId, phoneNumber, error }, "Failed to cleanup session");
         }
       }
     }
@@ -1010,10 +844,7 @@ export class SessionManager {
               cleanedLocal++;
               this.logger.info({ dir }, "Removed orphaned session directory");
             } catch (error) {
-              this.logger.error(
-                { dir, error },
-                "Failed to remove orphaned directory",
-              );
+              this.logger.error({ dir, error }, "Failed to remove orphaned directory");
             }
           }
         }
@@ -1023,10 +854,7 @@ export class SessionManager {
     }
 
     // Cleanup old cloud storage sessions if configured
-    if (
-      this.storage &&
-      (this.storageType === "hybrid" || this.storageType === "cloud")
-    ) {
+    if (this.storage && (this.storageType === "hybrid" || this.storageType === "cloud")) {
       try {
         const bucket = this.storage.bucket(this.bucketName);
         const [files] = await bucket.getFiles({ prefix: "sessions/" });
@@ -1044,25 +872,16 @@ export class SessionManager {
               await file.delete();
               cleanedCloud++;
             } catch (error) {
-              this.logger.error(
-                { file: file.name, error },
-                "Failed to delete old cloud session file",
-              );
+              this.logger.error({ file: file.name, error }, "Failed to delete old cloud session file");
             }
           }
         }
 
         if (cleanedCloud > 0) {
-          this.logger.info(
-            { cleanedCloud },
-            "Cleaned up old sessions from cloud storage",
-          );
+          this.logger.info({ cleanedCloud }, "Cleaned up old sessions from cloud storage");
         }
       } catch (error) {
-        this.logger.error(
-          { error },
-          "Failed to cleanup cloud storage sessions",
-        );
+        this.logger.error({ error }, "Failed to cleanup cloud storage sessions");
       }
     }
 
@@ -1074,7 +893,7 @@ export class SessionManager {
           cleanedCloud,
           totalCleaned,
         },
-        "Session cleanup completed",
+        "Session cleanup completed"
       );
     }
 
@@ -1106,34 +925,21 @@ export class SessionManager {
   private getSessionPath(userId: string, phoneNumber: string): string {
     // Sanitize inputs - remove directory traversal sequences
     const sanitizedUserId = userId.replace(/\.\./g, "").replace(/[\/\\]/g, "");
-    const sanitizedPhone = phoneNumber
-      .replace(/\.\./g, "")
-      .replace(/[\/\\]/g, "");
+    const sanitizedPhone = phoneNumber.replace(/\.\./g, "").replace(/[\/\\]/g, "");
 
     // Additional validation: if phone number contained traversal sequences, it's invalid
-    if (
-      phoneNumber.includes("..") ||
-      phoneNumber.includes("/") ||
-      phoneNumber.includes("\\")
-    ) {
-      throw new Error(
-        "Invalid phone number: contains directory traversal sequences",
-      );
+    if (phoneNumber.includes("..") || phoneNumber.includes("/") || phoneNumber.includes("\\")) {
+      throw new Error("Invalid phone number: contains directory traversal sequences");
     }
 
-    const sessionPath = path.join(
-      this.sessionsDir,
-      `${sanitizedUserId}-${sanitizedPhone}`,
-    );
+    const sessionPath = path.join(this.sessionsDir, `${sanitizedUserId}-${sanitizedPhone}`);
 
     // CRITICAL: Verify resolved path is within sessionsDir
     const resolvedPath = path.resolve(sessionPath);
     const resolvedSessionsDir = path.resolve(this.sessionsDir);
 
     if (!resolvedPath.startsWith(resolvedSessionsDir)) {
-      throw new Error(
-        "Invalid session path: potential directory traversal attack",
-      );
+      throw new Error("Invalid session path: potential directory traversal attack");
     }
 
     return sessionPath;
@@ -1173,19 +979,13 @@ export class SessionManager {
         const [userId, phoneNumber] = sessionKey.split(":");
         backupPromises.push(
           this.backupToCloudStorage(userId, phoneNumber).catch((error) => {
-            this.logger.error(
-              { userId, phoneNumber, error },
-              "Failed final backup during shutdown",
-            );
-          }),
+            this.logger.error({ userId, phoneNumber, error }, "Failed final backup during shutdown");
+          })
         );
       }
 
       if (backupPromises.length > 0) {
-        this.logger.info(
-          { sessions: backupPromises.length },
-          "Performing final backup of all sessions",
-        );
+        this.logger.info({ sessions: backupPromises.length }, "Performing final backup of all sessions");
         await Promise.all(backupPromises);
       }
     }

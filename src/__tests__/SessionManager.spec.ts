@@ -69,9 +69,7 @@ jest.mock("fs", () => ({
     readFile: jest.fn().mockResolvedValue(Buffer.from("test")),
     readdir: jest.fn().mockResolvedValue([]),
     unlink: jest.fn().mockResolvedValue(undefined),
-    stat: jest
-      .fn()
-      .mockResolvedValue({ isDirectory: () => true, mtime: new Date() }),
+    stat: jest.fn().mockResolvedValue({ isDirectory: () => true, mtime: new Date() }),
     access: jest.fn().mockResolvedValue(undefined),
     rm: jest.fn().mockResolvedValue(undefined),
   },
@@ -144,9 +142,7 @@ describe("SessionManager", () => {
       bucket: jest.fn().mockReturnValue(mockBucket),
     } as any;
 
-    (Storage as jest.MockedClass<typeof Storage>).mockImplementation(
-      () => mockStorage,
-    );
+    (Storage as jest.MockedClass<typeof Storage>).mockImplementation(() => mockStorage);
 
     // Mock ProxyManager
     mockProxyManager = {
@@ -239,56 +235,35 @@ describe("SessionManager", () => {
     });
 
     it("should create a new WhatsApp connection", async () => {
-      const socket = await sessionManager.createConnection(
-        userId,
-        phoneNumber,
-        "US",
-      );
+      const socket = await sessionManager.createConnection(userId, phoneNumber, "US");
 
       expect(socket).toBeDefined();
       expect(baileys.useMultiFileAuthState).toHaveBeenCalled();
       expect(baileys.fetchLatestBaileysVersion).toHaveBeenCalled();
       expect(baileys.makeWASocket).toHaveBeenCalled();
-      expect(mockProxyManager.createProxyAgent).toHaveBeenCalledWith(
-        userId,
-        phoneNumber,
-        "US",
-      );
+      expect(mockProxyManager.createProxyAgent).toHaveBeenCalledWith(userId, phoneNumber, "US");
     });
 
     it("should skip proxy creation when skipProxy is true", async () => {
-      await sessionManager.createConnection(
-        userId,
-        phoneNumber,
-        "US",
-        "DM Champ",
-        true,
-      );
+      await sessionManager.createConnection(userId, phoneNumber, "US", "DM Champ", true);
 
       expect(mockProxyManager.createProxyAgent).not.toHaveBeenCalled();
     });
 
     it("should use custom browser name if provided", async () => {
-      await sessionManager.createConnection(
-        userId,
-        phoneNumber,
-        undefined,
-        "Custom Browser",
-      );
+      await sessionManager.createConnection(userId, phoneNumber, undefined, "Custom Browser");
 
       expect(baileys.makeWASocket).toHaveBeenCalledWith(
         expect.objectContaining({
           browser: ["Custom Browser", "Chrome", "131.0.0.0"],
-        }),
+        })
       );
     });
 
     it("should handle invalid phone number format", async () => {
       const invalidPhone = "invalid";
 
-      await expect(
-        sessionManager.createConnection(userId, invalidPhone),
-      ).rejects.toThrow("Invalid phone number format");
+      await expect(sessionManager.createConnection(userId, invalidPhone)).rejects.toThrow("Invalid phone number format");
     });
 
     it("should reuse existing session if found in memory", async () => {
@@ -310,9 +285,7 @@ describe("SessionManager", () => {
         throw new Error("Connection failed");
       });
 
-      await expect(
-        sessionManager.createConnection(userId, phoneNumber),
-      ).rejects.toThrow("Connection failed");
+      await expect(sessionManager.createConnection(userId, phoneNumber)).rejects.toThrow("Connection failed");
     });
 
     it("should configure socket with proper settings", async () => {
@@ -329,7 +302,7 @@ describe("SessionManager", () => {
           syncFullHistory: true,
           fireInitQueries: true,
           downloadHistory: true,
-        }),
+        })
       );
     });
   });
@@ -346,20 +319,13 @@ describe("SessionManager", () => {
       mockStorageFile.save.mockClear();
 
       // Mock readdir to return session files
-      (fs.promises.readdir as jest.Mock).mockResolvedValueOnce([
-        "creds.json",
-        "app-state-sync-key-test.json",
-      ]);
+      (fs.promises.readdir as jest.Mock).mockResolvedValueOnce(["creds.json", "app-state-sync-key-test.json"]);
 
       // Mock readFile to return file content
-      (fs.promises.readFile as jest.Mock).mockResolvedValueOnce(
-        Buffer.from("session data"),
-      );
+      (fs.promises.readFile as jest.Mock).mockResolvedValueOnce(Buffer.from("session data"));
 
       // Manually trigger backup using private method
-      const backupMethod = (sessionManager as any).backupToCloudStorage.bind(
-        sessionManager,
-      );
+      const backupMethod = (sessionManager as any).backupToCloudStorage.bind(sessionManager);
       await backupMethod(userId, phoneNumber);
 
       expect(mockBucket.file).toHaveBeenCalled();
@@ -373,20 +339,10 @@ describe("SessionManager", () => {
 
       // Create properly encrypted test data using the same encryption method
       const testData = Buffer.from(JSON.stringify({ test: "data" }));
-      const encryptionKey =
-        process.env.SESSION_ENCRYPTION_KEY ||
-        crypto.randomBytes(32).toString("hex");
+      const encryptionKey = process.env.SESSION_ENCRYPTION_KEY || crypto.randomBytes(32).toString("hex");
       const iv = crypto.randomBytes(16);
-      const cipher = crypto.createCipheriv(
-        "aes-256-cbc",
-        Buffer.from(encryptionKey.slice(0, 64), "hex"),
-        iv,
-      );
-      const mockEncryptedData = Buffer.concat([
-        iv,
-        cipher.update(testData),
-        cipher.final(),
-      ]);
+      const cipher = crypto.createCipheriv("aes-256-cbc", Buffer.from(encryptionKey.slice(0, 64), "hex"), iv);
+      const mockEncryptedData = Buffer.concat([iv, cipher.update(testData), cipher.final()]);
 
       const testFile = {
         ...mockStorageFile,
@@ -397,9 +353,7 @@ describe("SessionManager", () => {
       mockBucket.getFiles.mockResolvedValueOnce([[testFile]]);
 
       // Test restore directly
-      const restoreMethod = (
-        sessionManager as any
-      ).restoreFromCloudStorage.bind(sessionManager);
+      const restoreMethod = (sessionManager as any).restoreFromCloudStorage.bind(sessionManager);
       const sessionPath = "/tmp/sessions/user123-+1234567890";
       const restored = await restoreMethod(userId, phoneNumber, sessionPath);
 
@@ -428,8 +382,7 @@ describe("SessionManager", () => {
     });
 
     it("should use CloudRunSessionOptimizer in cloud mode", async () => {
-      const CloudRunSessionOptimizer =
-        require("../services/CloudRunSessionOptimizer").CloudRunSessionOptimizer;
+      const CloudRunSessionOptimizer = require("../services/CloudRunSessionOptimizer").CloudRunSessionOptimizer;
 
       const mockOptimizer = {
         downloadSession: jest.fn().mockResolvedValue(true),
@@ -487,10 +440,7 @@ describe("SessionManager", () => {
     it("should delete local session files", async () => {
       // Configure mocks for this test
       (fs.promises.unlink as jest.Mock).mockClear();
-      (fs.promises.readdir as jest.Mock).mockResolvedValueOnce([
-        "creds.json",
-        "app-state.json",
-      ]);
+      (fs.promises.readdir as jest.Mock).mockResolvedValueOnce(["creds.json", "app-state.json"]);
 
       await sessionManager.deleteSession(userId, phoneNumber, true);
 
@@ -498,9 +448,7 @@ describe("SessionManager", () => {
     });
 
     it("should delete session from cloud storage", async () => {
-      mockBucket.getFiles.mockResolvedValue([
-        [mockStorageFile, mockStorageFile],
-      ]);
+      mockBucket.getFiles.mockResolvedValue([[mockStorageFile, mockStorageFile]]);
 
       await sessionManager.deleteSession(userId, phoneNumber, true);
 
@@ -525,9 +473,7 @@ describe("SessionManager", () => {
       mockBucket.getFiles.mockResolvedValue([[]]);
 
       // Should not throw
-      await expect(
-        sessionManager.deleteSession(userId, phoneNumber, true),
-      ).resolves.not.toThrow();
+      await expect(sessionManager.deleteSession(userId, phoneNumber, true)).resolves.not.toThrow();
     });
 
     it("should clear backup timer on deletion", async () => {
@@ -582,7 +528,7 @@ describe("SessionManager", () => {
       expect(mockDoc.ref.update).not.toHaveBeenCalledWith(
         expect.objectContaining({
           status: "disconnected",
-        }),
+        })
       );
     });
   });
@@ -594,10 +540,7 @@ describe("SessionManager", () => {
 
     it("should return true when local session exists", async () => {
       // Configure mocks
-      (fs.promises.readdir as jest.Mock).mockResolvedValueOnce([
-        "creds.json",
-        "app-state.json",
-      ]);
+      (fs.promises.readdir as jest.Mock).mockResolvedValueOnce(["creds.json", "app-state.json"]);
 
       const exists = await sessionManager.sessionExists(userId, phoneNumber);
 
@@ -619,9 +562,7 @@ describe("SessionManager", () => {
       sessionManager = new SessionManager(mockProxyManager, mockFirestore);
 
       // Configure mocks
-      (fs.promises.readdir as jest.Mock).mockRejectedValueOnce(
-        new Error("ENOENT"),
-      );
+      (fs.promises.readdir as jest.Mock).mockRejectedValueOnce(new Error("ENOENT"));
       mockBucket.getFiles.mockClear();
       mockBucket.getFiles.mockResolvedValueOnce([[mockStorageFile]]);
 
@@ -643,11 +584,7 @@ describe("SessionManager", () => {
 
     it("should list all valid sessions", async () => {
       // Configure mocks - need to mock for the sessionsDir path check
-      (fs.promises.readdir as jest.Mock).mockResolvedValueOnce([
-        "user1-+1111111111",
-        "user2-+2222222222",
-        "invalid-dir",
-      ]);
+      (fs.promises.readdir as jest.Mock).mockResolvedValueOnce(["user1-+1111111111", "user2-+2222222222", "invalid-dir"]);
 
       (fs.promises.stat as jest.Mock).mockClear();
       (fs.promises.stat as jest.Mock).mockResolvedValue({
@@ -684,9 +621,7 @@ describe("SessionManager", () => {
     });
 
     it("should handle errors gracefully", async () => {
-      (fs.promises.readdir as jest.Mock).mockRejectedValueOnce(
-        new Error("Permission denied"),
-      );
+      (fs.promises.readdir as jest.Mock).mockRejectedValueOnce(new Error("Permission denied"));
 
       const sessions = await sessionManager.listAllSessions();
 
@@ -728,9 +663,7 @@ describe("SessionManager", () => {
 
     it("should cleanup old sessions", async () => {
       // Mock old session directory
-      (fs.promises.readdir as jest.Mock).mockResolvedValue([
-        "user1-+1111111111",
-      ]);
+      (fs.promises.readdir as jest.Mock).mockResolvedValue(["user1-+1111111111"]);
 
       const oldDate = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000); // 60 days old
       (fs.promises.stat as jest.Mock).mockResolvedValue({
@@ -764,9 +697,7 @@ describe("SessionManager", () => {
     });
 
     it("should not cleanup recent sessions", async () => {
-      (fs.promises.readdir as jest.Mock).mockResolvedValue([
-        "user1-+1111111111",
-      ]);
+      (fs.promises.readdir as jest.Mock).mockResolvedValue(["user1-+1111111111"]);
 
       const recentDate = new Date(Date.now() - 1000); // 1 second old
       (fs.promises.stat as jest.Mock).mockResolvedValue({
@@ -796,9 +727,7 @@ describe("SessionManager", () => {
       mockBucket.file.mockClear();
       mockStorageFile.save.mockClear();
       (fs.promises.readdir as jest.Mock).mockResolvedValue(["creds.json"]);
-      (fs.promises.readFile as jest.Mock).mockResolvedValue(
-        Buffer.from("data"),
-      );
+      (fs.promises.readFile as jest.Mock).mockResolvedValue(Buffer.from("data"));
 
       await sessionManager.shutdown();
 
@@ -820,8 +749,7 @@ describe("SessionManager", () => {
 
     it("should shutdown cloud optimizer if present", async () => {
       process.env.SESSION_STORAGE_TYPE = "cloud";
-      const CloudRunSessionOptimizer =
-        require("../services/CloudRunSessionOptimizer").CloudRunSessionOptimizer;
+      const CloudRunSessionOptimizer = require("../services/CloudRunSessionOptimizer").CloudRunSessionOptimizer;
 
       const mockOptimizer = {
         downloadSession: jest.fn().mockResolvedValue(true),
@@ -866,10 +794,7 @@ describe("SessionManager", () => {
 
       (fs.promises.readdir as jest.Mock).mockResolvedValue(["creds.json"]);
 
-      const promises = [
-        sessionManager.deleteSession(userId, "+1111111111", true),
-        sessionManager.deleteSession(userId, "+2222222222", true),
-      ];
+      const promises = [sessionManager.deleteSession(userId, "+1111111111", true), sessionManager.deleteSession(userId, "+2222222222", true)];
 
       await expect(Promise.all(promises)).resolves.not.toThrow();
     });
@@ -882,9 +807,7 @@ describe("SessionManager", () => {
     });
 
     it("should handle storage initialization errors", async () => {
-      (fs.promises.mkdir as jest.Mock).mockRejectedValue(
-        new Error("Permission denied"),
-      );
+      (fs.promises.mkdir as jest.Mock).mockRejectedValue(new Error("Permission denied"));
 
       // Should not throw on initialization
       const manager = new SessionManager(mockProxyManager, mockFirestore);
@@ -894,27 +817,19 @@ describe("SessionManager", () => {
     it("should handle backup failures gracefully", async () => {
       // Mock the session directory exists
       (fs.promises.readdir as jest.Mock).mockResolvedValue(["creds.json"]);
-      (fs.promises.readFile as jest.Mock).mockResolvedValue(
-        Buffer.from("data"),
-      );
+      (fs.promises.readFile as jest.Mock).mockResolvedValue(Buffer.from("data"));
 
       // Mock storage save to fail
       mockStorageFile.save.mockClear();
       mockStorageFile.save.mockRejectedValue(new Error("Storage error"));
 
       // Should throw the storage error
-      const backupMethod = (sessionManager as any).backupToCloudStorage.bind(
-        sessionManager,
-      );
-      await expect(backupMethod(userId, phoneNumber)).rejects.toThrow(
-        "Storage error",
-      );
+      const backupMethod = (sessionManager as any).backupToCloudStorage.bind(sessionManager);
+      await expect(backupMethod(userId, phoneNumber)).rejects.toThrow("Storage error");
     });
 
     it("should handle Firestore update failures", async () => {
-      mockCollection.doc().update = jest
-        .fn()
-        .mockRejectedValue(new Error("Firestore error"));
+      mockCollection.doc().update = jest.fn().mockRejectedValue(new Error("Firestore error"));
 
       // Should not throw - errors are logged
       await sessionManager.createConnection(userId, phoneNumber);
@@ -1018,24 +933,15 @@ describe("SessionManager Integration", () => {
       }),
     } as any;
 
-    integrationSessionManager = new SessionManager(
-      mockProxyManager,
-      mockFirestore,
-    );
+    integrationSessionManager = new SessionManager(mockProxyManager, mockFirestore);
 
     // Create session
-    const socket = await integrationSessionManager.createConnection(
-      "user123",
-      "+1234567890",
-    );
+    const socket = await integrationSessionManager.createConnection("user123", "+1234567890");
     expect(socket).toBeDefined();
 
     // Check session exists
     (fs.promises.readdir as jest.Mock).mockResolvedValueOnce(["creds.json"]);
-    const exists = await integrationSessionManager.sessionExists(
-      "user123",
-      "+1234567890",
-    );
+    const exists = await integrationSessionManager.sessionExists("user123", "+1234567890");
     expect(exists).toBe(true);
 
     // Get metrics
@@ -1044,11 +950,7 @@ describe("SessionManager Integration", () => {
 
     // Delete session
     (fs.promises.readdir as jest.Mock).mockResolvedValueOnce(["creds.json"]);
-    await integrationSessionManager.deleteSession(
-      "user123",
-      "+1234567890",
-      true,
-    );
+    await integrationSessionManager.deleteSession("user123", "+1234567890", true);
 
     // Shutdown
     await integrationSessionManager.shutdown();
@@ -1086,9 +988,7 @@ describe("SessionManager - Adversarial Edge Cases", () => {
       bucket: jest.fn().mockReturnValue(mockBucket),
     } as any;
 
-    (Storage as jest.MockedClass<typeof Storage>).mockImplementation(
-      () => mockStorage,
-    );
+    (Storage as jest.MockedClass<typeof Storage>).mockImplementation(() => mockStorage);
 
     mockProxyManager = {
       createProxyAgent: jest.fn().mockResolvedValue(null),
@@ -1165,15 +1065,10 @@ describe("SessionManager - Adversarial Edge Cases", () => {
       mockBucket.getFiles.mockResolvedValueOnce([[mockStorageFile]]);
 
       // Mock local session doesn't exist
-      (fs.promises.readdir as jest.Mock).mockRejectedValueOnce(
-        new Error("ENOENT"),
-      );
+      (fs.promises.readdir as jest.Mock).mockRejectedValueOnce(new Error("ENOENT"));
 
       // This should either fail gracefully or create new session
-      const result = await sessionManager.createConnection(
-        "user123",
-        "+1234567890",
-      );
+      const result = await sessionManager.createConnection("user123", "+1234567890");
 
       // Should still create a connection (with new auth state)
       expect(result).toBeDefined();
@@ -1187,14 +1082,10 @@ describe("SessionManager - Adversarial Edge Cases", () => {
       mockStorageFile.download.mockResolvedValueOnce([invalidData]);
       mockBucket.getFiles.mockResolvedValueOnce([[mockStorageFile]]);
 
-      (fs.promises.readdir as jest.Mock).mockRejectedValueOnce(
-        new Error("ENOENT"),
-      );
+      (fs.promises.readdir as jest.Mock).mockRejectedValueOnce(new Error("ENOENT"));
 
       // Should handle decryption failure gracefully
-      await expect(
-        sessionManager.createConnection("user123", "+1234567890"),
-      ).resolves.toBeDefined();
+      await expect(sessionManager.createConnection("user123", "+1234567890")).resolves.toBeDefined();
     });
   });
 
@@ -1204,11 +1095,7 @@ describe("SessionManager - Adversarial Edge Cases", () => {
       sessionManager = new SessionManager(mockProxyManager, mockFirestore);
 
       // Mock multiple files but one fails mid-write
-      (fs.promises.readdir as jest.Mock).mockResolvedValueOnce([
-        "creds.json",
-        "app-state-sync-key-1.json",
-        "app-state-sync-key-2.json",
-      ]);
+      (fs.promises.readdir as jest.Mock).mockResolvedValueOnce(["creds.json", "app-state-sync-key-1.json", "app-state-sync-key-2.json"]);
 
       (fs.promises.readFile as jest.Mock)
         .mockResolvedValueOnce(Buffer.from("file1"))
@@ -1216,19 +1103,12 @@ describe("SessionManager - Adversarial Edge Cases", () => {
         .mockResolvedValueOnce(Buffer.from("file3"));
 
       // First file succeeds, second fails
-      mockStorageFile.save
-        .mockResolvedValueOnce(undefined)
-        .mockRejectedValueOnce(new Error("Disk quota exceeded"))
-        .mockResolvedValueOnce(undefined);
+      mockStorageFile.save.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error("Disk quota exceeded")).mockResolvedValueOnce(undefined);
 
-      const backupMethod = (sessionManager as any).backupToCloudStorage.bind(
-        sessionManager,
-      );
+      const backupMethod = (sessionManager as any).backupToCloudStorage.bind(sessionManager);
 
       // Should throw error on partial failure
-      await expect(backupMethod("user123", "+1234567890")).rejects.toThrow(
-        "Disk quota exceeded",
-      );
+      await expect(backupMethod("user123", "+1234567890")).rejects.toThrow("Disk quota exceeded");
 
       // BUG: Some files uploaded but not all - inconsistent state!
     });
@@ -1239,14 +1119,8 @@ describe("SessionManager - Adversarial Edge Cases", () => {
       // BUG EXPECTED: Race condition in session creation
       sessionManager = new SessionManager(mockProxyManager, mockFirestore);
 
-      const promise1 = sessionManager.createConnection(
-        "user123",
-        "+1234567890",
-      );
-      const promise2 = sessionManager.createConnection(
-        "user123",
-        "+1234567890",
-      );
+      const promise1 = sessionManager.createConnection("user123", "+1234567890");
+      const promise2 = sessionManager.createConnection("user123", "+1234567890");
 
       const [result1, result2] = await Promise.all([promise1, promise2]);
 
@@ -1263,13 +1137,9 @@ describe("SessionManager - Adversarial Edge Cases", () => {
       sessionManager = new SessionManager(mockProxyManager, mockFirestore);
 
       (fs.promises.readdir as jest.Mock).mockResolvedValue(["creds.json"]);
-      (fs.promises.readFile as jest.Mock).mockResolvedValue(
-        Buffer.from("data"),
-      );
+      (fs.promises.readFile as jest.Mock).mockResolvedValue(Buffer.from("data"));
 
-      const backupMethod = (sessionManager as any).backupToCloudStorage.bind(
-        sessionManager,
-      );
+      const backupMethod = (sessionManager as any).backupToCloudStorage.bind(sessionManager);
 
       // Trigger two backups simultaneously
       const promise1 = backupMethod("user123", "+1234567890");
@@ -1292,17 +1162,10 @@ describe("SessionManager - Adversarial Edge Cases", () => {
 
       // Change encryption key by creating new instance
       const originalKey = process.env.SESSION_ENCRYPTION_KEY;
-      process.env.SESSION_ENCRYPTION_KEY = crypto
-        .randomBytes(32)
-        .toString("hex");
+      process.env.SESSION_ENCRYPTION_KEY = crypto.randomBytes(32).toString("hex");
 
-      const newSessionManager = new SessionManager(
-        mockProxyManager,
-        mockFirestore,
-      );
-      const decrypt = (newSessionManager as any).decrypt.bind(
-        newSessionManager,
-      );
+      const newSessionManager = new SessionManager(mockProxyManager, mockFirestore);
+      const decrypt = (newSessionManager as any).decrypt.bind(newSessionManager);
 
       // Should fail to decrypt with different key
       expect(() => decrypt(encrypted)).toThrow();
@@ -1319,22 +1182,14 @@ describe("SessionManager - Adversarial Edge Cases", () => {
       sessionManager = new SessionManager(mockProxyManager, mockFirestore);
 
       (fs.promises.readdir as jest.Mock).mockResolvedValueOnce(["creds.json"]);
-      (fs.promises.readFile as jest.Mock).mockResolvedValueOnce(
-        Buffer.from("data"),
-      );
+      (fs.promises.readFile as jest.Mock).mockResolvedValueOnce(Buffer.from("data"));
 
       // Mock quota exceeded error
-      mockStorageFile.save.mockRejectedValueOnce(
-        new Error("Quota exceeded: Storage limit reached"),
-      );
+      mockStorageFile.save.mockRejectedValueOnce(new Error("Quota exceeded: Storage limit reached"));
 
-      const backupMethod = (sessionManager as any).backupToCloudStorage.bind(
-        sessionManager,
-      );
+      const backupMethod = (sessionManager as any).backupToCloudStorage.bind(sessionManager);
 
-      await expect(backupMethod("user123", "+1234567890")).rejects.toThrow(
-        "Quota exceeded",
-      );
+      await expect(backupMethod("user123", "+1234567890")).rejects.toThrow("Quota exceeded");
 
       // BUG: Error is thrown but might not be handled properly in auto-backup
     });
@@ -1346,21 +1201,15 @@ describe("SessionManager - Adversarial Edge Cases", () => {
         () =>
           new Promise((_, reject) => {
             setTimeout(() => reject(new Error("Network timeout")), 100);
-          }),
+          })
       );
 
       (fs.promises.readdir as jest.Mock).mockResolvedValueOnce(["creds.json"]);
-      (fs.promises.readFile as jest.Mock).mockResolvedValueOnce(
-        Buffer.from("data"),
-      );
+      (fs.promises.readFile as jest.Mock).mockResolvedValueOnce(Buffer.from("data"));
 
-      const backupMethod = (sessionManager as any).backupToCloudStorage.bind(
-        sessionManager,
-      );
+      const backupMethod = (sessionManager as any).backupToCloudStorage.bind(sessionManager);
 
-      await expect(backupMethod("user123", "+1234567890")).rejects.toThrow(
-        "Network timeout",
-      );
+      await expect(backupMethod("user123", "+1234567890")).rejects.toThrow("Network timeout");
     });
   });
 
@@ -1370,9 +1219,7 @@ describe("SessionManager - Adversarial Edge Cases", () => {
 
       const longPhoneNumber = "+1" + "2".repeat(1000);
 
-      await expect(
-        sessionManager.createConnection("user123", longPhoneNumber),
-      ).rejects.toThrow("Invalid phone number format");
+      await expect(sessionManager.createConnection("user123", longPhoneNumber)).rejects.toThrow("Invalid phone number format");
 
       // BUG: Might create filesystem paths that are too long
     });
@@ -1382,9 +1229,7 @@ describe("SessionManager - Adversarial Edge Cases", () => {
 
       const specialPhone = "+1234<script>alert(1)</script>";
 
-      await expect(
-        sessionManager.createConnection("user123", specialPhone),
-      ).rejects.toThrow("Invalid phone number format");
+      await expect(sessionManager.createConnection("user123", specialPhone)).rejects.toThrow("Invalid phone number format");
     });
 
     it("should handle phone numbers with null bytes", async () => {
@@ -1392,9 +1237,7 @@ describe("SessionManager - Adversarial Edge Cases", () => {
 
       const nullBytePhone = "+1234\x00567890";
 
-      await expect(
-        sessionManager.createConnection("user123", nullBytePhone),
-      ).rejects.toThrow();
+      await expect(sessionManager.createConnection("user123", nullBytePhone)).rejects.toThrow();
     });
   });
 
@@ -1406,9 +1249,7 @@ describe("SessionManager - Adversarial Edge Cases", () => {
 
       // Create 100 sessions rapidly
       for (let i = 0; i < 100; i++) {
-        sessions.push(
-          sessionManager.createConnection("user123", `+${1000000000 + i}`),
-        );
+        sessions.push(sessionManager.createConnection("user123", `+${1000000000 + i}`));
       }
 
       await Promise.all(sessions);
@@ -1437,11 +1278,7 @@ describe("SessionManager - Adversarial Edge Cases", () => {
       (fs.promises.readdir as jest.Mock).mockResolvedValue(["creds.json"]);
 
       for (let i = 0; i < 10; i++) {
-        await sessionManager.deleteSession(
-          "user123",
-          `+${1000000000 + i}`,
-          true,
-        );
+        await sessionManager.deleteSession("user123", `+${1000000000 + i}`, true);
       }
 
       // All timers should be cleared
@@ -1462,9 +1299,7 @@ describe("SessionManager - Adversarial Edge Cases", () => {
         "app-state-sync-key-4.json",
       ]);
 
-      (fs.promises.readFile as jest.Mock).mockResolvedValue(
-        Buffer.from("data"),
-      );
+      (fs.promises.readFile as jest.Mock).mockResolvedValue(Buffer.from("data"));
 
       // Track file operations for atomic behavior verification
       let uploadAttempts = 0;
@@ -1478,20 +1313,11 @@ describe("SessionManager - Adversarial Edge Cases", () => {
       });
 
       // Mock getFiles for cleanup to return temp files
-      mockBucket.getFiles.mockResolvedValue([
-        [
-          { delete: jest.fn().mockResolvedValue(undefined) },
-          { delete: jest.fn().mockResolvedValue(undefined) },
-        ],
-      ]);
+      mockBucket.getFiles.mockResolvedValue([[{ delete: jest.fn().mockResolvedValue(undefined) }, { delete: jest.fn().mockResolvedValue(undefined) }]]);
 
-      const backupMethod = (sessionManager as any).backupToCloudStorage.bind(
-        sessionManager,
-      );
+      const backupMethod = (sessionManager as any).backupToCloudStorage.bind(sessionManager);
 
-      await expect(backupMethod("user123", "+1234567890")).rejects.toThrow(
-        "Network failure",
-      );
+      await expect(backupMethod("user123", "+1234567890")).rejects.toThrow("Network failure");
 
       // FIXED: Atomic behavior - all files attempted in parallel via Promise.all
       // When one fails, all fail (no partial backup)
@@ -1501,7 +1327,7 @@ describe("SessionManager - Adversarial Edge Cases", () => {
       expect(mockBucket.getFiles).toHaveBeenCalledWith(
         expect.objectContaining({
           prefix: expect.stringContaining(".tmp-"),
-        }),
+        })
       );
     });
   });
@@ -1513,9 +1339,7 @@ describe("SessionManager - Adversarial Edge Cases", () => {
       const traversalPhone = "+../../etc/passwd";
 
       // Should be rejected by phone number validation or path sanitization
-      await expect(
-        sessionManager.createConnection("user123", traversalPhone),
-      ).rejects.toThrow(); // Can be either "Invalid phone number format" or "contains directory traversal sequences"
+      await expect(sessionManager.createConnection("user123", traversalPhone)).rejects.toThrow(); // Can be either "Invalid phone number format" or "contains directory traversal sequences"
     });
 
     it("should prevent directory traversal in user IDs", async () => {
@@ -1544,10 +1368,7 @@ describe("SessionManager - Adversarial Edge Cases", () => {
       const phoneNumber = "+1234567890";
 
       // Test if path sanitization is in place
-      const sessionKey = (sessionManager as any).getSessionKey(
-        maliciousUserId,
-        phoneNumber,
-      );
+      const sessionKey = (sessionManager as any).getSessionKey(maliciousUserId, phoneNumber);
 
       // FIXED: getSessionKey now sanitizes userId to remove directory traversal
       expect(sessionKey).not.toContain("../"); // Security vulnerability fixed!
@@ -1562,30 +1383,19 @@ describe("SessionManager - Adversarial Edge Cases", () => {
       await sessionManager.createConnection("user123", "+1234567890");
 
       (fs.promises.readdir as jest.Mock).mockResolvedValue(["creds.json"]);
-      (fs.promises.readFile as jest.Mock).mockResolvedValue(
-        Buffer.from("data"),
-      );
+      (fs.promises.readFile as jest.Mock).mockResolvedValue(Buffer.from("data"));
 
-      const backupMethod = (sessionManager as any).backupToCloudStorage.bind(
-        sessionManager,
-      );
+      const backupMethod = (sessionManager as any).backupToCloudStorage.bind(sessionManager);
 
       // Trigger backup and delete simultaneously
       const backupPromise = backupMethod("user123", "+1234567890");
-      const deletePromise = sessionManager.deleteSession(
-        "user123",
-        "+1234567890",
-        true,
-      );
+      const deletePromise = sessionManager.deleteSession("user123", "+1234567890", true);
 
       // One should fail or both should handle gracefully
       await Promise.allSettled([backupPromise, deletePromise]);
 
       // Check final state is consistent
-      const exists = await sessionManager.sessionExists(
-        "user123",
-        "+1234567890",
-      );
+      const exists = await sessionManager.sessionExists("user123", "+1234567890");
       expect(typeof exists).toBe("boolean");
     });
   });
@@ -1636,9 +1446,7 @@ describe("SessionManager - Adversarial Edge Cases", () => {
       sessionManager = new SessionManager(mockProxyManager, mockFirestore);
 
       // Mock file system full error
-      (fs.promises.writeFile as jest.Mock).mockRejectedValueOnce(
-        new Error("ENOSPC: no space left on device"),
-      );
+      (fs.promises.writeFile as jest.Mock).mockRejectedValueOnce(new Error("ENOSPC: no space left on device"));
 
       // Should handle gracefully
       try {
@@ -1651,15 +1459,10 @@ describe("SessionManager - Adversarial Edge Cases", () => {
     it("should handle Cloud Storage connection failure", async () => {
       sessionManager = new SessionManager(mockProxyManager, mockFirestore);
 
-      mockBucket.getFiles.mockRejectedValueOnce(
-        new Error("Service unavailable"),
-      );
+      mockBucket.getFiles.mockRejectedValueOnce(new Error("Service unavailable"));
 
       // Should fallback to local session
-      const result = await sessionManager.createConnection(
-        "user123",
-        "+1234567890",
-      );
+      const result = await sessionManager.createConnection("user123", "+1234567890");
 
       expect(result).toBeDefined();
     });
@@ -1669,14 +1472,10 @@ describe("SessionManager - Adversarial Edge Cases", () => {
     it("should handle deleting session that doesn't exist", async () => {
       sessionManager = new SessionManager(mockProxyManager, mockFirestore);
 
-      (fs.promises.readdir as jest.Mock).mockRejectedValue(
-        new Error("ENOENT: no such file or directory"),
-      );
+      (fs.promises.readdir as jest.Mock).mockRejectedValue(new Error("ENOENT: no such file or directory"));
 
       // Should not throw
-      await expect(
-        sessionManager.deleteSession("nonexistent", "+9999999999", true),
-      ).resolves.not.toThrow();
+      await expect(sessionManager.deleteSession("nonexistent", "+9999999999", true)).resolves.not.toThrow();
     });
 
     it("should handle shutdown with active backup operations", async () => {
@@ -1686,9 +1485,7 @@ describe("SessionManager - Adversarial Edge Cases", () => {
       await sessionManager.createConnection("user123", "+1234567890");
 
       (fs.promises.readdir as jest.Mock).mockResolvedValue(["creds.json"]);
-      (fs.promises.readFile as jest.Mock).mockResolvedValue(
-        Buffer.from("data"),
-      );
+      (fs.promises.readFile as jest.Mock).mockResolvedValue(Buffer.from("data"));
 
       // Shutdown immediately
       await sessionManager.shutdown();

@@ -25,9 +25,7 @@ describe("MediaService", () => {
     // Mock Storage and its methods
     mockStorageFile = {
       save: jest.fn().mockResolvedValue(undefined),
-      getSignedUrl: jest
-        .fn()
-        .mockResolvedValue(["https://signed-url.com/file.jpg"]),
+      getSignedUrl: jest.fn().mockResolvedValue(["https://signed-url.com/file.jpg"]),
       delete: jest.fn().mockResolvedValue(undefined),
     };
 
@@ -39,9 +37,7 @@ describe("MediaService", () => {
       bucket: jest.fn().mockReturnValue(mockBucket),
     } as any;
 
-    (Storage as jest.MockedClass<typeof Storage>).mockImplementation(
-      () => mockStorage,
-    );
+    (Storage as jest.MockedClass<typeof Storage>).mockImplementation(() => mockStorage);
 
     // Set environment variables
     process.env.GOOGLE_CLOUD_PROJECT = "test-project";
@@ -67,25 +63,17 @@ describe("MediaService", () => {
     const phoneNumber = "+1234567890";
 
     it("should upload media successfully", async () => {
-      const result = await mediaService.uploadMedia(
-        testMediaFile,
-        userId,
-        phoneNumber,
-      );
+      const result = await mediaService.uploadMedia(testMediaFile, userId, phoneNumber);
 
       expect(result).toEqual({
         url: "https://signed-url.com/file.jpg",
-        filename: expect.stringMatching(
-          /whatsapp-media\/user123\/\+1234567890\/\d+_.+\.jpg/,
-        ),
+        filename: expect.stringMatching(/whatsapp-media\/user123\/\+1234567890\/\d+_.+\.jpg/),
         contentType: "image/jpeg",
         size: expect.any(Number), // Size may change due to processing
         bucket: "test-bucket",
       });
 
-      expect(mockBucket.file).toHaveBeenCalledWith(
-        expect.stringContaining("whatsapp-media/user123"),
-      );
+      expect(mockBucket.file).toHaveBeenCalledWith(expect.stringContaining("whatsapp-media/user123"));
       expect(mockStorageFile.save).toHaveBeenCalledWith(
         testMediaFile.buffer,
         expect.objectContaining({
@@ -93,7 +81,7 @@ describe("MediaService", () => {
             contentType: "image/jpeg",
           }),
           gzip: true,
-        }),
+        })
       );
       expect(mockStorageFile.getSignedUrl).toHaveBeenCalledWith({
         action: "read",
@@ -107,9 +95,7 @@ describe("MediaService", () => {
         size: 20 * 1024 * 1024, // 20MB (exceeds 16MB limit)
       };
 
-      await expect(
-        mediaService.uploadMedia(largeFile, userId, phoneNumber),
-      ).rejects.toThrow("File size 20971520 exceeds maximum 16777216 bytes");
+      await expect(mediaService.uploadMedia(largeFile, userId, phoneNumber)).rejects.toThrow("File size 20971520 exceeds maximum 16777216 bytes");
     });
 
     it("should compress large images", async () => {
@@ -117,9 +103,7 @@ describe("MediaService", () => {
         width: 2000,
         height: 1500,
         contain: jest.fn().mockReturnThis(),
-        getBuffer: jest
-          .fn()
-          .mockResolvedValue(Buffer.from("compressed image")),
+        getBuffer: jest.fn().mockResolvedValue(Buffer.from("compressed image")),
       };
 
       (Jimp.fromBuffer as jest.Mock).mockResolvedValue(mockJimpInstance);
@@ -136,10 +120,7 @@ describe("MediaService", () => {
       expect(Jimp.fromBuffer).toHaveBeenCalledWith(largeImageFile.buffer);
       expect(mockJimpInstance.contain).toHaveBeenCalledWith({ w: 1920, h: 1920 });
       expect(mockJimpInstance.getBuffer).toHaveBeenCalledWith("image/jpeg", { quality: 85 });
-      expect(mockStorageFile.save).toHaveBeenCalledWith(
-        Buffer.from("compressed image"),
-        expect.any(Object),
-      );
+      expect(mockStorageFile.save).toHaveBeenCalledWith(Buffer.from("compressed image"), expect.any(Object));
     });
 
     it("should handle different file types", async () => {
@@ -156,11 +137,7 @@ describe("MediaService", () => {
           mimetype: testCase.mimetype,
         };
 
-        const result = await mediaService.uploadMedia(
-          file,
-          userId,
-          phoneNumber,
-        );
+        const result = await mediaService.uploadMedia(file, userId, phoneNumber);
 
         expect(result.filename).toContain(testCase.expectedExtension);
         expect(result.contentType).toBe(testCase.mimetype);
@@ -170,25 +147,16 @@ describe("MediaService", () => {
     it("should handle upload failures gracefully", async () => {
       mockStorageFile.save.mockRejectedValue(new Error("Storage error"));
 
-      await expect(
-        mediaService.uploadMedia(testMediaFile, userId, phoneNumber),
-      ).rejects.toThrow("Storage error");
+      await expect(mediaService.uploadMedia(testMediaFile, userId, phoneNumber)).rejects.toThrow("Storage error");
     });
   });
 
   describe("downloadAndUploadWhatsAppMedia", () => {
     it("should download and upload WhatsApp media", async () => {
-      const mockDownload = jest
-        .fn()
-        .mockResolvedValue(Buffer.from("whatsapp media"));
+      const mockDownload = jest.fn().mockResolvedValue(Buffer.from("whatsapp media"));
       const mimetype = "image/jpeg";
 
-      const result = await mediaService.downloadAndUploadWhatsAppMedia(
-        mockDownload,
-        mimetype,
-        "user123",
-        "+1234567890",
-      );
+      const result = await mediaService.downloadAndUploadWhatsAppMedia(mockDownload, mimetype, "user123", "+1234567890");
 
       expect(mockDownload).toHaveBeenCalled();
       expect(result.contentType).toBe(mimetype);
@@ -196,18 +164,9 @@ describe("MediaService", () => {
     });
 
     it("should handle download failures", async () => {
-      const mockDownload = jest
-        .fn()
-        .mockRejectedValue(new Error("Download failed"));
+      const mockDownload = jest.fn().mockRejectedValue(new Error("Download failed"));
 
-      await expect(
-        mediaService.downloadAndUploadWhatsAppMedia(
-          mockDownload,
-          "image/jpeg",
-          "user123",
-          "+1234567890",
-        ),
-      ).rejects.toThrow("Download failed");
+      await expect(mediaService.downloadAndUploadWhatsAppMedia(mockDownload, "image/jpeg", "user123", "+1234567890")).rejects.toThrow("Download failed");
     });
   });
 
@@ -224,9 +183,7 @@ describe("MediaService", () => {
     it("should handle deletion failures", async () => {
       mockStorageFile.delete.mockRejectedValue(new Error("Delete failed"));
 
-      await expect(mediaService.deleteMedia("test.jpg")).rejects.toThrow(
-        "Delete failed",
-      );
+      await expect(mediaService.deleteMedia("test.jpg")).rejects.toThrow("Delete failed");
     });
   });
 
@@ -242,9 +199,7 @@ describe("MediaService", () => {
       ];
 
       // Access private method for testing (TypeScript workaround)
-      const getFileExtension = (mediaService as any).getFileExtension.bind(
-        mediaService,
-      );
+      const getFileExtension = (mediaService as any).getFileExtension.bind(mediaService);
 
       testCases.forEach(({ mimetype, expected }) => {
         expect(getFileExtension(mimetype)).toBe(expected);
@@ -299,9 +254,7 @@ describe("MediaService Integration", () => {
       width: 800,
       height: 600,
       contain: jest.fn().mockReturnThis(),
-      getBuffer: jest
-        .fn()
-        .mockResolvedValue(Buffer.from("processed image")),
+      getBuffer: jest.fn().mockResolvedValue(Buffer.from("processed image")),
     };
 
     (Jimp.fromBuffer as jest.Mock).mockResolvedValue(mockJimpInstance);
@@ -316,11 +269,7 @@ describe("MediaService Integration", () => {
       originalname: "photo.jpg",
     };
 
-    const result = await mediaService.uploadMedia(
-      imageFile,
-      "user123",
-      "+1234567890",
-    );
+    const result = await mediaService.uploadMedia(imageFile, "user123", "+1234567890");
 
     expect(result).toEqual({
       url: "https://signed-url.com/file.jpg",

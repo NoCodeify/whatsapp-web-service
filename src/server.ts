@@ -63,10 +63,7 @@ let sessionRecoveryService: SessionRecoveryService | undefined;
 
 // Always initialize ISP proxy services since we hardcode to ISP
 dynamicProxyService = new DynamicProxyService();
-sessionRecoveryService = new SessionRecoveryService(
-  firestore,
-  `instance_${process.env.HOSTNAME || "unknown"}_${Date.now()}`,
-);
+sessionRecoveryService = new SessionRecoveryService(firestore, `instance_${process.env.HOSTNAME || "unknown"}_${Date.now()}`);
 
 // Initialize core components with proper dependencies
 const proxyManager = new ProxyManager(firestore, dynamicProxyService);
@@ -74,10 +71,7 @@ const sessionManager = new SessionManager(proxyManager, firestore);
 const connectionStateManager = new ConnectionStateManager(firestore);
 
 // Initialize status reconciliation service
-const statusReconciliationService = new StatusReconciliationService(
-  firestore,
-  connectionStateManager,
-);
+const statusReconciliationService = new StatusReconciliationService(firestore, connectionStateManager);
 
 // Set up reconciliation event listeners for monitoring
 statusReconciliationService.on("reconciliation-complete", (metrics) => {
@@ -90,7 +84,7 @@ statusReconciliationService.on("reconciliation-complete", (metrics) => {
       desyncsFixed: metrics.desyncsFixed,
       desyncsFailed: metrics.desyncsFailed,
     },
-    "Status reconciliation completed",
+    "Status reconciliation completed"
   );
 });
 
@@ -101,7 +95,7 @@ statusReconciliationService.on("excessive-desyncs", (data) => {
       threshold: data.threshold,
       desyncs: data.desyncs,
     },
-    "ALERT: Excessive desyncs detected!",
+    "ALERT: Excessive desyncs detected!"
   );
 });
 
@@ -110,7 +104,7 @@ statusReconciliationService.on("reconciliation-error", (data) => {
     {
       error: data.error,
     },
-    "Error during reconciliation",
+    "Error during reconciliation"
   );
 });
 
@@ -118,7 +112,7 @@ statusReconciliationService.on("reconciliation-error", (data) => {
 const reconnectionService = new ReconnectionService(
   sessionManager,
   undefined as any, // Will be set after connectionPool is created
-  firestore,
+  firestore
 );
 
 // Initialize Cloud Run optimization services BEFORE ConnectionPool
@@ -134,7 +128,7 @@ const connectionPool = new ConnectionPool(
   connectionStateManager,
   webSocketManager,
   errorHandler,
-  instanceCoordinator,
+  instanceCoordinator
 );
 
 // Set connection pool reference for recovery service
@@ -171,10 +165,7 @@ const app = express();
 const server = createServer(app);
 const io = new SocketServer(server, {
   cors: {
-    origin:
-      process.env.CORS_ORIGIN === "*"
-        ? true
-        : process.env.CORS_ORIGIN?.split(",") || ["http://localhost:3000"],
+    origin: process.env.CORS_ORIGIN === "*" ? true : process.env.CORS_ORIGIN?.split(",") || ["http://localhost:3000"],
     credentials: true,
     methods: ["GET", "POST"],
   },
@@ -184,7 +175,7 @@ const io = new SocketServer(server, {
 app.use(
   helmet({
     crossOriginResourcePolicy: { policy: "cross-origin" },
-  }),
+  })
 );
 app.use(compression());
 
@@ -202,10 +193,7 @@ const corsOptions = {
     // In development mode, allow all localhost origins (Flutter Web uses dynamic ports)
     if (process.env.NODE_ENV === "development" && origin) {
       const isLocalhost =
-        origin.startsWith("http://localhost:") ||
-        origin.startsWith("http://127.0.0.1:") ||
-        origin === "http://localhost" ||
-        origin === "http://127.0.0.1";
+        origin.startsWith("http://localhost:") || origin.startsWith("http://127.0.0.1:") || origin === "http://localhost" || origin === "http://127.0.0.1";
 
       if (isLocalhost) {
         return callback(null, true);
@@ -213,9 +201,7 @@ const corsOptions = {
     }
 
     // Otherwise, check against allowed origins
-    const allowedOrigins = process.env.CORS_ORIGIN?.split(",") || [
-      "http://localhost:3000",
-    ];
+    const allowedOrigins = process.env.CORS_ORIGIN?.split(",") || ["http://localhost:3000"];
     if (allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
@@ -247,9 +233,7 @@ declare global {
 // Correlation ID middleware - essential for request tracing
 app.use((req: Request, res: Response, next: NextFunction) => {
   // Generate or use existing correlation ID
-  req.correlationId =
-    (req.headers["x-correlation-id"] as string) ||
-    `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  req.correlationId = (req.headers["x-correlation-id"] as string) || `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   req.startTime = Date.now();
 
   // Set correlation ID in response headers for client tracking
@@ -272,7 +256,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
       userAgent: req.headers["user-agent"],
       contentLength: req.headers["content-length"],
     },
-    "Request received",
+    "Request received"
   );
 
   res.on("finish", () => {
@@ -290,10 +274,9 @@ app.use((req: Request, res: Response, next: NextFunction) => {
         contentLength: res.get("content-length"),
         // Add severity based on status code
         ...(res.statusCode >= 500 && { severity: "ERROR" }),
-        ...(res.statusCode >= 400 &&
-          res.statusCode < 500 && { severity: "WARNING" }),
+        ...(res.statusCode >= 400 && res.statusCode < 500 && { severity: "WARNING" }),
       },
-      `Request completed: ${res.statusCode >= 400 ? "failed" : "success"}`,
+      `Request completed: ${res.statusCode >= 400 ? "failed" : "success"}`
     );
 
     // Log slow requests as warnings
@@ -306,7 +289,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
           duration,
           threshold: 5000,
         },
-        "Slow request detected",
+        "Slow request detected"
       );
     }
   });
@@ -325,10 +308,7 @@ app.get("/health", async (_req: Request, res: Response) => {
     const getContainerMemoryLimit = (): number => {
       try {
         const fs = require("fs");
-        const memLimit = fs.readFileSync(
-          "/sys/fs/cgroup/memory/memory.limit_in_bytes",
-          "utf8",
-        );
+        const memLimit = fs.readFileSync("/sys/fs/cgroup/memory/memory.limit_in_bytes", "utf8");
         return parseInt(memLimit.trim());
       } catch {
         // Fallback for non-containerized environments
@@ -352,15 +332,11 @@ app.get("/health", async (_req: Request, res: Response) => {
     const reconciliationMetrics = statusReconciliationService.getMetrics();
 
     // Determine overall health status
-    const hasOpenCircuitBreaker = errorStats.circuitBreakers.some(
-      (cb) => cb.state === "open",
-    );
+    const hasOpenCircuitBreaker = errorStats.circuitBreakers.some((cb) => cb.state === "open");
     const isHealthy =
       rssMemoryPercentage < 90 &&
       metrics.activeConnections >= 0 &&
-      (webSocketStats.failedConnections || 0) /
-        Math.max(webSocketStats.totalConnections || 1, 1) <
-        0.5 &&
+      (webSocketStats.failedConnections || 0) / Math.max(webSocketStats.totalConnections || 1, 1) < 0.5 &&
       !hasOpenCircuitBreaker;
 
     const healthData = {
@@ -419,14 +395,10 @@ app.get("/health", async (_req: Request, res: Response) => {
       // Error handling statistics
       errors: {
         totalCircuitBreakers: errorStats.circuitBreakers.length,
-        openCircuitBreakers: errorStats.circuitBreakers.filter(
-          (cb) => cb.state === "open",
-        ).length,
+        openCircuitBreakers: errorStats.circuitBreakers.filter((cb) => cb.state === "open").length,
         totalErrorTypes: errorStats.errorStats.length,
         recentErrors: errorStats.errorStats.filter(
-          (e) =>
-            new Date().getTime() - new Date(e.lastOccurrence).getTime() <
-            300000, // 5 minutes
+          (e) => new Date().getTime() - new Date(e.lastOccurrence).getTime() < 300000 // 5 minutes
         ).length,
         circuitBreakers: errorStats.circuitBreakers,
         errorStats: errorStats.errorStats,
@@ -443,12 +415,7 @@ app.get("/health", async (_req: Request, res: Response) => {
         desyncFailed: reconciliationMetrics.desyncFailed,
         lastCheckTime: reconciliationMetrics.lastCheckTime,
         recentDesyncs: reconciliationMetrics.desyncs.slice(-10), // Last 10 desyncs
-        successRate:
-          reconciliationMetrics.desyncDetected > 0
-            ? (reconciliationMetrics.desyncFixed /
-                reconciliationMetrics.desyncDetected) *
-              100
-            : 100,
+        successRate: reconciliationMetrics.desyncDetected > 0 ? (reconciliationMetrics.desyncFixed / reconciliationMetrics.desyncDetected) * 100 : 100,
       },
 
       // Environment info
@@ -484,10 +451,7 @@ app.get("/status-check", async (req: Request, res: Response) => {
 
     // Optionally trigger manual reconciliation
     if (triggerReconciliation) {
-      logger.info(
-        { correlationId: req.correlationId },
-        "Manual reconciliation triggered via /status-check endpoint",
-      );
+      logger.info({ correlationId: req.correlationId }, "Manual reconciliation triggered via /status-check endpoint");
       await statusReconciliationService.manualReconcile();
     }
 
@@ -514,32 +478,21 @@ app.get("/status-check", async (req: Request, res: Response) => {
         desyncDetected: afterMetrics.desyncDetected,
         desyncFixed: afterMetrics.desyncFixed,
         desyncFailed: afterMetrics.desyncFailed,
-        successRate:
-          afterMetrics.desyncDetected > 0
-            ? (afterMetrics.desyncFixed / afterMetrics.desyncDetected) * 100
-            : 100,
+        successRate: afterMetrics.desyncDetected > 0 ? (afterMetrics.desyncFixed / afterMetrics.desyncDetected) * 100 : 100,
         recentDesyncs: afterMetrics.desyncs.slice(-20), // Last 20 desyncs for analysis
       },
 
       // If reconciliation was triggered, show what changed
       ...(triggerReconciliation && {
         reconciliationResults: {
-          desyncsFoundThisRun:
-            afterMetrics.desyncDetected - beforeMetrics.desyncDetected,
-          desyncsFixedThisRun:
-            afterMetrics.desyncFixed - beforeMetrics.desyncFixed,
-          desyncsFailedThisRun:
-            afterMetrics.desyncFailed - beforeMetrics.desyncFailed,
+          desyncsFoundThisRun: afterMetrics.desyncDetected - beforeMetrics.desyncDetected,
+          desyncsFixedThisRun: afterMetrics.desyncFixed - beforeMetrics.desyncFixed,
+          desyncsFailedThisRun: afterMetrics.desyncFailed - beforeMetrics.desyncFailed,
         },
       }),
 
       // Health status
-      status:
-        afterMetrics.desyncFailed === 0 ||
-        afterMetrics.desyncFailed / Math.max(afterMetrics.desyncDetected, 1) <
-          0.1
-          ? "healthy"
-          : "degraded",
+      status: afterMetrics.desyncFailed === 0 || afterMetrics.desyncFailed / Math.max(afterMetrics.desyncDetected, 1) < 0.1 ? "healthy" : "degraded",
 
       // Instructions for manual reconciliation
       help: {
@@ -577,16 +530,7 @@ app.get("/readiness", (_req: Request, res: Response) => {
 });
 
 // API Routes
-app.use(
-  "/api",
-  createApiRoutes(
-    connectionPool,
-    sessionManager,
-    proxyManager,
-    connectionStateManager,
-    reconnectionService,
-  ),
-);
+app.use("/api", createApiRoutes(connectionPool, sessionManager, proxyManager, connectionStateManager, reconnectionService));
 
 // WebSocket handlers
 createWebSocketHandlers(io, connectionPool, sessionManager);
@@ -612,7 +556,7 @@ app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
       userAgent: req.headers["user-agent"],
       timestamp: new Date().toISOString(),
     },
-    "Unhandled error in request",
+    "Unhandled error in request"
   );
 
   // Send appropriate error response
@@ -639,7 +583,7 @@ app.use((req: Request, res: Response) => {
       userAgent: req.headers["user-agent"],
       timestamp: new Date().toISOString(),
     },
-    "Route not found",
+    "Route not found"
   );
 
   res.status(404).json({
@@ -700,7 +644,7 @@ server.listen(PORT, async () => {
       maxConnections: process.env.MAX_CONNECTIONS || 50,
       instanceUrl: process.env.INSTANCE_URL || `http://localhost:${PORT}`,
     },
-    "WhatsApp Web service started",
+    "WhatsApp Web service started"
   );
 
   // Recover previous connections after a short delay to ensure all services are ready

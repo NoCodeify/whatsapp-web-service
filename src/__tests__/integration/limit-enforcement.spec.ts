@@ -146,15 +146,13 @@ describe("Integration: WhatsApp Web Limit Enforcement", () => {
       };
     });
 
-    mockFirestoreInstance.runTransaction = jest.fn(
-      async (updateFunction: any) => {
-        // Use a getter to always get the current mockPhoneDoc state, not captured in closure
-        return await updateFunction({
-          get: jest.fn(() => Promise.resolve(mockPhoneDoc)),
-          update: mockPhoneDoc.ref.update,
-        });
-      },
-    );
+    mockFirestoreInstance.runTransaction = jest.fn(async (updateFunction: any) => {
+      // Use a getter to always get the current mockPhoneDoc state, not captured in closure
+      return await updateFunction({
+        get: jest.fn(() => Promise.resolve(mockPhoneDoc)),
+        update: mockPhoneDoc.ref.update,
+      });
+    });
 
     mockFirestore = mockFirestoreInstance;
 
@@ -178,11 +176,7 @@ describe("Integration: WhatsApp Web Limit Enforcement", () => {
       for (let i = 0; i < dailyLimit; i++) {
         const recipient = `+1917555${String(1000 + i).padStart(4, "0")}`;
 
-        const result = await limitChecker.checkLimits(
-          userId,
-          phoneNumber,
-          recipient,
-        );
+        const result = await limitChecker.checkLimits(userId, phoneNumber, recipient);
 
         expect(result.allowed).toBe(true);
 
@@ -205,16 +199,10 @@ describe("Integration: WhatsApp Web Limit Enforcement", () => {
       console.log(`  ✓ All ${dailyLimit} messages sent successfully`);
 
       // 26th message should be blocked
-      console.log(
-        `\n🚫 Attempting to send 26th message (should be blocked)...`,
-      );
+      console.log(`\n🚫 Attempting to send 26th message (should be blocked)...`);
 
       const blockedRecipient = "+19175559999";
-      const blocked = await limitChecker.checkLimits(
-        userId,
-        phoneNumber,
-        blockedRecipient,
-      );
+      const blocked = await limitChecker.checkLimits(userId, phoneNumber, blockedRecipient);
 
       console.log(`\n📋 Result:`);
       console.log(`  • Allowed: ${blocked.allowed}`);
@@ -257,39 +245,23 @@ describe("Integration: WhatsApp Web Limit Enforcement", () => {
 
       mockContactsQuery.empty = true; // New contact
 
-      const newContactResult = await limitChecker.checkLimits(
-        userId,
-        phoneNumber,
-        "+19175550001",
-      );
+      const newContactResult = await limitChecker.checkLimits(userId, phoneNumber, "+19175550001");
 
-      console.log(
-        `  • Result: ${newContactResult.allowed ? "ALLOWED" : "BLOCKED"}`,
-      );
+      console.log(`  • Result: ${newContactResult.allowed ? "ALLOWED" : "BLOCKED"}`);
       console.log(`  • Reason: ${newContactResult.error || "N/A"}`);
 
       expect(newContactResult.allowed).toBe(false);
       expect(newContactResult.error).toContain("new contacts reached");
 
       // Attempt to send to an EXISTING contact (should be allowed)
-      console.log(
-        `\n✅ Test 2: Sending to existing contact (should be allowed)...`,
-      );
+      console.log(`\n✅ Test 2: Sending to existing contact (should be allowed)...`);
 
       mockContactsQuery.empty = false; // Existing contact
 
-      const existingContactResult = await limitChecker.checkLimits(
-        userId,
-        phoneNumber,
-        "+19175550002",
-      );
+      const existingContactResult = await limitChecker.checkLimits(userId, phoneNumber, "+19175550002");
 
-      console.log(
-        `  • Result: ${existingContactResult.allowed ? "ALLOWED" : "BLOCKED"}`,
-      );
-      console.log(
-        `  • Reason: ${existingContactResult.error || "Passed checks"}`,
-      );
+      console.log(`  • Result: ${existingContactResult.allowed ? "ALLOWED" : "BLOCKED"}`);
+      console.log(`  • Reason: ${existingContactResult.error || "Passed checks"}`);
 
       expect(existingContactResult.allowed).toBe(true);
 
@@ -308,9 +280,7 @@ describe("Integration: WhatsApp Web Limit Enforcement", () => {
       console.log(`  • New contacts today: 25/${dailyLimit}`);
       console.log(`  • Total messages today: 26/${messageLimit}`);
 
-      console.log(
-        "\n✅ SCENARIO 2 COMPLETE: Contact type differentiation working!",
-      );
+      console.log("\n✅ SCENARIO 2 COMPLETE: Contact type differentiation working!");
       console.log("=".repeat(60));
     });
   });
@@ -336,11 +306,7 @@ describe("Integration: WhatsApp Web Limit Enforcement", () => {
       console.log(`  • New contacts: 25/${dailyLimit}`);
       console.log(`  • Total messages: 250/${messageLimit}`);
 
-      const day1Result = await limitChecker.checkLimits(
-        userId,
-        phoneNumber,
-        "+19175550001",
-      );
+      const day1Result = await limitChecker.checkLimits(userId, phoneNumber, "+19175550001");
 
       console.log(`  • Status: ${day1Result.allowed ? "ALLOWED" : "BLOCKED"}`);
       expect(day1Result.allowed).toBe(false);
@@ -365,19 +331,11 @@ describe("Integration: WhatsApp Web Limit Enforcement", () => {
 
       mockContactsQuery.empty = true; // New contact
 
-      const day2Result = await limitChecker.checkLimits(
-        userId,
-        phoneNumber,
-        "+19175550100",
-      );
+      const day2Result = await limitChecker.checkLimits(userId, phoneNumber, "+19175550100");
 
       console.log(`  • Current date: 2025-01-16`);
-      console.log(
-        `  • Usage date: ${mockPhoneDoc.data().whatsapp_web_usage.today_date}`,
-      );
-      console.log(
-        `  • Limit check result: ${day2Result.allowed ? "ALLOWED" : "BLOCKED"}`,
-      );
+      console.log(`  • Usage date: ${mockPhoneDoc.data().whatsapp_web_usage.today_date}`);
+      console.log(`  • Limit check result: ${day2Result.allowed ? "ALLOWED" : "BLOCKED"}`);
 
       expect(day2Result.allowed).toBe(true);
 
@@ -436,14 +394,12 @@ describe("Integration: WhatsApp Web Limit Enforcement", () => {
       let currentPhoneDoc = mockPhoneDoc1;
 
       // Update runTransaction to use the currently active phone doc
-      mockFirestoreInstance.runTransaction = jest.fn(
-        async (updateFunction: any) => {
-          return await updateFunction({
-            get: jest.fn(() => Promise.resolve(currentPhoneDoc)),
-            update: currentPhoneDoc.ref.update,
-          });
-        },
-      );
+      mockFirestoreInstance.runTransaction = jest.fn(async (updateFunction: any) => {
+        return await updateFunction({
+          get: jest.fn(() => Promise.resolve(currentPhoneDoc)),
+          update: currentPhoneDoc.ref.update,
+        });
+      });
 
       // Update firestore mock to return correct phone doc
       mockFirestore.collection = jest.fn((collectionName: string) => ({
@@ -456,10 +412,7 @@ describe("Integration: WhatsApp Web Limit Enforcement", () => {
                   return {
                     doc: jest.fn((phoneId: string) => {
                       // Set the current phone doc based on which number is being accessed
-                      currentPhoneDoc =
-                        phoneId === phoneNumber1
-                          ? mockPhoneDoc1
-                          : mockPhoneDoc2;
+                      currentPhoneDoc = phoneId === phoneNumber1 ? mockPhoneDoc1 : mockPhoneDoc2;
                       return {
                         get: jest.fn().mockResolvedValue(currentPhoneDoc),
                       };
@@ -491,16 +444,10 @@ describe("Integration: WhatsApp Web Limit Enforcement", () => {
       // Send from Phone 1 (should succeed - 25th message)
       console.log(`\n📤 Test 1: Send from Phone 1 (should succeed)...`);
 
-      const phone1Result = await limitChecker.checkLimits(
-        userId,
-        phoneNumber1,
-        "+19175550001",
-      );
+      const phone1Result = await limitChecker.checkLimits(userId, phoneNumber1, "+19175550001");
 
       console.log(`  • Allowed: ${phone1Result.allowed}`);
-      console.log(
-        `  • Usage: ${phone1Result.usage?.used}/${phone1Result.usage?.limit}`,
-      );
+      console.log(`  • Usage: ${phone1Result.usage?.used}/${phone1Result.usage?.limit}`);
 
       expect(phone1Result.allowed).toBe(true);
 
@@ -520,11 +467,7 @@ describe("Integration: WhatsApp Web Limit Enforcement", () => {
       // Try to send from Phone 1 again (should fail)
       console.log(`\n🚫 Test 2: Send from Phone 1 again (should fail)...`);
 
-      const phone1Blocked = await limitChecker.checkLimits(
-        userId,
-        phoneNumber1,
-        "+19175550002",
-      );
+      const phone1Blocked = await limitChecker.checkLimits(userId, phoneNumber1, "+19175550002");
 
       console.log(`  • Allowed: ${phone1Blocked.allowed}`);
       console.log(`  • Error: ${phone1Blocked.error || "N/A"}`);
@@ -532,20 +475,12 @@ describe("Integration: WhatsApp Web Limit Enforcement", () => {
       expect(phone1Blocked.allowed).toBe(false);
 
       // Send from Phone 2 (should still succeed - independent limit)
-      console.log(
-        `\n✅ Test 3: Send from Phone 2 (should succeed - independent limit)...`,
-      );
+      console.log(`\n✅ Test 3: Send from Phone 2 (should succeed - independent limit)...`);
 
-      const phone2Result = await limitChecker.checkLimits(
-        userId,
-        phoneNumber2,
-        "+19175550003",
-      );
+      const phone2Result = await limitChecker.checkLimits(userId, phoneNumber2, "+19175550003");
 
       console.log(`  • Allowed: ${phone2Result.allowed}`);
-      console.log(
-        `  • Usage: ${phone2Result.usage?.used}/${phone2Result.usage?.limit}`,
-      );
+      console.log(`  • Usage: ${phone2Result.usage?.used}/${phone2Result.usage?.limit}`);
       console.log(`  • Remaining: ${phone2Result.usage?.remaining}`);
 
       expect(phone2Result.allowed).toBe(true);
@@ -574,28 +509,19 @@ describe("Integration: WhatsApp Web Limit Enforcement", () => {
         messaging_limit: dailyLimit,
       });
 
-      console.log(
-        `\n📊 Starting state: ${currentUsage}/${dailyLimit} messages sent`,
-      );
+      console.log(`\n📊 Starting state: ${currentUsage}/${dailyLimit} messages sent`);
       console.log(`   Remaining capacity: ${dailyLimit - currentUsage}`);
 
       // Simulate 10 concurrent requests (only 5 should succeed)
       console.log(`\n📤 Simulating 10 concurrent message requests...`);
 
-      const recipients = Array.from(
-        { length: 10 },
-        (_, i) => `+19175551${String(100 + i).padStart(3, "0")}`,
-      );
+      const recipients = Array.from({ length: 10 }, (_, i) => `+19175551${String(100 + i).padStart(3, "0")}`);
 
       const promises = recipients.map(async (recipient, index) => {
         // Simulate small delay to make concurrency more realistic
         await new Promise((resolve) => setTimeout(resolve, Math.random() * 10));
 
-        const result = await limitChecker.checkLimits(
-          userId,
-          phoneNumber,
-          recipient,
-        );
+        const result = await limitChecker.checkLimits(userId, phoneNumber, recipient);
 
         return {
           recipient,
@@ -619,9 +545,7 @@ describe("Integration: WhatsApp Web Limit Enforcement", () => {
       // but not actually incrementing (that would happen in real implementation)
       console.log(`\n📋 Detailed results:`);
       results.forEach((r) => {
-        console.log(
-          `  ${r.allowed ? "✓" : "✗"} ${r.recipient}: ${r.allowed ? "ALLOWED" : r.error}`,
-        );
+        console.log(`  ${r.allowed ? "✓" : "✗"} ${r.recipient}: ${r.allowed ? "ALLOWED" : r.error}`);
       });
 
       // In a real concurrent scenario with proper transactions,
@@ -655,11 +579,7 @@ describe("Integration: WhatsApp Web Limit Enforcement", () => {
       // Attempt to send (should be blocked)
       console.log(`\n🚫 Attempting to send message at exact limit...`);
 
-      const result = await limitChecker.checkLimits(
-        userId,
-        phoneNumber,
-        "+19175550001",
-      );
+      const result = await limitChecker.checkLimits(userId, phoneNumber, "+19175550001");
 
       console.log(`\n📋 Result:`);
       console.log(`  • Allowed: ${result.allowed}`);
