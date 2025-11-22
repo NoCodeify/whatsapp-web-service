@@ -38,10 +38,7 @@ export interface ProxyLocation {
 export class ProxyManager {
   private logger = pino({ name: "ProxyManager" });
   private sessions: Map<string, ProxySession> = new Map();
-  private activeProxies: Map<
-    string,
-    { ip: string; country: string; assignedAt: Date }
-  > = new Map();
+  private activeProxies: Map<string, { ip: string; country: string; assignedAt: Date }> = new Map();
   private brightDataService?: BrightDataService;
   private dynamicProxyService?: DynamicProxyService;
   private _firestore?: Firestore;
@@ -353,10 +350,7 @@ export class ProxyManager {
     },
   ];
 
-  constructor(
-    firestore?: Firestore,
-    dynamicProxyService?: DynamicProxyService,
-  ) {
+  constructor(firestore?: Firestore, dynamicProxyService?: DynamicProxyService) {
     this._firestore = firestore;
     this.dynamicProxyService = dynamicProxyService;
 
@@ -367,26 +361,17 @@ export class ProxyManager {
       this.logger.info("Proxy explicitly disabled via USE_PROXY=false");
       this.brightDataConfig.customerID = "";
       this.brightDataConfig.zonePassword = "";
-    } else if (
-      !this.brightDataConfig.customerID ||
-      !this.brightDataConfig.zonePassword
-    ) {
-      this.logger.warn(
-        "Bright Data credentials not configured. Running without proxy.",
-      );
+    } else if (!this.brightDataConfig.customerID || !this.brightDataConfig.zonePassword) {
+      this.logger.warn("Bright Data credentials not configured. Running without proxy.");
     } else {
       // For ISP proxies with dynamic allocation enabled
       if (this.brightDataConfig.proxyType === "isp") {
         if (this.dynamicProxyService) {
-          this.logger.info(
-            "Using DynamicProxyService for ISP proxy management with direct purchase/release",
-          );
+          this.logger.info("Using DynamicProxyService for ISP proxy management with direct purchase/release");
         } else if (this._firestore) {
           // Fallback to static IP management
           this.brightDataService = new BrightDataService(this._firestore);
-          this.logger.info(
-            "Initialized BrightDataService for ISP proxy management (static IPs only)",
-          );
+          this.logger.info("Initialized BrightDataService for ISP proxy management (static IPs only)");
         }
       }
     }
@@ -395,11 +380,7 @@ export class ProxyManager {
   /**
    * Generate a unique session ID for sticky IP assignment
    */
-  private generateSessionId(
-    userId: string,
-    phoneNumber: string,
-    forceNew = false,
-  ): string {
+  private generateSessionId(userId: string, phoneNumber: string, forceNew = false): string {
     const key = `${userId}:${phoneNumber}`;
 
     if (!forceNew && this.sessions.has(key)) {
@@ -409,11 +390,7 @@ export class ProxyManager {
     }
 
     // Generate new session ID using crypto for uniqueness
-    const sessionId = crypto
-      .createHash("md5")
-      .update(`${userId}_${phoneNumber}_${Date.now()}_${Math.random()}`)
-      .digest("hex")
-      .substring(0, 16);
+    const sessionId = crypto.createHash("md5").update(`${userId}_${phoneNumber}_${Date.now()}_${Math.random()}`).digest("hex").substring(0, 16);
 
     const session: ProxySession = {
       userId,
@@ -425,10 +402,7 @@ export class ProxyManager {
     };
 
     this.sessions.set(key, session);
-    this.logger.info(
-      { userId, phoneNumber, sessionId },
-      "Generated new proxy session",
-    );
+    this.logger.info({ userId, phoneNumber, sessionId }, "Generated new proxy session");
 
     return sessionId;
   }
@@ -436,16 +410,9 @@ export class ProxyManager {
   /**
    * Get proxy configuration for a specific user/phone combination
    */
-  async getProxyConfig(
-    userId: string,
-    phoneNumber: string,
-    country?: string,
-  ): Promise<ProxyConfig | null> {
+  async getProxyConfig(userId: string, phoneNumber: string, country?: string): Promise<ProxyConfig | null> {
     // If no credentials configured, return null (no proxy)
-    if (
-      !this.brightDataConfig.customerID ||
-      !this.brightDataConfig.zonePassword
-    ) {
+    if (!this.brightDataConfig.customerID || !this.brightDataConfig.zonePassword) {
       return null;
     }
 
@@ -469,7 +436,7 @@ export class ProxyManager {
                 ip: existingProxy.ip,
                 country: existingProxy.country,
               },
-              "Reusing existing proxy from activeProxies (same process)",
+              "Reusing existing proxy from activeProxies (same process)"
             );
 
             // Return config using existing proxy (matches format from line 502)
@@ -489,11 +456,7 @@ export class ProxyManager {
 
           // No existing proxy found, purchase new one
           const requestedCountry = country || "us"; // Default to US if no country specified
-          const dynamicResult = await this.dynamicProxyService.assignProxy(
-            userId,
-            phoneNumber,
-            requestedCountry,
-          );
+          const dynamicResult = await this.dynamicProxyService.assignProxy(userId, phoneNumber, requestedCountry);
 
           if (dynamicResult && dynamicResult.proxy) {
             const proxy = dynamicResult.proxy;
@@ -536,24 +499,18 @@ export class ProxyManager {
               },
               dynamicResult.fallbackUsed
                 ? `Using dynamic ISP proxy with AI-suggested fallback (${dynamicResult.originalCountry} → ${dynamicResult.usedCountry})`
-                : "Using dynamic ISP proxy with direct purchase",
+                : "Using dynamic ISP proxy with direct purchase"
             );
             return dynamicConfig;
           }
         } catch (error) {
-          this.logger.warn(
-            { error, userId, phoneNumber, requestedCountry: country },
-            "Dynamic proxy allocation failed, falling back to static assignment",
-          );
+          this.logger.warn({ error, userId, phoneNumber, requestedCountry: country }, "Dynamic proxy allocation failed, falling back to static assignment");
         }
       }
 
       // Fallback to BrightDataService (static IP assignment)
       if (this.brightDataService) {
-        const ispConfig = await this.brightDataService.getProxyConfig(
-          userId,
-          phoneNumber,
-        );
+        const ispConfig = await this.brightDataService.getProxyConfig(userId, phoneNumber);
         if (ispConfig) {
           this.logger.info(
             {
@@ -562,30 +519,20 @@ export class ProxyManager {
               type: "isp_static",
               sessionId: ispConfig.sessionId,
             },
-            "Using static ISP proxy with dedicated IP assignment",
+            "Using static ISP proxy with dedicated IP assignment"
           );
           return ispConfig;
         } else {
           // CRITICAL SAFETY: If no proxy available in ISP mode, do NOT allow connection
           // This prevents exposing user's real IP address
-          this.logger.error(
-            { userId, phoneNumber, proxyType: "isp" },
-            "SECURITY: No ISP proxy available - blocking connection to prevent IP exposure",
-          );
-          throw new Error(
-            "No proxy available for secure connection. Connection blocked to protect user privacy.",
-          );
+          this.logger.error({ userId, phoneNumber, proxyType: "isp" }, "SECURITY: No ISP proxy available - blocking connection to prevent IP exposure");
+          throw new Error("No proxy available for secure connection. Connection blocked to protect user privacy.");
         }
       }
 
       // If no proxy services are configured in ISP mode, block connection
-      this.logger.error(
-        { userId, phoneNumber, proxyType: "isp" },
-        "SECURITY: ISP proxy type configured but no proxy services available - blocking connection",
-      );
-      throw new Error(
-        "Proxy service not configured. Connection blocked to protect user privacy.",
-      );
+      this.logger.error({ userId, phoneNumber, proxyType: "isp" }, "SECURITY: ISP proxy type configured but no proxy services available - blocking connection");
+      throw new Error("Proxy service not configured. Connection blocked to protect user privacy.");
     }
 
     // Fallback to session-based residential proxy
@@ -618,21 +565,14 @@ export class ProxyManager {
       type: "residential",
     };
 
-    this.logger.debug(
-      { userId, phoneNumber, sessionId, country, type: "residential" },
-      "Generated proxy configuration",
-    );
+    this.logger.debug({ userId, phoneNumber, sessionId, country, type: "residential" }, "Generated proxy configuration");
     return config;
   }
 
   /**
    * Create a proxy agent for HTTP/HTTPS requests
    */
-  async createProxyAgent(
-    userId: string,
-    phoneNumber: string,
-    country?: string,
-  ): Promise<ProxyAgent | null> {
+  async createProxyAgent(userId: string, phoneNumber: string, country?: string): Promise<ProxyAgent | null> {
     const proxyConfig = await this.getProxyConfig(userId, phoneNumber, country);
 
     if (!proxyConfig) {
@@ -660,18 +600,14 @@ export class ProxyManager {
    */
   findNearestLocation(userCountry: string): string {
     // Check if user's country is available
-    const userLocation = this.availableLocations.find(
-      (l) => l.code === userCountry,
-    );
+    const userLocation = this.availableLocations.find((l) => l.code === userCountry);
     if (userLocation && userLocation.available) {
       return userCountry;
     }
 
     // If not available, find another location in the same region
     if (userLocation) {
-      const sameRegionLocations = this.availableLocations.filter(
-        (l) => l.region === userLocation.region && l.available,
-      );
+      const sameRegionLocations = this.availableLocations.filter((l) => l.region === userLocation.region && l.available);
       if (sameRegionLocations.length > 0) {
         return sameRegionLocations[0].code;
       }
@@ -695,11 +631,7 @@ export class ProxyManager {
     for (const region of Object.keys(regionalFallbacks)) {
       const fallbacks = regionalFallbacks[region];
       for (const fallback of fallbacks) {
-        if (
-          this.availableLocations.find(
-            (l) => l.code === fallback && l.available,
-          )
-        ) {
+        if (this.availableLocations.find((l) => l.code === fallback && l.available)) {
           return fallback;
         }
       }
@@ -726,21 +658,12 @@ export class ProxyManager {
           // Remove from memory
           this.activeProxies.delete(connectionKey);
 
-          this.logger.info(
-            { userId, phoneNumber, ip: proxyInfo.ip },
-            "Proxy released directly",
-          );
+          this.logger.info({ userId, phoneNumber, ip: proxyInfo.ip }, "Proxy released directly");
         } else {
-          this.logger.debug(
-            { userId, phoneNumber },
-            "No proxy found to release",
-          );
+          this.logger.debug({ userId, phoneNumber }, "No proxy found to release");
         }
       } catch (error: any) {
-        this.logger.error(
-          { error: error.message, userId, phoneNumber },
-          "Failed to release proxy",
-        );
+        this.logger.error({ error: error.message, userId, phoneNumber }, "Failed to release proxy");
       }
     }
   }
@@ -748,10 +671,7 @@ export class ProxyManager {
   /**
    * Rotate proxy by generating a new session ID
    */
-  async rotateProxy(
-    userId: string,
-    phoneNumber: string,
-  ): Promise<ProxyConfig | null> {
+  async rotateProxy(userId: string, phoneNumber: string): Promise<ProxyConfig | null> {
     const key = `${userId}:${phoneNumber}`;
 
     // Increment rotation count if session exists
@@ -759,10 +679,7 @@ export class ProxyManager {
       const session = this.sessions.get(key)!;
       session.rotationCount++;
 
-      this.logger.info(
-        { userId, phoneNumber, rotationCount: session.rotationCount },
-        "Rotating proxy session",
-      );
+      this.logger.info({ userId, phoneNumber, rotationCount: session.rotationCount }, "Rotating proxy session");
     }
 
     // Force new session ID generation
@@ -776,21 +693,15 @@ export class ProxyManager {
    */
   async getMetrics() {
     const activeSessions = this.sessions.size;
-    const totalRotations = Array.from(this.sessions.values()).reduce(
-      (sum, session) => sum + session.rotationCount,
-      0,
-    );
+    const totalRotations = Array.from(this.sessions.values()).reduce((sum, session) => sum + session.rotationCount, 0);
 
-    const avgRotationsPerSession =
-      activeSessions > 0 ? totalRotations / activeSessions : 0;
+    const avgRotationsPerSession = activeSessions > 0 ? totalRotations / activeSessions : 0;
 
     const oldestSession = Array.from(this.sessions.values()).reduce(
       (oldest, session) => {
-        return !oldest || session.createdAt < oldest.createdAt
-          ? session
-          : oldest;
+        return !oldest || session.createdAt < oldest.createdAt ? session : oldest;
       },
-      null as ProxySession | null,
+      null as ProxySession | null
     );
 
     // Include dynamic proxy metrics if available
@@ -806,9 +717,7 @@ export class ProxyManager {
       activeSessions,
       totalRotations,
       avgRotationsPerSession,
-      oldestSessionAge: oldestSession
-        ? Date.now() - oldestSession.createdAt.getTime()
-        : 0,
+      oldestSessionAge: oldestSession ? Date.now() - oldestSession.createdAt.getTime() : 0,
       proxyType: this.brightDataConfig.proxyType,
       ...(dynamicMetrics && { dynamicProxy: dynamicMetrics }),
       ...(ispMetrics && { ispProxy: ispMetrics }),
@@ -839,12 +748,7 @@ export class ProxyManager {
   /**
    * Update session with IP information (called after successful connection)
    */
-  updateSessionInfo(
-    userId: string,
-    phoneNumber: string,
-    proxyIp: string,
-    country?: string,
-  ) {
+  updateSessionInfo(userId: string, phoneNumber: string, proxyIp: string, country?: string) {
     const key = `${userId}:${phoneNumber}`;
 
     if (this.sessions.has(key)) {
@@ -852,10 +756,7 @@ export class ProxyManager {
       session.proxyIp = proxyIp;
       session.country = country;
 
-      this.logger.info(
-        { userId, phoneNumber, proxyIp, country },
-        "Updated proxy session info",
-      );
+      this.logger.info({ userId, phoneNumber, proxyIp, country }, "Updated proxy session info");
     }
   }
 
@@ -870,10 +771,7 @@ export class ProxyManager {
   /**
    * Test proxy connection
    */
-  async testProxyConnection(
-    userId: string,
-    phoneNumber: string,
-  ): Promise<boolean> {
+  async testProxyConnection(userId: string, phoneNumber: string): Promise<boolean> {
     try {
       const agent = await this.createProxyAgent(userId, phoneNumber);
 
@@ -890,19 +788,13 @@ export class ProxyManager {
 
       if (response.data && response.data.ip) {
         this.updateSessionInfo(userId, phoneNumber, response.data.ip);
-        this.logger.info(
-          { userId, phoneNumber, ip: response.data.ip },
-          "Proxy connection test successful",
-        );
+        this.logger.info({ userId, phoneNumber, ip: response.data.ip }, "Proxy connection test successful");
         return true;
       }
 
       return false;
     } catch (error) {
-      this.logger.error(
-        { userId, phoneNumber, error },
-        "Proxy connection test failed",
-      );
+      this.logger.error({ userId, phoneNumber, error }, "Proxy connection test failed");
       return false;
     }
   }

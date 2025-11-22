@@ -56,11 +56,7 @@ export class ConnectionStateManager extends EventEmitter {
   /**
    * Initialize connection state
    */
-  async initializeState(
-    userId: string,
-    phoneNumber: string,
-    instanceUrl: string,
-  ): Promise<ConnectionState> {
+  async initializeState(userId: string, phoneNumber: string, instanceUrl: string): Promise<ConnectionState> {
     const key = this.getStateKey(userId, phoneNumber);
 
     const state: ConnectionState = {
@@ -95,11 +91,7 @@ export class ConnectionStateManager extends EventEmitter {
   /**
    * Update connection state
    */
-  async updateState(
-    userId: string,
-    phoneNumber: string,
-    updates: Partial<ConnectionState>,
-  ): Promise<ConnectionState | null> {
+  async updateState(userId: string, phoneNumber: string, updates: Partial<ConnectionState>): Promise<ConnectionState | null> {
     const key = this.getStateKey(userId, phoneNumber);
     const state = this.states.get(key);
 
@@ -131,10 +123,7 @@ export class ConnectionStateManager extends EventEmitter {
   /**
    * Get connection state
    */
-  async getState(
-    userId: string,
-    phoneNumber: string,
-  ): Promise<ConnectionState | null> {
+  async getState(userId: string, phoneNumber: string): Promise<ConnectionState | null> {
     const key = this.getStateKey(userId, phoneNumber);
 
     // Check memory first
@@ -162,11 +151,7 @@ export class ConnectionStateManager extends EventEmitter {
    * Update in-memory status only (without persisting to Firestore)
    * Used to keep in-memory state synchronized when status is updated elsewhere
    */
-  updateInMemoryStatus(
-    userId: string,
-    phoneNumber: string,
-    status: ConnectionState["status"],
-  ): void {
+  updateInMemoryStatus(userId: string, phoneNumber: string, status: ConnectionState["status"]): void {
     const key = this.getStateKey(userId, phoneNumber);
     const state = this.states.get(key);
 
@@ -174,10 +159,7 @@ export class ConnectionStateManager extends EventEmitter {
       state.status = status;
       state.lastActivity = new Date();
 
-      this.logger.debug(
-        { userId, phoneNumber, status },
-        "Updated in-memory status without Firestore write",
-      );
+      this.logger.debug({ userId, phoneNumber, status }, "Updated in-memory status without Firestore write");
     }
   }
 
@@ -215,10 +197,7 @@ export class ConnectionStateManager extends EventEmitter {
             instanceUrl: whatsappData.instance_url || "",
             createdAt: data.created_at?.toDate() || new Date(),
             lastActivity: data.updated_at?.toDate() || new Date(),
-            lastHeartbeat:
-              whatsappData.last_heartbeat?.toDate() ||
-              data.updated_at?.toDate() ||
-              new Date(),
+            lastHeartbeat: whatsappData.last_heartbeat?.toDate() || data.updated_at?.toDate() || new Date(),
             messageCount: whatsappData.message_count || 0,
             sessionExists: whatsappData.session_exists !== false,
             qrScanned: whatsappData.qr_scanned || false,
@@ -252,10 +231,7 @@ export class ConnectionStateManager extends EventEmitter {
         const userId = userDoc.id;
 
         // Get all WhatsApp sessions for this user from unified phone_numbers collection
-        const sessionsSnapshot = await userDoc.ref
-          .collection("phone_numbers")
-          .where("type", "==", "whatsapp_web")
-          .get();
+        const sessionsSnapshot = await userDoc.ref.collection("phone_numbers").where("type", "==", "whatsapp_web").get();
 
         for (const sessionDoc of sessionsSnapshot.docs) {
           const data = sessionDoc.data();
@@ -272,7 +248,7 @@ export class ConnectionStateManager extends EventEmitter {
                 phoneNumber,
                 status: whatsappData.status,
               },
-              "Skipping logged out session",
+              "Skipping logged out session"
             );
             continue;
           }
@@ -305,7 +281,7 @@ export class ConnectionStateManager extends EventEmitter {
               phoneNumber,
               previousStatus: data.status,
             },
-            "Recovered connection state from phone_numbers collection",
+            "Recovered connection state from phone_numbers collection"
           );
         }
       }
@@ -314,7 +290,7 @@ export class ConnectionStateManager extends EventEmitter {
         {
           totalRecovered: recovered.length,
         },
-        "Connection recovery scan complete",
+        "Connection recovery scan complete"
       );
 
       return recovered;
@@ -328,20 +304,12 @@ export class ConnectionStateManager extends EventEmitter {
    * Ensure state exists for a connection, initializing if missing
    * This prevents desync between ConnectionPool and ConnectionStateManager
    */
-  async ensureStateForConnection(
-    userId: string,
-    phoneNumber: string,
-    instanceUrl: string,
-    currentStatus?: string,
-  ): Promise<ConnectionState> {
+  async ensureStateForConnection(userId: string, phoneNumber: string, instanceUrl: string, currentStatus?: string): Promise<ConnectionState> {
     const key = this.getStateKey(userId, phoneNumber);
     let state = this.states.get(key);
 
     if (!state) {
-      this.logger.warn(
-        { userId, phoneNumber },
-        "State missing for active connection - initializing to prevent desync",
-      );
+      this.logger.warn({ userId, phoneNumber }, "State missing for active connection - initializing to prevent desync");
 
       // Initialize state for this connection
       state = {
@@ -369,15 +337,9 @@ export class ConnectionStateManager extends EventEmitter {
           qrScanned: true,
         });
 
-        this.logger.info(
-          { userId, phoneNumber, status: state.status },
-          "Initialized missing state for active connection",
-        );
+        this.logger.info({ userId, phoneNumber, status: state.status }, "Initialized missing state for active connection");
       } catch (error) {
-        this.logger.error(
-          { userId, phoneNumber, error },
-          "Failed to persist initialized state to Firestore",
-        );
+        this.logger.error({ userId, phoneNumber, error }, "Failed to persist initialized state to Firestore");
       }
     }
 
@@ -437,13 +399,7 @@ export class ConnectionStateManager extends EventEmitter {
   /**
    * Update sync progress
    */
-  async updateSyncProgress(
-    userId: string,
-    phoneNumber: string,
-    contacts: number,
-    messages: number,
-    completed: boolean = false,
-  ) {
+  async updateSyncProgress(userId: string, phoneNumber: string, contacts: number, messages: number, completed: boolean = false) {
     const state = await this.getState(userId, phoneNumber);
 
     if (!state) return;
@@ -521,10 +477,7 @@ export class ConnectionStateManager extends EventEmitter {
   /**
    * Persist state to Firestore with exponential backoff retry
    */
-  private async persistStateWithRetry(
-    state: ConnectionState,
-    attempt: number,
-  ): Promise<void> {
+  private async persistStateWithRetry(state: ConnectionState, attempt: number): Promise<void> {
     const maxAttempts = 3;
     const retryDelays = [1000, 2000, 4000]; // 1s, 2s, 4s
 
@@ -549,7 +502,7 @@ export class ConnectionStateManager extends EventEmitter {
               phoneNumber: state.phoneNumber,
               status: state.status,
             },
-            "Phone number document doesn't exist for disconnected state - user likely logged out",
+            "Phone number document doesn't exist for disconnected state - user likely logged out"
           );
           return;
         }
@@ -573,7 +526,7 @@ export class ConnectionStateManager extends EventEmitter {
               status: state.status,
               attempt,
             },
-            "CRITICAL: Phone number document missing for active connection - status update SKIPPED. This will cause 'no connection' errors!",
+            "CRITICAL: Phone number document missing for active connection - status update SKIPPED. This will cause 'no connection' errors!"
           );
 
           // Schedule a retry for active connections
@@ -586,7 +539,7 @@ export class ConnectionStateManager extends EventEmitter {
                 attempt,
                 delay,
               },
-              `Scheduling retry ${attempt}/${maxAttempts} to persist state`,
+              `Scheduling retry ${attempt}/${maxAttempts} to persist state`
             );
 
             await new Promise((resolve) => setTimeout(resolve, delay));
@@ -594,7 +547,7 @@ export class ConnectionStateManager extends EventEmitter {
           } else {
             this.logger.error(
               { userId: state.userId, phoneNumber: state.phoneNumber },
-              "Max retry attempts reached - state persistence FAILED. Manual intervention required!",
+              "Max retry attempts reached - state persistence FAILED. Manual intervention required!"
             );
           }
 
@@ -603,15 +556,10 @@ export class ConnectionStateManager extends EventEmitter {
 
         // Query might have returned empty due to eventual consistency
         // Use the document from verification
-        const ref = verifySnapshot.docs.find(
-          (doc) => doc.data().type === "whatsapp_web",
-        )?.ref;
+        const ref = verifySnapshot.docs.find((doc) => doc.data().type === "whatsapp_web")?.ref;
 
         if (!ref) {
-          this.logger.error(
-            { userId: state.userId, phoneNumber: state.phoneNumber },
-            "Phone number document exists but type is not whatsapp_web",
-          );
+          this.logger.error({ userId: state.userId, phoneNumber: state.phoneNumber }, "Phone number document exists but type is not whatsapp_web");
           return;
         }
 
@@ -626,10 +574,7 @@ export class ConnectionStateManager extends EventEmitter {
     } catch (error: any) {
       // Determine if error is retryable
       const isRetryable =
-        error?.code === "UNAVAILABLE" ||
-        error?.code === "DEADLINE_EXCEEDED" ||
-        error?.message?.includes("timeout") ||
-        error?.message?.includes("ECONNRESET");
+        error?.code === "UNAVAILABLE" || error?.code === "DEADLINE_EXCEEDED" || error?.message?.includes("timeout") || error?.message?.includes("ECONNRESET");
 
       if (isRetryable && attempt < maxAttempts) {
         const delay = retryDelays[attempt - 1];
@@ -642,7 +587,7 @@ export class ConnectionStateManager extends EventEmitter {
             attempt,
             delay,
           },
-          `Retryable error during persistState, scheduling retry ${attempt}/${maxAttempts}`,
+          `Retryable error during persistState, scheduling retry ${attempt}/${maxAttempts}`
         );
 
         await new Promise((resolve) => setTimeout(resolve, delay));
@@ -663,7 +608,7 @@ export class ConnectionStateManager extends EventEmitter {
           isRetryable,
           maxAttemptsReached: attempt >= maxAttempts,
         },
-        "CRITICAL: Failed to persist state after all retries - this WILL cause synchronization issues!",
+        "CRITICAL: Failed to persist state after all retries - this WILL cause synchronization issues!"
       );
 
       // Emit event for monitoring/alerting
@@ -680,10 +625,7 @@ export class ConnectionStateManager extends EventEmitter {
   /**
    * Perform the actual Firestore update
    */
-  private async performStateUpdate(
-    ref: admin.firestore.DocumentReference,
-    state: ConnectionState,
-  ): Promise<void> {
+  private async performStateUpdate(ref: admin.firestore.DocumentReference, state: ConnectionState): Promise<void> {
     // Prepare update data using nested field updates to avoid overwriting other fields
     // Use dot notation (e.g., "whatsapp_web.status") instead of object replacement
     const updateData: any = {
@@ -706,16 +648,12 @@ export class ConnectionStateManager extends EventEmitter {
 
     // Add sync progress fields if available
     if (state.syncProgress) {
-      updateData["whatsapp_web.sync_contacts_count"] =
-        state.syncProgress.contacts;
-      updateData["whatsapp_web.sync_messages_count"] =
-        state.syncProgress.messages;
-      updateData["whatsapp_web.sync_started_at"] =
-        admin.firestore.Timestamp.fromDate(state.syncProgress.startedAt);
+      updateData["whatsapp_web.sync_contacts_count"] = state.syncProgress.contacts;
+      updateData["whatsapp_web.sync_messages_count"] = state.syncProgress.messages;
+      updateData["whatsapp_web.sync_started_at"] = admin.firestore.Timestamp.fromDate(state.syncProgress.startedAt);
 
       if (state.syncProgress.completedAt) {
-        updateData["whatsapp_web.sync_completed_at"] =
-          admin.firestore.Timestamp.fromDate(state.syncProgress.completedAt);
+        updateData["whatsapp_web.sync_completed_at"] = admin.firestore.Timestamp.fromDate(state.syncProgress.completedAt);
       }
 
       // Add sync status based on progress
@@ -729,8 +667,7 @@ export class ConnectionStateManager extends EventEmitter {
         updateData["whatsapp_web.sync_status"] = "started";
       }
 
-      updateData["whatsapp_web.sync_last_update"] =
-        admin.firestore.Timestamp.now();
+      updateData["whatsapp_web.sync_last_update"] = admin.firestore.Timestamp.now();
     }
 
     // Add metadata fields if available
@@ -742,8 +679,7 @@ export class ConnectionStateManager extends EventEmitter {
         updateData["whatsapp_web.proxy_ip"] = state.metadata.proxyIp;
       }
       if (state.metadata.whatsappVersion) {
-        updateData["whatsapp_web.whatsapp_version"] =
-          state.metadata.whatsappVersion;
+        updateData["whatsapp_web.whatsapp_version"] = state.metadata.whatsappVersion;
       }
       if (state.metadata.platform) {
         updateData["whatsapp_web.platform"] = state.metadata.platform;
@@ -769,7 +705,7 @@ export class ConnectionStateManager extends EventEmitter {
         phoneNumber: state.phoneNumber,
         status: state.status,
       },
-      "State persisted successfully to Firestore",
+      "State persisted successfully to Firestore"
     );
   }
 
@@ -807,7 +743,7 @@ export class ConnectionStateManager extends EventEmitter {
           userId,
           phoneNumber,
         },
-        "Failed to persist heartbeat",
+        "Failed to persist heartbeat"
       );
     }
   }
@@ -815,10 +751,7 @@ export class ConnectionStateManager extends EventEmitter {
   /**
    * Load state from Firestore
    */
-  private async loadState(
-    userId: string,
-    phoneNumber: string,
-  ): Promise<ConnectionState | null> {
+  private async loadState(userId: string, phoneNumber: string): Promise<ConnectionState | null> {
     try {
       const phoneNumbersSnapshot = await this.firestore
         .collection("users")
@@ -838,11 +771,7 @@ export class ConnectionStateManager extends EventEmitter {
 
       // Load sync progress from Firestore if available
       let syncProgress: ConnectionState["syncProgress"] = undefined;
-      if (
-        whatsappData.sync_contacts_count ||
-        whatsappData.sync_messages_count ||
-        whatsappData.sync_started_at
-      ) {
+      if (whatsappData.sync_contacts_count || whatsappData.sync_messages_count || whatsappData.sync_started_at) {
         syncProgress = {
           contacts: whatsappData.sync_contacts_count || 0,
           messages: whatsappData.sync_messages_count || 0,
@@ -858,15 +787,10 @@ export class ConnectionStateManager extends EventEmitter {
         instanceUrl: whatsappData.instance_url || "",
         createdAt: data.created_at?.toDate() || new Date(),
         lastActivity: data.updated_at?.toDate() || new Date(),
-        lastHeartbeat:
-          whatsappData.last_heartbeat?.toDate() ||
-          whatsappData.last_seen?.toDate() ||
-          data.updated_at?.toDate() ||
-          new Date(),
+        lastHeartbeat: whatsappData.last_heartbeat?.toDate() || whatsappData.last_seen?.toDate() || data.updated_at?.toDate() || new Date(),
         messageCount: whatsappData.message_count || 0,
         sessionExists: whatsappData.session_exists !== false,
-        qrScanned:
-          whatsappData.qr_scanned || whatsappData.status !== "qr_pending",
+        qrScanned: whatsappData.qr_scanned || whatsappData.status !== "qr_pending",
         syncCompleted: whatsappData.sync_completed || false,
         errorCount: whatsappData.error_count || 0,
         lastError: whatsappData.last_error,
@@ -884,9 +808,7 @@ export class ConnectionStateManager extends EventEmitter {
   private startCleanupTask() {
     // No longer doing time-based cleanup
     // Connections persist until explicitly logged out
-    this.logger.info(
-      "Stale connection cleanup disabled - connections persist until logout",
-    );
+    this.logger.info("Stale connection cleanup disabled - connections persist until logout");
   }
 
   /**

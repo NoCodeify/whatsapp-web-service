@@ -68,10 +68,7 @@ export class CloudRunSessionOptimizer {
   private async initializeCacheDirectory(): Promise<void> {
     try {
       await mkdir(this.config.cacheDir, { recursive: true });
-      this.logger.info(
-        { dir: this.config.cacheDir },
-        "Session cache directory initialized",
-      );
+      this.logger.info({ dir: this.config.cacheDir }, "Session cache directory initialized");
     } catch (error) {
       this.logger.error({ error }, "Failed to create session cache directory");
     }
@@ -101,10 +98,7 @@ export class CloudRunSessionOptimizer {
 
       return exists;
     } catch (error) {
-      this.logger.error(
-        { userId, phoneNumber, error },
-        "Failed to check session existence",
-      );
+      this.logger.error({ userId, phoneNumber, error }, "Failed to check session existence");
       return false;
     }
   }
@@ -112,11 +106,7 @@ export class CloudRunSessionOptimizer {
   /**
    * Download session from Cloud Storage with caching
    */
-  async downloadSession(
-    userId: string,
-    phoneNumber: string,
-    localPath: string,
-  ): Promise<boolean> {
+  async downloadSession(userId: string, phoneNumber: string, localPath: string): Promise<boolean> {
     try {
       // Create local directory
       await mkdir(localPath, { recursive: true });
@@ -127,10 +117,7 @@ export class CloudRunSessionOptimizer {
       const [files] = await bucket.getFiles({ prefix });
 
       if (files.length === 0) {
-        this.logger.warn(
-          { userId, phoneNumber },
-          "No session files found in Cloud Storage",
-        );
+        this.logger.warn({ userId, phoneNumber }, "No session files found in Cloud Storage");
         return false;
       }
 
@@ -141,15 +128,9 @@ export class CloudRunSessionOptimizer {
 
         try {
           await file.download({ destination: localFilePath });
-          this.logger.debug(
-            { userId, phoneNumber, fileName },
-            "Downloaded session file",
-          );
+          this.logger.debug({ userId, phoneNumber, fileName }, "Downloaded session file");
         } catch (error) {
-          this.logger.error(
-            { userId, phoneNumber, fileName, error },
-            "Failed to download session file",
-          );
+          this.logger.error({ userId, phoneNumber, fileName, error }, "Failed to download session file");
           throw error;
         }
       });
@@ -159,17 +140,11 @@ export class CloudRunSessionOptimizer {
       // Update cache
       this.updateCache(userId, phoneNumber, true, localPath);
 
-      this.logger.info(
-        { userId, phoneNumber, fileCount: files.length },
-        "Session downloaded from Cloud Storage",
-      );
+      this.logger.info({ userId, phoneNumber, fileCount: files.length }, "Session downloaded from Cloud Storage");
 
       return true;
     } catch (error) {
-      this.logger.error(
-        { userId, phoneNumber, error },
-        "Failed to download session from Cloud Storage",
-      );
+      this.logger.error({ userId, phoneNumber, error }, "Failed to download session from Cloud Storage");
       return false;
     }
   }
@@ -177,11 +152,7 @@ export class CloudRunSessionOptimizer {
   /**
    * Upload session to Cloud Storage (queued)
    */
-  async uploadSession(
-    userId: string,
-    phoneNumber: string,
-    localPath: string,
-  ): Promise<void> {
+  async uploadSession(userId: string, phoneNumber: string, localPath: string): Promise<void> {
     return new Promise((resolve, reject) => {
       const uploadTask = async () => {
         try {
@@ -200,11 +171,7 @@ export class CloudRunSessionOptimizer {
   /**
    * Perform the actual upload with retries
    */
-  private async performUpload(
-    userId: string,
-    phoneNumber: string,
-    localPath: string,
-  ): Promise<void> {
+  private async performUpload(userId: string, phoneNumber: string, localPath: string): Promise<void> {
     let attempt = 0;
 
     while (attempt < this.config.retryAttempts) {
@@ -222,10 +189,7 @@ export class CloudRunSessionOptimizer {
           throw error;
         }
 
-        this.logger.warn(
-          { userId, phoneNumber, attempt, error },
-          "Upload attempt failed, retrying",
-        );
+        this.logger.warn({ userId, phoneNumber, attempt, error }, "Upload attempt failed, retrying");
 
         await this.sleep(this.config.retryDelay * attempt);
       }
@@ -235,11 +199,7 @@ export class CloudRunSessionOptimizer {
   /**
    * Execute the upload operation
    */
-  private async doUpload(
-    userId: string,
-    phoneNumber: string,
-    localPath: string,
-  ): Promise<void> {
+  private async doUpload(userId: string, phoneNumber: string, localPath: string): Promise<void> {
     try {
       const files = await readdir(localPath);
       const bucket = this.storage.bucket(this.config.bucketName);
@@ -265,18 +225,12 @@ export class CloudRunSessionOptimizer {
           },
         });
 
-        this.logger.debug(
-          { userId, phoneNumber, fileName },
-          "Uploaded session file to Cloud Storage",
-        );
+        this.logger.debug({ userId, phoneNumber, fileName }, "Uploaded session file to Cloud Storage");
       });
 
       await Promise.all(uploadPromises);
 
-      this.logger.info(
-        { userId, phoneNumber, fileCount: files.length },
-        "Session uploaded to Cloud Storage",
-      );
+      this.logger.info({ userId, phoneNumber, fileCount: files.length }, "Session uploaded to Cloud Storage");
 
       // Update Firestore metadata
       await this.updateSessionMetadata(userId, phoneNumber, {
@@ -286,10 +240,7 @@ export class CloudRunSessionOptimizer {
         instance: process.env.HOSTNAME || "unknown",
       });
     } catch (error) {
-      this.logger.error(
-        { userId, phoneNumber, error },
-        "Failed to upload session to Cloud Storage",
-      );
+      this.logger.error({ userId, phoneNumber, error }, "Failed to upload session to Cloud Storage");
       throw error;
     }
   }
@@ -332,27 +283,15 @@ export class CloudRunSessionOptimizer {
           await phoneNumbersSnapshot.docs[0].ref.update({
             "whatsapp_web.backup_metadata": null,
           });
-          this.logger.info(
-            { userId, phoneNumber },
-            "Deleted backup metadata from phone_numbers collection",
-          );
+          this.logger.info({ userId, phoneNumber }, "Deleted backup metadata from phone_numbers collection");
         }
       } catch (error) {
-        this.logger.warn(
-          { userId, phoneNumber, error },
-          "Failed to delete backup metadata from phone_numbers collection",
-        );
+        this.logger.warn({ userId, phoneNumber, error }, "Failed to delete backup metadata from phone_numbers collection");
       }
 
-      this.logger.info(
-        { userId, phoneNumber, deletedFiles: files.length },
-        "Session deleted from Cloud Storage",
-      );
+      this.logger.info({ userId, phoneNumber, deletedFiles: files.length }, "Session deleted from Cloud Storage");
     } catch (error) {
-      this.logger.error(
-        { userId, phoneNumber, error },
-        "Failed to delete session from Cloud Storage",
-      );
+      this.logger.error({ userId, phoneNumber, error }, "Failed to delete session from Cloud Storage");
       throw error;
     }
   }
@@ -396,11 +335,7 @@ export class CloudRunSessionOptimizer {
   /**
    * Update session metadata in Firestore
    */
-  private async updateSessionMetadata(
-    userId: string,
-    phoneNumber: string,
-    metadata: any,
-  ): Promise<void> {
+  private async updateSessionMetadata(userId: string, phoneNumber: string, metadata: any): Promise<void> {
     try {
       // Find the phone number document in unified collection
       const phoneNumbersSnapshot = await this.firestore
@@ -447,10 +382,7 @@ export class CloudRunSessionOptimizer {
           });
       }
     } catch (error) {
-      this.logger.error(
-        { userId, phoneNumber, error },
-        "Failed to update backup metadata in phone_numbers collection",
-      );
+      this.logger.error({ userId, phoneNumber, error }, "Failed to update backup metadata in phone_numbers collection");
     }
   }
 
@@ -461,12 +393,7 @@ export class CloudRunSessionOptimizer {
     return `${userId}:${phoneNumber}`;
   }
 
-  private updateCache(
-    userId: string,
-    phoneNumber: string,
-    isValid: boolean,
-    localPath?: string,
-  ): void {
+  private updateCache(userId: string, phoneNumber: string, isValid: boolean, localPath?: string): void {
     const sessionKey = this.getSessionKey(userId, phoneNumber);
 
     this.sessionCache.set(sessionKey, {
@@ -493,9 +420,7 @@ export class CloudRunSessionOptimizer {
     const entries = Array.from(this.sessionCache.entries());
 
     // Sort by last modified date (oldest first)
-    entries.sort(
-      ([, a], [, b]) => a.lastModified.getTime() - b.lastModified.getTime(),
-    );
+    entries.sort(([, a], [, b]) => a.lastModified.getTime() - b.lastModified.getTime());
 
     // Remove oldest entries
     const toRemove = Math.ceil(entries.length * 0.2); // Remove 20%
@@ -504,10 +429,7 @@ export class CloudRunSessionOptimizer {
       this.sessionCache.delete(entries[i][0]);
     }
 
-    this.logger.debug(
-      { removed: toRemove, remaining: this.sessionCache.size },
-      "Cleaned up session cache",
-    );
+    this.logger.debug({ removed: toRemove, remaining: this.sessionCache.size }, "Cleaned up session cache");
   }
 
   /**
@@ -535,9 +457,7 @@ export class CloudRunSessionOptimizer {
    * Get cache statistics
    */
   getCacheStats() {
-    const validEntries = Array.from(this.sessionCache.values()).filter(
-      (entry) => this.isCacheValid(entry),
-    ).length;
+    const validEntries = Array.from(this.sessionCache.values()).filter((entry) => this.isCacheValid(entry)).length;
 
     return {
       totalEntries: this.sessionCache.size,
@@ -563,10 +483,7 @@ export class CloudRunSessionOptimizer {
 
     // Process remaining uploads
     if (this.uploadQueue.length > 0) {
-      this.logger.info(
-        { queueSize: this.uploadQueue.length },
-        "Processing remaining uploads before shutdown",
-      );
+      this.logger.info({ queueSize: this.uploadQueue.length }, "Processing remaining uploads before shutdown");
       await this.processUploadQueue();
     }
 

@@ -60,10 +60,7 @@ export class ErrorHandler extends EventEmitter {
   > = new Map();
 
   // Recovery strategies
-  private recoveryStrategies: Map<
-    string,
-    (context: ErrorContext) => Promise<boolean>
-  > = new Map();
+  private recoveryStrategies: Map<string, (context: ErrorContext) => Promise<boolean>> = new Map();
 
   private readonly config: ErrorHandlingConfig = {
     maxRetries: parseInt(process.env.ERROR_MAX_RETRIES || "3"),
@@ -71,12 +68,8 @@ export class ErrorHandler extends EventEmitter {
     exponentialBackoff: process.env.ERROR_EXPONENTIAL_BACKOFF !== "false",
     circuitBreaker: {
       failureThreshold: parseInt(process.env.CIRCUIT_BREAKER_THRESHOLD || "5"),
-      recoveryTimeout: parseInt(
-        process.env.CIRCUIT_BREAKER_RECOVERY || "30000",
-      ),
-      monitoringPeriod: parseInt(
-        process.env.CIRCUIT_BREAKER_MONITOR || "60000",
-      ),
+      recoveryTimeout: parseInt(process.env.CIRCUIT_BREAKER_RECOVERY || "30000"),
+      monitoringPeriod: parseInt(process.env.CIRCUIT_BREAKER_MONITOR || "60000"),
     },
     enableGracefulDegradation: process.env.GRACEFUL_DEGRADATION !== "false",
   };
@@ -104,10 +97,7 @@ export class ErrorHandler extends EventEmitter {
 
     // Check circuit breaker state
     if (this.isCircuitOpen(errorKey)) {
-      this.logger.warn(
-        { errorKey, context },
-        "Circuit breaker is open, skipping recovery attempt",
-      );
+      this.logger.warn({ errorKey, context }, "Circuit breaker is open, skipping recovery attempt");
       return false;
     }
 
@@ -123,10 +113,7 @@ export class ErrorHandler extends EventEmitter {
   /**
    * Register a recovery strategy for a specific error type
    */
-  registerRecoveryStrategy(
-    errorType: string,
-    strategy: (context: ErrorContext) => Promise<boolean>,
-  ): void {
+  registerRecoveryStrategy(errorType: string, strategy: (context: ErrorContext) => Promise<boolean>): void {
     this.recoveryStrategies.set(errorType, strategy);
     this.logger.debug({ errorType }, "Recovery strategy registered");
   }
@@ -134,11 +121,7 @@ export class ErrorHandler extends EventEmitter {
   /**
    * Execute an operation with error handling and retries
    */
-  async executeWithRetry<T>(
-    operation: () => Promise<T>,
-    context: ErrorContext,
-    maxRetries?: number,
-  ): Promise<T> {
+  async executeWithRetry<T>(operation: () => Promise<T>, context: ErrorContext, maxRetries?: number): Promise<T> {
     const retries = maxRetries ?? this.config.maxRetries;
 
     for (let attempt = 0; attempt <= retries; attempt++) {
@@ -156,9 +139,7 @@ export class ErrorHandler extends EventEmitter {
         }
 
         // Calculate delay with exponential backoff
-        const delay = this.config.exponentialBackoff
-          ? this.config.retryDelay * Math.pow(2, attempt)
-          : this.config.retryDelay;
+        const delay = this.config.exponentialBackoff ? this.config.retryDelay * Math.pow(2, attempt) : this.config.retryDelay;
 
         this.logger.warn(
           {
@@ -168,7 +149,7 @@ export class ErrorHandler extends EventEmitter {
             error: (error as Error).message,
             context,
           },
-          "Operation failed, retrying",
+          "Operation failed, retrying"
         );
 
         await this.sleep(delay);
@@ -193,9 +174,7 @@ export class ErrorHandler extends EventEmitter {
         stackTrace: error.stack,
       }).then((recovered) => {
         if (!recovered) {
-          this.logger.fatal(
-            "Failed to recover from uncaught exception, initiating graceful shutdown",
-          );
+          this.logger.fatal("Failed to recover from uncaught exception, initiating graceful shutdown");
           this.gracefulShutdown();
         }
       });
@@ -205,8 +184,7 @@ export class ErrorHandler extends EventEmitter {
     process.on("unhandledRejection", (reason, promise) => {
       this.logger.error({ reason, promise }, "Unhandled promise rejection");
 
-      const error =
-        reason instanceof Error ? reason : new Error(String(reason));
+      const error = reason instanceof Error ? reason : new Error(String(reason));
 
       this.handleError(error, {
         operation: "unhandledRejection",
@@ -272,18 +250,12 @@ export class ErrorHandler extends EventEmitter {
   /**
    * Attempt to recover from an error
    */
-  private async attemptRecovery(
-    error: Error,
-    context: ErrorContext,
-  ): Promise<boolean> {
+  private async attemptRecovery(error: Error, context: ErrorContext): Promise<boolean> {
     const errorType = this.categorizeError(error);
 
     const strategy = this.recoveryStrategies.get(errorType);
     if (!strategy) {
-      this.logger.warn(
-        { errorType, error: error.message },
-        "No recovery strategy available for error type",
-      );
+      this.logger.warn({ errorType, error: error.message }, "No recovery strategy available for error type");
       return false;
     }
 
@@ -298,10 +270,7 @@ export class ErrorHandler extends EventEmitter {
 
       return recovered;
     } catch (recoveryError) {
-      this.logger.error(
-        { errorType, recoveryError, originalError: error },
-        "Recovery strategy threw an error",
-      );
+      this.logger.error({ errorType, recoveryError, originalError: error }, "Recovery strategy threw an error");
       return false;
     }
   }
@@ -313,17 +282,11 @@ export class ErrorHandler extends EventEmitter {
     const message = error.message.toLowerCase();
     const stack = error.stack?.toLowerCase() || "";
 
-    if (
-      message.includes("stream errored") ||
-      message.includes("stream error")
-    ) {
+    if (message.includes("stream errored") || message.includes("stream error")) {
       return "stream_error";
     }
 
-    if (
-      message.includes("connection closed") ||
-      message.includes("connection lost")
-    ) {
+    if (message.includes("connection closed") || message.includes("connection lost")) {
       return "connection_closed";
     }
 
@@ -351,9 +314,7 @@ export class ErrorHandler extends EventEmitter {
    */
   private getErrorKey(error: Error, context: ErrorContext): string {
     const errorType = this.categorizeError(error);
-    return context.connectionId
-      ? `${errorType}_${context.connectionId}`
-      : errorType;
+    return context.connectionId ? `${errorType}_${context.connectionId}` : errorType;
   }
 
   /**
@@ -377,19 +338,14 @@ export class ErrorHandler extends EventEmitter {
   /**
    * Determine error severity
    */
-  private determineSeverity(
-    error: Error,
-  ): "low" | "medium" | "high" | "critical" {
+  private determineSeverity(error: Error): "low" | "medium" | "high" | "critical" {
     const message = error.message.toLowerCase();
 
     if (message.includes("fatal") || message.includes("critical")) {
       return "critical";
     }
 
-    if (
-      message.includes("connection closed") ||
-      message.includes("stream errored")
-    ) {
+    if (message.includes("connection closed") || message.includes("stream errored")) {
       return "high";
     }
 
@@ -410,10 +366,7 @@ export class ErrorHandler extends EventEmitter {
     if (circuit.state === CircuitBreakerState.OPEN) {
       if (Date.now() > circuit.nextRetryTime.getTime()) {
         circuit.state = CircuitBreakerState.HALF_OPEN;
-        this.logger.info(
-          { errorKey },
-          "Circuit breaker moved to half-open state",
-        );
+        this.logger.info({ errorKey }, "Circuit breaker moved to half-open state");
         return false;
       }
       return true;
@@ -442,14 +395,9 @@ export class ErrorHandler extends EventEmitter {
 
       if (circuit.failures >= this.config.circuitBreaker.failureThreshold) {
         circuit.state = CircuitBreakerState.OPEN;
-        circuit.nextRetryTime = new Date(
-          Date.now() + this.config.circuitBreaker.recoveryTimeout,
-        );
+        circuit.nextRetryTime = new Date(Date.now() + this.config.circuitBreaker.recoveryTimeout);
 
-        this.logger.warn(
-          { errorKey, failures: circuit.failures },
-          "Circuit breaker tripped to open state",
-        );
+        this.logger.warn({ errorKey, failures: circuit.failures }, "Circuit breaker tripped to open state");
       }
     }
 
@@ -467,16 +415,11 @@ export class ErrorHandler extends EventEmitter {
         const timeSinceLastFailure = now - circuit.lastFailureTime.getTime();
 
         // Reset circuit breaker if no failures for a while
-        if (
-          timeSinceLastFailure > this.config.circuitBreaker.monitoringPeriod
-        ) {
+        if (timeSinceLastFailure > this.config.circuitBreaker.monitoringPeriod) {
           if (circuit.state !== CircuitBreakerState.CLOSED) {
             circuit.state = CircuitBreakerState.CLOSED;
             circuit.failures = 0;
-            this.logger.info(
-              { errorKey },
-              "Circuit breaker auto-reset due to inactivity",
-            );
+            this.logger.info({ errorKey }, "Circuit breaker auto-reset due to inactivity");
           }
         }
       }
@@ -534,21 +477,17 @@ export class ErrorHandler extends EventEmitter {
    * Get error handling statistics
    */
   getStats() {
-    const circuitBreakerStats = Array.from(this.circuitBreakers.entries()).map(
-      ([key, circuit]) => ({
-        errorKey: key,
-        state: circuit.state,
-        failures: circuit.failures,
-        lastFailureTime: circuit.lastFailureTime,
-      }),
-    );
+    const circuitBreakerStats = Array.from(this.circuitBreakers.entries()).map(([key, circuit]) => ({
+      errorKey: key,
+      state: circuit.state,
+      failures: circuit.failures,
+      lastFailureTime: circuit.lastFailureTime,
+    }));
 
-    const errorStatsArray = Array.from(this.errorStats.entries()).map(
-      ([key, stats]) => ({
-        errorKey: key,
-        ...stats,
-      }),
-    );
+    const errorStatsArray = Array.from(this.errorStats.entries()).map(([key, stats]) => ({
+      errorKey: key,
+      ...stats,
+    }));
 
     return {
       circuitBreakers: circuitBreakerStats,

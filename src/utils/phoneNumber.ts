@@ -3,6 +3,29 @@ import pino from "pino";
 
 const logger = pino({ name: "PhoneNumberUtils" });
 
+/**
+ * Fix Mexican phone number formatting bug
+ * Mexico changed its numbering plan in August 2019, removing the '1' digit
+ * after country code +52 for mobile numbers. However, libphonenumber-js
+ * (versions < 1.12.x) still uses outdated metadata.
+ *
+ * Correct E.164 format: +52XXXXXXXXXX (13 chars, NO '1')
+ * Incorrect format: +521XXXXXXXXXX (14 chars, HAS '1')
+ *
+ * @param formatted - E.164 formatted phone number
+ * @returns Corrected phone number if Mexican with incorrect '1', otherwise unchanged
+ */
+function fixMexicanPhoneNumber(formatted: string): string {
+  // Detect incorrect format: +521XXXXXXXXXX (14 chars)
+  if (formatted.startsWith("+521") && formatted.length === 14) {
+    // Correct to: +52XXXXXXXXXX (13 chars)
+    const corrected = "+52" + formatted.substring(4);
+    logger.debug({ original: formatted, corrected }, "Fixed Mexican phone number format (removed incorrect '1' after country code)");
+    return corrected;
+  }
+  return formatted;
+}
+
 export interface ParsedPhoneNumber {
   e164: string;
   countryCode: string;
@@ -20,13 +43,16 @@ export interface ParsedPhoneNumber {
  * @param defaultCountry - Optional default country code if number doesn't include country code
  * @returns Formatted E.164 phone number or null if invalid
  */
-export function formatPhoneNumber(
-  phoneNumber: string,
-  defaultCountry?: CountryCode,
-): string | null {
+export function formatPhoneNumber(phoneNumber: string, defaultCountry?: CountryCode): string | null {
   try {
     // Clean the input - remove spaces, dashes, parentheses, etc.
     let cleaned = phoneNumber.replace(/[\s\-\(\)\.]/g, "");
+
+    // Pre-fix Mexican numbers before parsing to avoid libphonenumber-js validation failure
+    // Mexico removed '1' after +52 in 2019, but old metadata still expects it
+    if (cleaned.startsWith("+521") && cleaned.length === 14) {
+      cleaned = "+52" + cleaned.substring(4);
+    }
 
     // If it doesn't start with +, add it (assuming it's an international number)
     if (cleaned.length > 0 && !cleaned.startsWith("+")) {
@@ -35,7 +61,7 @@ export function formatPhoneNumber(
         // Try parsing with the default country
         const parsed = parsePhoneNumberFromString(cleaned, defaultCountry);
         if (parsed && parsed.isValid()) {
-          return parsed.number as string;
+          return fixMexicanPhoneNumber(parsed.number as string);
         }
       }
 
@@ -49,19 +75,13 @@ export function formatPhoneNumber(
     if (!parsed) {
       // If parsing failed and we have a default country, try with that
       if (defaultCountry) {
-        const parsedWithCountry = parsePhoneNumberFromString(
-          phoneNumber,
-          defaultCountry,
-        );
+        const parsedWithCountry = parsePhoneNumberFromString(phoneNumber, defaultCountry);
         if (parsedWithCountry && parsedWithCountry.isValid()) {
-          return parsedWithCountry.number as string;
+          return fixMexicanPhoneNumber(parsedWithCountry.number as string);
         }
       }
 
-      logger.warn(
-        { phoneNumber, defaultCountry },
-        "Failed to parse phone number",
-      );
+      logger.warn({ phoneNumber, defaultCountry }, "Failed to parse phone number");
       return null;
     }
 
@@ -74,20 +94,20 @@ export function formatPhoneNumber(
           country: parsed.country,
           isPossible: parsed.isPossible(),
         },
-        "Phone number is not valid",
+        "Phone number is not valid"
       );
 
       // Even if not fully valid, if it's possible, return the formatted version
       // This helps with some edge cases where the number is technically correct
       if (parsed.isPossible()) {
-        return parsed.number as string;
+        return fixMexicanPhoneNumber(parsed.number as string);
       }
 
       return null;
     }
 
-    // Return E.164 formatted number
-    return parsed.number as string;
+    // Return E.164 formatted number with Mexican fix applied
+    return fixMexicanPhoneNumber(parsed.number as string);
   } catch (error) {
     logger.error({ phoneNumber, error }, "Error formatting phone number");
     return null;
@@ -101,10 +121,7 @@ export function formatPhoneNumber(
  * @param defaultCountry - Optional default country code
  * @returns Parsed phone number details or null if invalid
  */
-export function parsePhoneNumber(
-  phoneNumber: string,
-  defaultCountry?: CountryCode,
-): ParsedPhoneNumber | null {
+export function parsePhoneNumber(phoneNumber: string, defaultCountry?: CountryCode): ParsedPhoneNumber | null {
   try {
     // Use the formatter to clean and validate
     const formatted = formatPhoneNumber(phoneNumber, defaultCountry);
@@ -140,10 +157,7 @@ export function parsePhoneNumber(
  * @param defaultCountry - Optional default country code
  * @returns WhatsApp JID format (e.g., "31658015937@s.whatsapp.net")
  */
-export function formatWhatsAppJid(
-  phoneNumber: string,
-  defaultCountry?: CountryCode,
-): string | null {
+export function formatWhatsAppJid(phoneNumber: string, defaultCountry?: CountryCode): string | null {
   const formatted = formatPhoneNumber(phoneNumber, defaultCountry);
   if (!formatted) {
     return null;
@@ -161,10 +175,7 @@ export function formatWhatsAppJid(
  * @param defaultCountry - Optional default country code
  * @returns True if valid, false otherwise
  */
-export function isValidPhoneNumber(
-  phoneNumber: string,
-  defaultCountry?: CountryCode,
-): boolean {
+export function isValidPhoneNumber(phoneNumber: string, defaultCountry?: CountryCode): boolean {
   const formatted = formatPhoneNumber(phoneNumber, defaultCountry);
   return formatted !== null;
 }
@@ -193,6 +204,9 @@ export function preprocessPhoneNumber(phoneNumber: string): string {
 
   // Handle common country-specific patterns with leading zeros
   const patterns = [
+    // Mexico: +52 1 -> +52 (post-2019 numbering plan)
+    // Fix for outdated libphonenumber-js metadata
+    { pattern: /^\+52\s*1(\d{10})$/, replacement: "+52$1" },
     // Netherlands: +31 0 -> +31
     { pattern: /^\+31\s*0/, replacement: "+31" },
     // France: +33 0 -> +33
@@ -224,7 +238,7 @@ export function preprocessPhoneNumber(phoneNumber: string): string {
           processed,
           pattern: pattern.toString(),
         },
-        "Preprocessed phone number to remove leading zero",
+        "Preprocessed phone number to remove leading zero"
       );
       break;
     }
@@ -241,10 +255,7 @@ export function preprocessPhoneNumber(phoneNumber: string): string {
  * @param defaultCountry - Optional default country code
  * @returns Formatted E.164 phone number or null if invalid
  */
-export function formatPhoneNumberSafe(
-  phoneNumber: string,
-  defaultCountry?: CountryCode,
-): string | null {
+export function formatPhoneNumberSafe(phoneNumber: string, defaultCountry?: CountryCode): string | null {
   // BUG #1 FIX: Reject excessively long phone numbers (DoS prevention)
   // E.164 format allows max 15 digits + country code + formatting characters
   const MAX_PHONE_LENGTH = 20;
@@ -254,17 +265,14 @@ export function formatPhoneNumberSafe(
         phoneNumber: phoneNumber?.substring(0, 50),
         length: phoneNumber?.length,
       },
-      "Phone number exceeds maximum allowed length",
+      "Phone number exceeds maximum allowed length"
     );
     return null;
   }
 
   // BUG #3 FIX: Reject strings containing null bytes (filesystem security)
   if (phoneNumber.includes("\x00")) {
-    logger.warn(
-      { phoneNumber: phoneNumber.substring(0, 50) },
-      "Phone number contains null byte",
-    );
+    logger.warn({ phoneNumber: phoneNumber.substring(0, 50) }, "Phone number contains null byte");
     return null;
   }
 
@@ -272,10 +280,7 @@ export function formatPhoneNumberSafe(
   // Valid characters: digits, +, -, (, ), and spaces
   const validCharsRegex = /^[\d\s\+\-\(\)]+$/;
   if (!validCharsRegex.test(phoneNumber)) {
-    logger.warn(
-      { phoneNumber: phoneNumber.substring(0, 50) },
-      "Phone number contains invalid characters",
-    );
+    logger.warn({ phoneNumber: phoneNumber.substring(0, 50) }, "Phone number contains invalid characters");
     return null;
   }
 

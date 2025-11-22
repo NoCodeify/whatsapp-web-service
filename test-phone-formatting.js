@@ -8,11 +8,7 @@
  * and that phone numbers are formatted correctly for WhatsApp.
  */
 
-const {
-  formatPhoneNumberSafe,
-  parsePhoneNumber,
-  formatWhatsAppJid,
-} = require("./dist/utils/phoneNumber");
+const { formatPhoneNumberSafe, parsePhoneNumber, formatWhatsAppJid } = require("./dist/utils/phoneNumber");
 
 console.log("📱 Phone Number Formatting Test");
 console.log("================================\n");
@@ -94,9 +90,7 @@ testCases.forEach((test, index) => {
     // Test WhatsApp JID formatting too
     if (result) {
       const jid = formatWhatsAppJid(test.input);
-      const expectedJid = result
-        ? `${result.substring(1)}@s.whatsapp.net`
-        : null;
+      const expectedJid = result ? `${result.substring(1)}@s.whatsapp.net` : null;
       console.log(`   JID:      "${jid}"`);
       if (jid !== expectedJid) {
         console.log(`   ⚠️  JID mismatch! Expected: "${expectedJid}"`);
@@ -118,13 +112,9 @@ console.log(`Results: ${passed} passed, ${failed} failed`);
 console.log("");
 
 if (failed === 0) {
-  console.log(
-    "🎉 All tests passed! Phone number formatting is working correctly.",
-  );
+  console.log("🎉 All tests passed! Phone number formatting is working correctly.");
   process.exit(0);
 } else {
-  console.log(
-    "⚠️  Some tests failed. Please review the phone number formatting logic.",
-  );
+  console.log("⚠️  Some tests failed. Please review the phone number formatting logic.");
   process.exit(1);
 }

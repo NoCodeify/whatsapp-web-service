@@ -81,15 +81,7 @@ export const maskSensitiveData = (data: any): any => {
   const masked = { ...data };
 
   // List of sensitive field names to mask
-  const sensitiveFields = [
-    "password",
-    "token",
-    "apiKey",
-    "api_key",
-    "secret",
-    "authorization",
-    "cookie",
-  ];
+  const sensitiveFields = ["password", "token", "apiKey", "api_key", "secret", "authorization", "cookie"];
 
   Object.keys(masked).forEach((key) => {
     const lowerKey = key.toLowerCase();
@@ -97,10 +89,7 @@ export const maskSensitiveData = (data: any): any => {
       masked[key] = "***REDACTED***";
     }
     // Partially mask message content in production
-    else if (
-      process.env.NODE_ENV === "production" &&
-      (lowerKey === "message" || lowerKey === "content" || lowerKey === "text")
-    ) {
+    else if (process.env.NODE_ENV === "production" && (lowerKey === "message" || lowerKey === "content" || lowerKey === "text")) {
       if (typeof masked[key] === "string" && masked[key].length > 20) {
         masked[key] = masked[key].substring(0, 20) + "...[truncated]";
       }
@@ -145,10 +134,7 @@ export class PerfTimer {
 /**
  * Create a child logger with additional context
  */
-export const createChildLogger = (
-  parentLogger: pino.Logger,
-  context: Record<string, any>,
-): pino.Logger => {
+export const createChildLogger = (parentLogger: pino.Logger, context: Record<string, any>): pino.Logger => {
   return parentLogger.child(maskSensitiveData(context));
 };
 

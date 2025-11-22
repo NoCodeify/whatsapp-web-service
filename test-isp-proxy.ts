@@ -114,12 +114,7 @@ async function testDirectConnection() {
     if (response3.data.ip === response4.data.ip) {
       console.log("✅ Sticky session working - Same IP:", response4.data.ip);
     } else {
-      console.log(
-        "⚠️  IPs differ:",
-        response3.data.ip,
-        "vs",
-        response4.data.ip,
-      );
+      console.log("⚠️  IPs differ:", response3.data.ip, "vs", response4.data.ip);
     }
 
     console.log("\n🎉 All ISP proxy tests passed!");
@@ -161,10 +156,7 @@ async function testProxyAgent() {
 
     console.log("✅ ProxyAgent test successful!");
     console.log("   IP:", response.data.ip);
-    console.log(
-      "   Location:",
-      `${response.data.city || "Unknown"}, ${response.data.country}`,
-    );
+    console.log("   Location:", `${response.data.city || "Unknown"}, ${response.data.country}`);
   } catch (error: any) {
     console.error("❌ ProxyAgent test failed:", error.message);
   }
@@ -174,9 +166,7 @@ async function testProxyAgent() {
 (async () => {
   if (!CONFIG.customerID || !CONFIG.password) {
     console.error("❌ Missing required configuration!");
-    console.error(
-      "   Please ensure BRIGHT_DATA_CUSTOMER_ID and BRIGHT_DATA_ZONE_PASSWORD are set in .env",
-    );
+    console.error("   Please ensure BRIGHT_DATA_CUSTOMER_ID and BRIGHT_DATA_ZONE_PASSWORD are set in .env");
     process.exit(1);
   }
 

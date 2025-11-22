@@ -39,11 +39,7 @@ export class StatusReconciliationService extends EventEmitter {
   private readonly MAX_DESYNCS_TO_TRACK = 100; // Keep last 100 desyncs
   private readonly DESYNC_ALERT_THRESHOLD = 10; // Alert if >10 desyncs in one check
 
-  constructor(
-    firestore: Firestore,
-    connectionStateManager: ConnectionStateManager,
-    connectionPool?: ConnectionPool,
-  ) {
+  constructor(firestore: Firestore, connectionStateManager: ConnectionStateManager, connectionPool?: ConnectionPool) {
     super();
     this.firestore = firestore;
     this.connectionStateManager = connectionStateManager;
@@ -59,10 +55,7 @@ export class StatusReconciliationService extends EventEmitter {
       return;
     }
 
-    this.logger.info(
-      { intervalMs: this.RECONCILIATION_INTERVAL },
-      "Starting status reconciliation service",
-    );
+    this.logger.info({ intervalMs: this.RECONCILIATION_INTERVAL }, "Starting status reconciliation service");
 
     // Run immediately on start
     this.reconcile().catch((error) => {
@@ -103,8 +96,7 @@ export class StatusReconciliationService extends EventEmitter {
 
       // Access in-memory connections through the connection state manager
       // (We'll need to expose a method to get all in-memory states)
-      const activeConnections =
-        await this.connectionStateManager.getActiveConnections();
+      const activeConnections = await this.connectionStateManager.getActiveConnections();
 
       for (const conn of activeConnections) {
         const key = `${conn.userId}:${conn.phoneNumber}`;
@@ -118,10 +110,7 @@ export class StatusReconciliationService extends EventEmitter {
       for (const userDoc of usersSnapshot.docs) {
         const userId = userDoc.id;
 
-        const phoneNumbersSnapshot = await userDoc.ref
-          .collection("phone_numbers")
-          .where("type", "==", "whatsapp_web")
-          .get();
+        const phoneNumbersSnapshot = await userDoc.ref.collection("phone_numbers").where("type", "==", "whatsapp_web").get();
 
         for (const phoneDoc of phoneNumbersSnapshot.docs) {
           const data = phoneDoc.data();
@@ -163,26 +152,19 @@ export class StatusReconciliationService extends EventEmitter {
               inMemoryStatus,
               firestoreStatus: firestoreStatus || "MISSING",
             },
-            "DESYNC DETECTED: In-memory status doesn't match Firestore",
+            "DESYNC DETECTED: In-memory status doesn't match Firestore"
           );
 
           // Attempt to fix by updating Firestore to match in-memory state
           let fixed = false;
           try {
-            const state = await this.connectionStateManager.getState(
-              userId,
-              phoneNumber,
-            );
+            const state = await this.connectionStateManager.getState(userId, phoneNumber);
 
             if (state) {
               // Force a state update to sync Firestore
-              await this.connectionStateManager.updateState(
-                userId,
-                phoneNumber,
-                {
-                  status: state.status, // Use current in-memory status
-                },
-              );
+              await this.connectionStateManager.updateState(userId, phoneNumber, {
+                status: state.status, // Use current in-memory status
+              });
 
               this.logger.info(
                 {
@@ -191,7 +173,7 @@ export class StatusReconciliationService extends EventEmitter {
                   previousFirestoreStatus: firestoreStatus || "MISSING",
                   newStatus: state.status,
                 },
-                "Successfully fixed desync by updating Firestore",
+                "Successfully fixed desync by updating Firestore"
               );
 
               fixed = true;
@@ -204,7 +186,7 @@ export class StatusReconciliationService extends EventEmitter {
                 phoneNumber,
                 error,
               },
-              "Failed to fix desync",
+              "Failed to fix desync"
             );
             this.metrics.desyncFailed++;
           }
@@ -228,8 +210,7 @@ export class StatusReconciliationService extends EventEmitter {
 
           // Double-check: verify the connection doesn't exist in the actual ConnectionPool
           // ConnectionStateManager might be out of sync but the actual connection could exist
-          const hasActualConnection =
-            this.connectionPool?.hasConnection(userId, phoneNumber) || false;
+          const hasActualConnection = this.connectionPool?.hasConnection(userId, phoneNumber) || false;
 
           if (hasActualConnection) {
             this.logger.warn(
@@ -240,26 +221,22 @@ export class StatusReconciliationService extends EventEmitter {
                 inMemoryState: false,
                 actualConnection: true,
               },
-              "DESYNC DETECTED: ConnectionStateManager missing but actual connection exists - re-syncing state",
+              "DESYNC DETECTED: ConnectionStateManager missing but actual connection exists - re-syncing state"
             );
 
             // Connection exists but ConnectionStateManager doesn't know about it
             // Force a state sync by updating the state
             try {
-              await this.connectionStateManager.updateState(
-                userId,
-                phoneNumber,
-                {
-                  status: "connected",
-                },
-              );
+              await this.connectionStateManager.updateState(userId, phoneNumber, {
+                status: "connected",
+              });
 
               this.logger.info(
                 {
                   userId,
                   phoneNumber,
                 },
-                "Re-synchronized ConnectionStateManager with actual connection",
+                "Re-synchronized ConnectionStateManager with actual connection"
               );
 
               this.metrics.desyncFixed++;
@@ -270,7 +247,7 @@ export class StatusReconciliationService extends EventEmitter {
                   phoneNumber,
                   error,
                 },
-                "Failed to re-sync ConnectionStateManager",
+                "Failed to re-sync ConnectionStateManager"
               );
               this.metrics.desyncFailed++;
             }
@@ -285,17 +262,13 @@ export class StatusReconciliationService extends EventEmitter {
               inMemory: false,
               actualConnection: false,
             },
-            "DESYNC DETECTED: Firestore shows 'connected' but no actual connection exists (stale data)",
+            "DESYNC DETECTED: Firestore shows 'connected' but no actual connection exists (stale data)"
           );
 
           // Fix by marking as disconnected in Firestore
           let fixed = false;
           try {
-            await this.connectionStateManager.markDisconnected(
-              userId,
-              phoneNumber,
-              "Reconciliation: No active connection found",
-            );
+            await this.connectionStateManager.markDisconnected(userId, phoneNumber, "Reconciliation: No active connection found");
 
             this.logger.info(
               {
@@ -303,7 +276,7 @@ export class StatusReconciliationService extends EventEmitter {
                 phoneNumber,
                 previousFirestoreStatus: firestoreStatus,
               },
-              "Successfully fixed stale Firestore data by marking as disconnected",
+              "Successfully fixed stale Firestore data by marking as disconnected"
             );
 
             fixed = true;
@@ -315,7 +288,7 @@ export class StatusReconciliationService extends EventEmitter {
                 phoneNumber,
                 error,
               },
-              "Failed to fix stale Firestore data",
+              "Failed to fix stale Firestore data"
             );
             this.metrics.desyncFailed++;
           }
@@ -339,10 +312,7 @@ export class StatusReconciliationService extends EventEmitter {
       for (const userDoc of usersSnapshot.docs) {
         const userId = userDoc.id;
 
-        const phoneNumbersSnapshot = await userDoc.ref
-          .collection("phone_numbers")
-          .where("type", "==", "whatsapp_web")
-          .get();
+        const phoneNumbersSnapshot = await userDoc.ref.collection("phone_numbers").where("type", "==", "whatsapp_web").get();
 
         for (const phoneDoc of phoneNumbersSnapshot.docs) {
           const data = phoneDoc.data();
@@ -352,11 +322,7 @@ export class StatusReconciliationService extends EventEmitter {
           const lastUpdated = whatsappData.last_updated?.toDate();
 
           // Check if stuck in initializing/connecting state (e.g., proxy purchase failed)
-          if (
-            phoneNumber &&
-            (status === "initializing" || status === "connecting") &&
-            lastUpdated
-          ) {
+          if (phoneNumber && (status === "initializing" || status === "connecting") && lastUpdated) {
             const timeSinceUpdate = now - lastUpdated.getTime();
 
             if (timeSinceUpdate > stuckInitializingTimeout) {
@@ -368,42 +334,28 @@ export class StatusReconciliationService extends EventEmitter {
                   timeSinceUpdateMs: timeSinceUpdate,
                   lastUpdated: lastUpdated.toISOString(),
                 },
-                "STUCK INITIALIZATION DETECTED: Connection stuck in initializing/connecting state, triggering retry",
+                "STUCK INITIALIZATION DETECTED: Connection stuck in initializing/connecting state, triggering retry"
               );
 
               // Check if connection actually exists in memory
-              const hasInMemoryConnection = inMemoryConnections.has(
-                `${userId}:${phoneNumber}`,
-              );
-              const hasActualConnection =
-                this.connectionPool?.hasConnection(userId, phoneNumber) ||
-                false;
+              const hasInMemoryConnection = inMemoryConnections.has(`${userId}:${phoneNumber}`);
+              const hasActualConnection = this.connectionPool?.hasConnection(userId, phoneNumber) || false;
 
               if (!hasInMemoryConnection && !hasActualConnection) {
                 // No connection exists - trigger reconnection attempt
                 let fixed = false;
                 try {
-                  this.logger.info(
-                    { userId, phoneNumber },
-                    "Attempting to recover stuck initialization by triggering reconnection",
-                  );
+                  this.logger.info({ userId, phoneNumber }, "Attempting to recover stuck initialization by triggering reconnection");
 
                   // Mark as disconnected first to clear the stuck state
-                  await this.connectionStateManager.updateState(
-                    userId,
-                    phoneNumber,
-                    {
-                      status: "disconnected",
-                    },
-                  );
+                  await this.connectionStateManager.updateState(userId, phoneNumber, {
+                    status: "disconnected",
+                  });
 
                   // Trigger reconnection through ConnectionPool
                   if (this.connectionPool) {
                     // Use the reconnect method if available, otherwise log warning
-                    this.logger.info(
-                      { userId, phoneNumber },
-                      "Triggering reconnection for stuck initialization - user will need to reconnect via UI",
-                    );
+                    this.logger.info({ userId, phoneNumber }, "Triggering reconnection for stuck initialization - user will need to reconnect via UI");
 
                     // Note: We mark as disconnected so the UI will show the disconnected state
                     // and the user can retry the connection. Auto-reconnect could cause issues
@@ -419,7 +371,7 @@ export class StatusReconciliationService extends EventEmitter {
                       phoneNumber,
                       error,
                     },
-                    "Failed to recover stuck initialization",
+                    "Failed to recover stuck initialization"
                   );
                   this.metrics.desyncFailed++;
                 }
@@ -441,15 +393,12 @@ export class StatusReconciliationService extends EventEmitter {
                     hasInMemoryConnection,
                     hasActualConnection,
                   },
-                  "Connection exists despite stuck initializing state - syncing Firestore",
+                  "Connection exists despite stuck initializing state - syncing Firestore"
                 );
 
                 try {
                   // Get actual connection state from ConnectionPool
-                  const actualConnection = this.connectionPool?.getConnection(
-                    userId,
-                    phoneNumber,
-                  );
+                  const actualConnection = this.connectionPool?.getConnection(userId, phoneNumber);
 
                   if (actualConnection) {
                     // Map Baileys connection state to our status
@@ -467,33 +416,20 @@ export class StatusReconciliationService extends EventEmitter {
                         baileysState: actualConnection.state.connection,
                         mappedStatus: actualStatus,
                       },
-                      "Syncing Firestore to match actual ConnectionPool state",
+                      "Syncing Firestore to match actual ConnectionPool state"
                     );
 
-                    await this.connectionStateManager.updateState(
-                      userId,
-                      phoneNumber,
-                      {
-                        status: actualStatus as any,
-                      },
-                    );
+                    await this.connectionStateManager.updateState(userId, phoneNumber, {
+                      status: actualStatus as any,
+                    });
                     this.metrics.desyncFixed++;
 
-                    this.logger.info(
-                      { userId, phoneNumber, newStatus: actualStatus },
-                      "Successfully synced stuck connection to actual state",
-                    );
+                    this.logger.info({ userId, phoneNumber, newStatus: actualStatus }, "Successfully synced stuck connection to actual state");
                   } else {
-                    this.logger.warn(
-                      { userId, phoneNumber },
-                      "hasConnection returned true but getConnection returned null - race condition?",
-                    );
+                    this.logger.warn({ userId, phoneNumber }, "hasConnection returned true but getConnection returned null - race condition?");
                   }
                 } catch (error) {
-                  this.logger.error(
-                    { userId, phoneNumber, error },
-                    "Failed to sync stuck initialization state",
-                  );
+                  this.logger.error({ userId, phoneNumber, error }, "Failed to sync stuck initialization state");
                   this.metrics.desyncFailed++;
                 }
               }
@@ -501,12 +437,7 @@ export class StatusReconciliationService extends EventEmitter {
           }
 
           // Check if stuck in importing state
-          if (
-            phoneNumber &&
-            (status === "importing_contacts" ||
-              status === "importing_messages") &&
-            lastUpdated
-          ) {
+          if (phoneNumber && (status === "importing_contacts" || status === "importing_messages") && lastUpdated) {
             const timeSinceUpdate = now - lastUpdated.getTime();
 
             if (timeSinceUpdate > stuckImportTimeout) {
@@ -518,20 +449,16 @@ export class StatusReconciliationService extends EventEmitter {
                   timeSinceUpdateMs: timeSinceUpdate,
                   lastUpdated: lastUpdated.toISOString(),
                 },
-                "STUCK IMPORT DETECTED: Connection stuck in importing state, forcing to connected",
+                "STUCK IMPORT DETECTED: Connection stuck in importing state, forcing to connected"
               );
 
               // Force completion by updating to "connected" and marking sync as completed
               let fixed = false;
               try {
-                await this.connectionStateManager.updateState(
-                  userId,
-                  phoneNumber,
-                  {
-                    status: "connected",
-                    syncCompleted: true, // This will set sync_status to "completed"
-                  },
-                );
+                await this.connectionStateManager.updateState(userId, phoneNumber, {
+                  status: "connected",
+                  syncCompleted: true, // This will set sync_status to "completed"
+                });
 
                 this.logger.info(
                   {
@@ -541,7 +468,7 @@ export class StatusReconciliationService extends EventEmitter {
                     newStatus: "connected",
                     stuckDurationMs: timeSinceUpdate,
                   },
-                  "Successfully recovered stuck import by forcing to connected",
+                  "Successfully recovered stuck import by forcing to connected"
                 );
 
                 fixed = true;
@@ -553,7 +480,7 @@ export class StatusReconciliationService extends EventEmitter {
                     phoneNumber,
                     error,
                   },
-                  "Failed to fix stuck import",
+                  "Failed to fix stuck import"
                 );
                 this.metrics.desyncFailed++;
               }
@@ -579,9 +506,7 @@ export class StatusReconciliationService extends EventEmitter {
       // Add to tracked desyncs (keep only last N)
       this.metrics.desyncs.push(...desyncsFound);
       if (this.metrics.desyncs.length > this.MAX_DESYNCS_TO_TRACK) {
-        this.metrics.desyncs = this.metrics.desyncs.slice(
-          -this.MAX_DESYNCS_TO_TRACK,
-        );
+        this.metrics.desyncs = this.metrics.desyncs.slice(-this.MAX_DESYNCS_TO_TRACK);
       }
 
       const duration = Date.now() - startTime;
@@ -604,7 +529,7 @@ export class StatusReconciliationService extends EventEmitter {
             threshold: this.DESYNC_ALERT_THRESHOLD,
             desyncs: desyncsFound,
           },
-          "ALERT: Excessive desyncs detected during reconciliation!",
+          "ALERT: Excessive desyncs detected during reconciliation!"
         );
 
         this.emit("excessive-desyncs", {
@@ -623,19 +548,16 @@ export class StatusReconciliationService extends EventEmitter {
           desyncsFixed: desyncsFound.filter((d) => d.fixed).length,
           desyncsFailed: desyncsFound.filter((d) => !d.fixed).length,
         },
-        "Status reconciliation check completed",
+        "Status reconciliation check completed"
       );
     } catch (error) {
       this.logger.error(
         {
           error,
           errorMessage: error instanceof Error ? error.message : String(error),
-          errorStack:
-            error instanceof Error
-              ? error.stack?.split("\n").slice(0, 5).join(" | ")
-              : undefined,
+          errorStack: error instanceof Error ? error.stack?.split("\n").slice(0, 5).join(" | ") : undefined,
         },
-        "Critical error during reconciliation",
+        "Critical error during reconciliation"
       );
 
       this.emit("reconciliation-error", { error });

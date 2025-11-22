@@ -66,51 +66,33 @@ export class DynamicProxyService {
       this.apiClient.defaults.headers["Authorization"] = `Bearer ${apiKey}`;
 
       // Initialize customer ID with validation
-      const customerIdFromSecret =
-        await secretManager.getBrightDataCustomerId();
+      const customerIdFromSecret = await secretManager.getBrightDataCustomerId();
 
       // Validate customer ID is not a placeholder before assignment
-      if (
-        customerIdFromSecret.includes("your_") ||
-        customerIdFromSecret.includes("placeholder")
-      ) {
+      if (customerIdFromSecret.includes("your_") || customerIdFromSecret.includes("placeholder")) {
         throw new Error("Customer ID appears to be a placeholder value");
       }
 
       this.customerId = customerIdFromSecret;
 
-      this.logger.info(
-        "Successfully initialized BrightData credentials from Secret Manager",
-      );
+      this.logger.info("Successfully initialized BrightData credentials from Secret Manager");
     } catch (error: any) {
-      this.logger.error(
-        { error: error.message },
-        "Failed to initialize credentials from Secret Manager",
-      );
+      this.logger.error({ error: error.message }, "Failed to initialize credentials from Secret Manager");
 
       // Reset customer ID to ensure no placeholder value persists
       this.customerId = "";
 
       // Try to use environment variables as fallback
       if (this.config.apiKey) {
-        this.apiClient.defaults.headers["Authorization"] =
-          `Bearer ${this.config.apiKey}`;
+        this.apiClient.defaults.headers["Authorization"] = `Bearer ${this.config.apiKey}`;
         this.logger.warn("Using API key from environment variable as fallback");
       }
 
-      if (
-        this.config.customerId &&
-        !this.config.customerId.includes("your_") &&
-        !this.config.customerId.includes("placeholder")
-      ) {
+      if (this.config.customerId && !this.config.customerId.includes("your_") && !this.config.customerId.includes("placeholder")) {
         this.customerId = this.config.customerId;
-        this.logger.warn(
-          "Using Customer ID from environment variable as fallback",
-        );
+        this.logger.warn("Using Customer ID from environment variable as fallback");
       } else {
-        this.logger.error(
-          "No valid Customer ID available - proxy purchases will fail",
-        );
+        this.logger.error("No valid Customer ID available - proxy purchases will fail");
       }
     }
   }
@@ -126,9 +108,7 @@ export class DynamicProxyService {
    * Check if the service is ready for use
    */
   isReady(): boolean {
-    return !!(
-      this.customerId && this.apiClient.defaults.headers["Authorization"]
-    );
+    return !!(this.customerId && this.apiClient.defaults.headers["Authorization"]);
   }
 
   /**
@@ -143,39 +123,27 @@ export class DynamicProxyService {
         // Purchase new proxy from BrightData
         this.logger.info(
           { country, attempt: attempt + 1, maxAttempts: MAX_RETRIES + 1 },
-          attempt === 0
-            ? "Purchasing new proxy"
-            : `Retrying proxy purchase (attempt ${attempt + 1}/${MAX_RETRIES + 1})`,
+          attempt === 0 ? "Purchasing new proxy" : `Retrying proxy purchase (attempt ${attempt + 1}/${MAX_RETRIES + 1})`
         );
 
         // Ensure credentials are initialized
         await this.ensureInitialized();
 
         if (!this.customerId) {
-          throw new Error(
-            "Customer ID not initialized - cannot purchase proxy",
-          );
+          throw new Error("Customer ID not initialized - cannot purchase proxy");
         }
 
         // Validate customer ID is not a placeholder value
-        if (
-          this.customerId.includes("your_") ||
-          this.customerId.includes("placeholder")
-        ) {
-          throw new Error(
-            "Customer ID contains placeholder value - configure valid credentials",
-          );
+        if (this.customerId.includes("your_") || this.customerId.includes("placeholder")) {
+          throw new Error("Customer ID contains placeholder value - configure valid credentials");
         }
 
-        const response = await this.apiClient.post<ProxyPurchaseResponse>(
-          "/zone/ips",
-          {
-            customer: this.customerId,
-            zone: this.config.zone,
-            count: 1,
-            country: country.toLowerCase(),
-          },
-        );
+        const response = await this.apiClient.post<ProxyPurchaseResponse>("/zone/ips", {
+          customer: this.customerId,
+          zone: this.config.zone,
+          count: 1,
+          country: country.toLowerCase(),
+        });
 
         if (!response.data.new_ips || response.data.new_ips.length === 0) {
           throw new Error(`No proxies available for country: ${country}`);
@@ -189,10 +157,7 @@ export class DynamicProxyService {
           country: country.toLowerCase(),
         };
 
-        this.logger.info(
-          { country, ip: proxyIp, attempt: attempt + 1 },
-          "Successfully purchased proxy",
-        );
+        this.logger.info({ country, ip: proxyIp, attempt: attempt + 1 }, "Successfully purchased proxy");
         return proxyInfo;
       } catch (error: any) {
         const errorInfo: any = {
@@ -218,14 +183,10 @@ export class DynamicProxyService {
           error.message?.includes("ETIMEDOUT") ||
           error.message?.includes("ECONNABORTED");
 
-        const isNetworkError =
-          error.code === "ECONNRESET" ||
-          error.code === "ENOTFOUND" ||
-          error.code === "ECONNREFUSED";
+        const isNetworkError = error.code === "ECONNRESET" || error.code === "ENOTFOUND" || error.code === "ECONNREFUSED";
 
         // Check if this is a server error (5xx) - these are typically temporary
-        const isServerError =
-          error.response?.status >= 500 && error.response?.status < 600;
+        const isServerError = error.response?.status >= 500 && error.response?.status < 600;
 
         const isRetriable = isTimeout || isNetworkError || isServerError;
 
@@ -247,15 +208,12 @@ export class DynamicProxyService {
             isRetriable,
             isPermanentError,
           },
-          "Proxy purchase attempt failed",
+          "Proxy purchase attempt failed"
         );
 
         // Handle permanent errors - don't retry
         if (isPermanentError) {
-          if (
-            error.response?.status === 400 ||
-            error.message.includes("No proxies available")
-          ) {
+          if (error.response?.status === 400 || error.message.includes("No proxies available")) {
             // Country not available, will trigger fallback
             throw new Error(`NO_PROXY_AVAILABLE:${country}`);
           }
@@ -264,21 +222,14 @@ export class DynamicProxyService {
 
         // If this is the last attempt, throw the error
         if (attempt === MAX_RETRIES) {
-          this.logger.error(
-            { country, attempts: MAX_RETRIES + 1 },
-            "All proxy purchase attempts failed",
-          );
+          this.logger.error({ country, attempts: MAX_RETRIES + 1 }, "All proxy purchase attempts failed");
           throw error;
         }
 
         // Retry on timeout/network/server errors
         if (isRetriable) {
           const delay = RETRY_DELAYS[attempt];
-          const errorType = isTimeout
-            ? "timeout"
-            : isNetworkError
-              ? "network"
-              : "server";
+          const errorType = isTimeout ? "timeout" : isNetworkError ? "network" : "server";
           this.logger.warn(
             {
               country,
@@ -287,7 +238,7 @@ export class DynamicProxyService {
               delayMs: delay,
               errorType,
             },
-            `Proxy purchase failed with retriable error, retrying after ${delay}ms`,
+            `Proxy purchase failed with retriable error, retrying after ${delay}ms`
           );
           await new Promise((resolve) => setTimeout(resolve, delay));
           // Continue to next iteration
@@ -299,9 +250,7 @@ export class DynamicProxyService {
     }
 
     // This should never be reached, but TypeScript requires it
-    throw new Error(
-      `Failed to purchase proxy for ${country} after ${MAX_RETRIES + 1} attempts`,
-    );
+    throw new Error(`Failed to purchase proxy for ${country} after ${MAX_RETRIES + 1} attempts`);
   }
 
   /**
@@ -317,13 +266,8 @@ export class DynamicProxyService {
       }
 
       // Validate customer ID is not a placeholder value
-      if (
-        this.customerId.includes("your_") ||
-        this.customerId.includes("placeholder")
-      ) {
-        throw new Error(
-          "Customer ID contains placeholder value - configure valid credentials",
-        );
+      if (this.customerId.includes("your_") || this.customerId.includes("placeholder")) {
+        throw new Error("Customer ID contains placeholder value - configure valid credentials");
       }
 
       this.logger.info({ ip }, "Releasing proxy");
@@ -404,7 +348,7 @@ export class DynamicProxyService {
   async assignProxy(
     userId: string,
     phoneNumber: string,
-    requestedCountry: string,
+    requestedCountry: string
   ): Promise<{
     proxy: ProxyInfo;
     fallbackUsed: boolean;
@@ -422,10 +366,7 @@ export class DynamicProxyService {
     while (attempts < MAX_ATTEMPTS) {
       try {
         // Try to get proxy for current country
-        this.logger.info(
-          { currentCountry, attempt: attempts + 1, requestedCountry },
-          "Attempting to purchase proxy",
-        );
+        this.logger.info({ currentCountry, attempt: attempts + 1, requestedCountry }, "Attempting to purchase proxy");
 
         const proxy = await this.purchaseProxy(currentCountry);
 
@@ -441,9 +382,7 @@ export class DynamicProxyService {
             fallbackUsed,
             attempts: attempts + 1,
           },
-          fallbackUsed
-            ? "Proxy assigned using AI-suggested fallback"
-            : "Proxy assigned for requested country",
+          fallbackUsed ? "Proxy assigned using AI-suggested fallback" : "Proxy assigned for requested country"
         );
 
         return {
@@ -467,7 +406,7 @@ export class DynamicProxyService {
             requestedCountry,
             unavailableCountries,
           },
-          "Proxy not available for country, requesting AI fallback",
+          "Proxy not available for country, requesting AI fallback"
         );
 
         attempts++;
@@ -476,16 +415,13 @@ export class DynamicProxyService {
           // Exhausted all attempts
           throw new Error(
             `No proxy available for ${requestedCountry} after ${MAX_ATTEMPTS} attempts. ` +
-              `Tried countries: ${requestedCountry}, ${unavailableCountries.slice(1).join(", ")}`,
+              `Tried countries: ${requestedCountry}, ${unavailableCountries.slice(1).join(", ")}`
           );
         }
 
         // Use AI agent to get next best country
         try {
-          currentCountry = await fallbackAgent.getNextBestCountry(
-            requestedCountry,
-            unavailableCountries,
-          );
+          currentCountry = await fallbackAgent.getNextBestCountry(requestedCountry, unavailableCountries);
 
           this.logger.info(
             {
@@ -494,24 +430,17 @@ export class DynamicProxyService {
               unavailableCountries,
               attempt: attempts + 1,
             },
-            "AI agent suggested fallback country",
+            "AI agent suggested fallback country"
           );
         } catch (aiError: any) {
-          this.logger.error(
-            { error: aiError.message, requestedCountry, unavailableCountries },
-            "AI agent failed to suggest fallback country",
-          );
-          throw new Error(
-            `Failed to find fallback country for ${requestedCountry}: ${aiError.message}`,
-          );
+          this.logger.error({ error: aiError.message, requestedCountry, unavailableCountries }, "AI agent failed to suggest fallback country");
+          throw new Error(`Failed to find fallback country for ${requestedCountry}: ${aiError.message}`);
         }
       }
     }
 
     // This should never be reached due to the MAX_ATTEMPTS check above
-    throw new Error(
-      `Failed to obtain proxy after ${MAX_ATTEMPTS} attempts for ${requestedCountry}`,
-    );
+    throw new Error(`Failed to obtain proxy after ${MAX_ATTEMPTS} attempts for ${requestedCountry}`);
   }
 
   /**

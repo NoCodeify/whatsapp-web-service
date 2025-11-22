@@ -1,12 +1,4 @@
-import {
-  WASocket,
-  DisconnectReason,
-  ConnectionState,
-  WAMessageContent,
-  WAMessageKey,
-  proto,
-  downloadMediaMessage,
-} from "@whiskeysockets/baileys";
+import { WASocket, DisconnectReason, ConnectionState, WAMessageContent, WAMessageKey, proto, downloadMediaMessage } from "@whiskeysockets/baileys";
 import pino from "pino";
 import { EventEmitter } from "events";
 import * as fs from "fs";
@@ -79,10 +71,7 @@ export class ConnectionPool extends EventEmitter {
   private isShuttingDown: boolean = false;
   private importListRefs: Map<string, DocumentReference> = new Map(); // Store import list refs per user
   private pendingChatMetadata: Map<string, any> = new Map(); // Store chat metadata for contacts to be created
-  private syncedContactInfo: Map<
-    string,
-    { name?: string; notify?: string; verifiedName?: string }
-  > = new Map(); // Store contact info from contacts.upsert
+  private syncedContactInfo: Map<string, { name?: string; notify?: string; verifiedName?: string }> = new Map(); // Store contact info from contacts.upsert
   private sentMessageIds: Map<string, Date> = new Map(); // Track API-sent message IDs
   private processedContactsCache: Map<string, Set<string>> = new Map(); // Session-based contact deduplication
   private reconnectionInProgress: Map<string, boolean> = new Map(); // Track ongoing reconnections to prevent conflicts
@@ -90,12 +79,8 @@ export class ConnectionPool extends EventEmitter {
   private readonly config: ConnectionPoolConfig = {
     maxConnections: parseInt(process.env.MAX_CONNECTIONS || "50"),
     healthCheckInterval: parseInt(process.env.HEALTH_CHECK_INTERVAL || "30000"),
-    sessionCleanupInterval: parseInt(
-      process.env.SESSION_CLEANUP_INTERVAL || "3600000",
-    ),
-    instanceUrl:
-      process.env.INSTANCE_URL ||
-      `http://localhost:${process.env.PORT || 8080}`,
+    sessionCleanupInterval: parseInt(process.env.SESSION_CLEANUP_INTERVAL || "3600000"),
+    instanceUrl: process.env.INSTANCE_URL || `http://localhost:${process.env.PORT || 8080}`,
   };
 
   constructor(
@@ -106,7 +91,7 @@ export class ConnectionPool extends EventEmitter {
     connectionStateManager?: ConnectionStateManager,
     wsManager?: any,
     errorHandler?: any,
-    instanceCoordinator?: any,
+    instanceCoordinator?: any
   ) {
     super();
     this.proxyManager = proxyManager;
@@ -119,8 +104,7 @@ export class ConnectionPool extends EventEmitter {
     // Use provided services or create new ones (for backwards compatibility)
     this.wsManager = wsManager || new CloudRunWebSocketManager();
     this.errorHandler = errorHandler || new ErrorHandler();
-    this.instanceCoordinator =
-      instanceCoordinator || new InstanceCoordinator(firestore);
+    this.instanceCoordinator = instanceCoordinator || new InstanceCoordinator(firestore);
 
     // Set up WebSocket manager event listeners
     this.setupWebSocketManagerListeners();
@@ -144,49 +128,34 @@ export class ConnectionPool extends EventEmitter {
    * Setup WebSocket manager event listeners
    */
   private setupWebSocketManagerListeners(): void {
-    this.wsManager.on(
-      "connection-error",
-      async ({ connectionId, error, consecutiveFailures, shouldReconnect }) => {
-        // Parse connection ID to get userId and phoneNumber
-        const [userId, phoneNumber] = connectionId.split(":");
+    this.wsManager.on("connection-error", async ({ connectionId, error, consecutiveFailures, shouldReconnect }) => {
+      // Parse connection ID to get userId and phoneNumber
+      const [userId, phoneNumber] = connectionId.split(":");
 
-        this.logger.warn(
-          { userId, phoneNumber, consecutiveFailures, error: error.message },
-          "WebSocket connection error detected",
-        );
+      this.logger.warn({ userId, phoneNumber, consecutiveFailures, error: error.message }, "WebSocket connection error detected");
 
-        if (shouldReconnect) {
-          this.logger.info(
-            { userId, phoneNumber },
-            "WebSocket manager triggering reconnection",
-          );
+      if (shouldReconnect) {
+        this.logger.info({ userId, phoneNumber }, "WebSocket manager triggering reconnection");
 
-          // Remove the current connection to trigger reconnection
-          await this.removeConnection(userId, phoneNumber);
+        // Remove the current connection to trigger reconnection
+        await this.removeConnection(userId, phoneNumber);
 
-          // Attempt reconnection after a short delay
-          setTimeout(async () => {
-            try {
-              // Get stored country from database
-              const storedCountry = await this.getStoredCountry(
-                userId,
-                phoneNumber,
-              );
-              await this.addConnection(
-                userId,
-                phoneNumber,
-                storedCountry, // Use stored country from DB
-              );
-            } catch (reconnectError) {
-              this.logger.error(
-                { userId, phoneNumber, error: reconnectError },
-                "WebSocket manager reconnection failed",
-              );
-            }
-          }, 5000);
-        }
-      },
-    );
+        // Attempt reconnection after a short delay
+        setTimeout(async () => {
+          try {
+            // Get stored country from database
+            const storedCountry = await this.getStoredCountry(userId, phoneNumber);
+            await this.addConnection(
+              userId,
+              phoneNumber,
+              storedCountry // Use stored country from DB
+            );
+          } catch (reconnectError) {
+            this.logger.error({ userId, phoneNumber, error: reconnectError }, "WebSocket manager reconnection failed");
+          }
+        }, 5000);
+      }
+    });
   }
 
   /**
@@ -194,145 +163,100 @@ export class ConnectionPool extends EventEmitter {
    */
   private setupErrorHandlerListeners(): void {
     // Handle WebSocket recovery requests
-    this.errorHandler.on(
-      "websocket-recovery-needed",
-      async ({ connectionId, userId, phoneNumber }) => {
-        this.logger.info(
-          { connectionId, userId, phoneNumber },
-          "WebSocket recovery requested",
-        );
+    this.errorHandler.on("websocket-recovery-needed", async ({ connectionId, userId, phoneNumber }) => {
+      this.logger.info({ connectionId, userId, phoneNumber }, "WebSocket recovery requested");
 
-        if (userId && phoneNumber) {
-          try {
-            // Get stored country from database
-            const storedCountry = await this.getStoredCountry(
-              userId,
-              phoneNumber,
-            );
+      if (userId && phoneNumber) {
+        try {
+          // Get stored country from database
+          const storedCountry = await this.getStoredCountry(userId, phoneNumber);
 
-            // Attempt to reconnect with retry logic
-            await this.errorHandler.executeWithRetry(
-              () =>
-                this.addConnection(
-                  userId,
-                  phoneNumber,
-                  storedCountry, // Use stored country from DB
-                ),
-              {
+          // Attempt to reconnect with retry logic
+          await this.errorHandler.executeWithRetry(
+            () =>
+              this.addConnection(
                 userId,
                 phoneNumber,
-                connectionId,
-                operation: "websocket-recovery",
-                timestamp: new Date(),
-              },
-            );
-          } catch (error) {
-            this.logger.error(
-              { userId, phoneNumber, error },
-              "WebSocket recovery failed",
-            );
-          }
+                storedCountry // Use stored country from DB
+              ),
+            {
+              userId,
+              phoneNumber,
+              connectionId,
+              operation: "websocket-recovery",
+              timestamp: new Date(),
+            }
+          );
+        } catch (error) {
+          this.logger.error({ userId, phoneNumber, error }, "WebSocket recovery failed");
         }
-      },
-    );
+      }
+    });
 
     // Handle connection restart requests
-    this.errorHandler.on(
-      "connection-restart-needed",
-      async ({ connectionId, userId, phoneNumber }) => {
-        this.logger.info(
-          { connectionId, userId, phoneNumber },
-          "Connection restart requested",
-        );
+    this.errorHandler.on("connection-restart-needed", async ({ connectionId, userId, phoneNumber }) => {
+      this.logger.info({ connectionId, userId, phoneNumber }, "Connection restart requested");
 
-        if (userId && phoneNumber) {
-          try {
-            // Remove current connection and reconnect
-            await this.removeConnection(userId, phoneNumber);
-            await this.sleep(5000); // Wait before reconnecting
+      if (userId && phoneNumber) {
+        try {
+          // Remove current connection and reconnect
+          await this.removeConnection(userId, phoneNumber);
+          await this.sleep(5000); // Wait before reconnecting
 
-            // Get stored country from database
-            const storedCountry = await this.getStoredCountry(
-              userId,
-              phoneNumber,
-            );
+          // Get stored country from database
+          const storedCountry = await this.getStoredCountry(userId, phoneNumber);
 
-            await this.errorHandler.executeWithRetry(
-              () =>
-                this.addConnection(
-                  userId,
-                  phoneNumber,
-                  storedCountry, // Use stored country from DB
-                ),
-              {
+          await this.errorHandler.executeWithRetry(
+            () =>
+              this.addConnection(
                 userId,
                 phoneNumber,
-                connectionId,
-                operation: "connection-restart",
-                timestamp: new Date(),
-              },
-            );
-          } catch (error) {
-            this.logger.error(
-              { userId, phoneNumber, error },
-              "Connection restart failed",
-            );
-          }
+                storedCountry // Use stored country from DB
+              ),
+            {
+              userId,
+              phoneNumber,
+              connectionId,
+              operation: "connection-restart",
+              timestamp: new Date(),
+            }
+          );
+        } catch (error) {
+          this.logger.error({ userId, phoneNumber, error }, "Connection restart failed");
         }
-      },
-    );
+      }
+    });
 
     // Handle connection refresh requests
-    this.errorHandler.on(
-      "connection-refresh-needed",
-      async ({ connectionId, userId, phoneNumber }) => {
-        this.logger.info(
-          { connectionId, userId, phoneNumber },
-          "Connection refresh requested",
-        );
+    this.errorHandler.on("connection-refresh-needed", async ({ connectionId, userId, phoneNumber }) => {
+      this.logger.info({ connectionId, userId, phoneNumber }, "Connection refresh requested");
 
-        if (userId && phoneNumber) {
-          const connection = this.connections.get(connectionId);
-          if (connection && this.wsManager) {
-            try {
-              // Refresh WebSocket health
-              await this.wsManager.refreshConnectionHealth(
-                connectionId,
-                connection.socket,
-              );
-            } catch (error) {
-              this.logger.error(
-                { userId, phoneNumber, error },
-                "Connection refresh failed",
-              );
-            }
+      if (userId && phoneNumber) {
+        const connection = this.connections.get(connectionId);
+        if (connection && this.wsManager) {
+          try {
+            // Refresh WebSocket health
+            await this.wsManager.refreshConnectionHealth(connectionId, connection.socket);
+          } catch (error) {
+            this.logger.error({ userId, phoneNumber, error }, "Connection refresh failed");
           }
         }
-      },
-    );
+      }
+    });
 
     // Handle reconnection requests
-    this.errorHandler.on(
-      "reconnection-needed",
-      async ({ connectionId, userId, phoneNumber }) => {
-        this.logger.info(
-          { connectionId, userId, phoneNumber },
-          "Reconnection requested",
-        );
+    this.errorHandler.on("reconnection-needed", async ({ connectionId, userId, phoneNumber }) => {
+      this.logger.info({ connectionId, userId, phoneNumber }, "Reconnection requested");
 
-        if (userId && phoneNumber) {
-          // Use existing reconnect logic with error handling
-          try {
-            await this.reconnect(userId, phoneNumber);
-          } catch (error) {
-            this.logger.error(
-              { userId, phoneNumber, error },
-              "Reconnection failed",
-            );
-          }
+      if (userId && phoneNumber) {
+        // Use existing reconnect logic with error handling
+        try {
+          await this.reconnect(userId, phoneNumber);
+        } catch (error) {
+          this.logger.error({ userId, phoneNumber, error }, "Reconnection failed");
         }
-      },
-    );
+      }
+    });
 
     // Handle graceful shutdown
     this.errorHandler.on("graceful-shutdown", () => {
@@ -348,92 +272,53 @@ export class ConnectionPool extends EventEmitter {
    */
   private setupInstanceCoordinatorListeners(): void {
     // Handle session transfer requests
-    this.instanceCoordinator.on(
-      "session-transfer-needed",
-      async ({ sessionKey, targetInstanceId, reason }) => {
-        this.logger.info(
-          { sessionKey, targetInstanceId, reason },
-          "Session transfer requested",
-        );
+    this.instanceCoordinator.on("session-transfer-needed", async ({ sessionKey, targetInstanceId, reason }) => {
+      this.logger.info({ sessionKey, targetInstanceId, reason }, "Session transfer requested");
 
-        const [userId, phoneNumber] = sessionKey.split(":");
-        if (userId && phoneNumber) {
-          try {
-            // Release current connection gracefully
-            await this.removeConnection(userId, phoneNumber);
-            this.logger.info(
-              { sessionKey, targetInstanceId },
-              "Session released for transfer",
-            );
-          } catch (error) {
-            this.logger.error(
-              { sessionKey, error },
-              "Error during session transfer",
-            );
-          }
+      const [userId, phoneNumber] = sessionKey.split(":");
+      if (userId && phoneNumber) {
+        try {
+          // Release current connection gracefully
+          await this.removeConnection(userId, phoneNumber);
+          this.logger.info({ sessionKey, targetInstanceId }, "Session released for transfer");
+        } catch (error) {
+          this.logger.error({ sessionKey, error }, "Error during session transfer");
         }
-      },
-    );
+      }
+    });
 
     // Handle load balancing recommendations
-    this.instanceCoordinator.on(
-      "load-balance-recommendation",
-      ({ action, details }) => {
-        this.logger.info(
-          { action, details },
-          "Load balancing recommendation received",
-        );
+    this.instanceCoordinator.on("load-balance-recommendation", ({ action, details }) => {
+      this.logger.info({ action, details }, "Load balancing recommendation received");
 
-        if (action === "reject_new_connections") {
-          this.logger.warn(
-            "Instance coordinator recommends rejecting new connections due to high load",
-          );
-        } else if (action === "accept_more_connections") {
-          this.logger.info(
-            "Instance coordinator indicates capacity available for new connections",
-          );
-        }
-      },
-    );
+      if (action === "reject_new_connections") {
+        this.logger.warn("Instance coordinator recommends rejecting new connections due to high load");
+      } else if (action === "accept_more_connections") {
+        this.logger.info("Instance coordinator indicates capacity available for new connections");
+      }
+    });
 
     // Handle instance health status changes
-    this.instanceCoordinator.on(
-      "instance-health-changed",
-      ({ instanceId, status, reason }) => {
-        this.logger.info(
-          { instanceId, status, reason },
-          "Instance health status changed",
-        );
+    this.instanceCoordinator.on("instance-health-changed", ({ instanceId, status, reason }) => {
+      this.logger.info({ instanceId, status, reason }, "Instance health status changed");
 
-        if (
-          status === "failed" &&
-          instanceId !== this.instanceCoordinator.getInstanceId()
-        ) {
-          this.logger.warn(
-            { instanceId },
-            "Another instance has failed - monitoring for session transfers",
-          );
-        }
-      },
-    );
+      if (status === "failed" && instanceId !== this.instanceCoordinator.getInstanceId()) {
+        this.logger.warn({ instanceId }, "Another instance has failed - monitoring for session transfers");
+      }
+    });
   }
 
   /**
    * Initialize recovery of previous connections after server restart
    */
   async initializeRecovery(): Promise<void> {
-    this.logger.info(
-      "Starting automatic connection recovery after server restart",
-    );
+    this.logger.info("Starting automatic connection recovery after server restart");
 
     try {
       // First, get all sessions from the filesystem (primary source)
       const filesystemSessions = await this.sessionManager.listAllSessions();
 
-      this.logger.info(
-        { count: filesystemSessions.length },
-        "Found sessions in filesystem",
-      );
+      this.logger.info({ count: filesystemSessions.length }, "Found sessions in filesystem");
 
       // Then get Firestore states if available (for metadata)
       let firestoreStates: Map<string, any> = new Map();
@@ -443,10 +328,7 @@ export class ConnectionPool extends EventEmitter {
           const key = `${state.userId}:${state.phoneNumber}`;
           firestoreStates.set(key, state);
         });
-        this.logger.info(
-          { count: states.length },
-          "Found connection states in Firestore",
-        );
+        this.logger.info({ count: states.length }, "Found connection states in Firestore");
       }
 
       if (filesystemSessions.length === 0) {
@@ -466,10 +348,7 @@ export class ConnectionPool extends EventEmitter {
 
         // Check if explicitly logged out in Firestore
         if (firestoreState && firestoreState.status === "logged_out") {
-          this.logger.info(
-            { userId, phoneNumber },
-            "Skipping recovery - user logged out",
-          );
+          this.logger.info({ userId, phoneNumber }, "Skipping recovery - user logged out");
           skippedCount++;
           continue;
         }
@@ -481,16 +360,12 @@ export class ConnectionPool extends EventEmitter {
             hasFirestoreState: !!firestoreState,
             previousStatus: firestoreState?.status,
           },
-          "Attempting to recover WhatsApp connection from session files",
+          "Attempting to recover WhatsApp connection from session files"
         );
 
         // Check for stuck sync and complete it before recovery
         // This prevents infinite sync loops when service restarts frequently
-        if (
-          firestoreState &&
-          (firestoreState.status === "importing_contacts" ||
-            firestoreState.status === "importing_messages")
-        ) {
+        if (firestoreState && (firestoreState.status === "importing_contacts" || firestoreState.status === "importing_messages")) {
           try {
             // Get full session data to check sync timing
             const sessionSnapshot = await this.firestore
@@ -508,8 +383,7 @@ export class ConnectionPool extends EventEmitter {
               const syncStartedAt = whatsappData.sync_started_at;
 
               if (syncStartedAt) {
-                const minutesSinceSync =
-                  (Date.now() - syncStartedAt.toMillis()) / 60000;
+                const minutesSinceSync = (Date.now() - syncStartedAt.toMillis()) / 60000;
 
                 // If sync has been stuck for > 5 minutes, complete it before recovery
                 if (minutesSinceSync > 5) {
@@ -521,7 +395,7 @@ export class ConnectionPool extends EventEmitter {
                       contactsCount: whatsappData.sync_contacts_count || 0,
                       messagesCount: whatsappData.sync_messages_count || 0,
                     },
-                    "Completing abandoned sync before recovery",
+                    "Completing abandoned sync before recovery"
                   );
 
                   // Mark sync as completed with current counts
@@ -531,24 +405,20 @@ export class ConnectionPool extends EventEmitter {
                       phoneNumber,
                       whatsappData.sync_contacts_count || 0,
                       whatsappData.sync_messages_count || 0,
-                      true, // Mark as completed
+                      true // Mark as completed
                     );
                   }
                 }
               }
             }
           } catch (error) {
-            this.logger.warn(
-              { userId, phoneNumber, error },
-              "Failed to check for stuck sync, continuing with recovery",
-            );
+            this.logger.warn({ userId, phoneNumber, error }, "Failed to check for stuck sync, continuing with recovery");
           }
         }
 
         try {
           // Use stored country from Firestore if available, otherwise undefined
-          const storedCountry =
-            firestoreState?.proxy_country || firestoreState?.country_code;
+          const storedCountry = firestoreState?.proxy_country || firestoreState?.country_code;
 
           // Attempt recovery using session files
           const success = await this.addConnection(
@@ -556,21 +426,15 @@ export class ConnectionPool extends EventEmitter {
             phoneNumber,
             storedCountry, // Use stored country from DB (e.g., "nl" for Dutch numbers)
             undefined, // No country code needed
-            true, // Mark as recovery
+            true // Mark as recovery
           );
 
           if (success) {
             recoveredCount++;
-            this.logger.info(
-              { userId, phoneNumber },
-              "Successfully recovered WhatsApp connection",
-            );
+            this.logger.info({ userId, phoneNumber }, "Successfully recovered WhatsApp connection");
           } else {
             failedCount++;
-            this.logger.warn(
-              { userId, phoneNumber },
-              "Failed to recover WhatsApp connection",
-            );
+            this.logger.warn({ userId, phoneNumber }, "Failed to recover WhatsApp connection");
           }
         } catch (error) {
           failedCount++;
@@ -580,7 +444,7 @@ export class ConnectionPool extends EventEmitter {
               phoneNumber,
               error,
             },
-            "Error recovering WhatsApp connection",
+            "Error recovering WhatsApp connection"
           );
         }
       }
@@ -592,7 +456,7 @@ export class ConnectionPool extends EventEmitter {
           failed: failedCount,
           skipped: skippedCount,
         },
-        "Connection recovery complete",
+        "Connection recovery complete"
       );
 
       // Emit recovery complete event
@@ -618,27 +482,18 @@ export class ConnectionPool extends EventEmitter {
     countryCode?: string,
     isRecovery: boolean = false,
     browserName?: string,
-    forceNew?: boolean,
+    forceNew?: boolean
   ): Promise<boolean> {
     // 🟢 BUG #4 FIX: Check if pool is shutting down before adding connection
     if (this.isShuttingDown) {
-      this.logger.warn(
-        { userId, phoneNumber },
-        "Cannot add connection: pool is shutting down",
-      );
+      this.logger.warn({ userId, phoneNumber }, "Cannot add connection: pool is shutting down");
       return false;
     }
 
     // Format the phone number to ensure consistent E.164 format
-    const formattedNumber = formatPhoneNumberSafe(
-      phoneNumber,
-      countryCode as any,
-    );
+    const formattedNumber = formatPhoneNumberSafe(phoneNumber, countryCode as any);
     if (!formattedNumber) {
-      this.logger.error(
-        { userId, phoneNumber, countryCode },
-        "Invalid phone number format",
-      );
+      this.logger.error({ userId, phoneNumber, countryCode }, "Invalid phone number format");
       throw new Error(`Invalid phone number format: ${phoneNumber}`);
     }
 
@@ -650,28 +505,18 @@ export class ConnectionPool extends EventEmitter {
         originalPhone: phoneNumber,
         formattedPhone: formattedNumber,
       },
-      "Adding connection with formatted phone number",
+      "Adding connection with formatted phone number"
     );
     const connectionKey = this.getConnectionKey(userId, phoneNumber);
 
     // Check instance coordination - request session ownership
     if (!isRecovery) {
-      const shouldHandle = await this.instanceCoordinator.shouldHandleSession(
-        userId,
-        phoneNumber,
-      );
+      const shouldHandle = await this.instanceCoordinator.shouldHandleSession(userId, phoneNumber);
       if (!shouldHandle) {
         // Try to request ownership
-        const ownershipGranted =
-          await this.instanceCoordinator.requestSessionOwnership(
-            userId,
-            phoneNumber,
-          );
+        const ownershipGranted = await this.instanceCoordinator.requestSessionOwnership(userId, phoneNumber);
         if (!ownershipGranted) {
-          this.logger.info(
-            { userId, phoneNumber, connectionKey },
-            "Session is owned by another instance, rejecting connection request",
-          );
+          this.logger.info({ userId, phoneNumber, connectionKey }, "Session is owned by another instance, rejecting connection request");
           return false;
         }
       }
@@ -680,44 +525,24 @@ export class ConnectionPool extends EventEmitter {
     // Check if connection already exists
     if (this.connections.has(connectionKey)) {
       const existing = this.connections.get(connectionKey)!;
-      if (
-        existing.state.connection === "open" ||
-        existing.state.connection === "connecting"
-      ) {
-        this.logger.info(
-          { userId, phoneNumber, state: existing.state.connection },
-          "Connection already exists and is active, not creating duplicate",
-        );
+      if (existing.state.connection === "open" || existing.state.connection === "connecting") {
+        this.logger.info({ userId, phoneNumber, state: existing.state.connection }, "Connection already exists and is active, not creating duplicate");
 
         // Synchronize Firestore status with actual connection state
         // This ensures status is correct even if connection was never marked as connected
-        if (
-          this.connectionStateManager &&
-          existing.state.connection === "open"
-        ) {
+        if (this.connectionStateManager && existing.state.connection === "open") {
           // Ensure state exists in memory before marking as connected
-          await this.connectionStateManager.ensureStateForConnection(
-            userId,
-            phoneNumber,
-            this.config.instanceUrl,
-            "connected",
-          );
+          await this.connectionStateManager.ensureStateForConnection(userId, phoneNumber, this.config.instanceUrl, "connected");
 
           // Mark as connected to ensure Firestore is in sync
           await this.connectionStateManager.markConnected(userId, phoneNumber);
-          this.logger.info(
-            { userId, phoneNumber },
-            "Synchronized Firestore status to 'connected' for existing open connection",
-          );
+          this.logger.info({ userId, phoneNumber }, "Synchronized Firestore status to 'connected' for existing open connection");
         }
 
         return true;
       } else if (existing.state.connection === "close") {
         // Remove closed connection before creating new one
-        this.logger.info(
-          { userId, phoneNumber },
-          "Removing closed connection before creating new one",
-        );
+        this.logger.info({ userId, phoneNumber }, "Removing closed connection before creating new one");
         this.connections.delete(connectionKey);
       }
     }
@@ -729,7 +554,7 @@ export class ConnectionPool extends EventEmitter {
           currentConnections: this.connections.size,
           maxConnections: this.config.maxConnections,
         },
-        "Connection pool at capacity",
+        "Connection pool at capacity"
       );
       this.emit("capacity-reached");
       return false;
@@ -746,11 +571,7 @@ export class ConnectionPool extends EventEmitter {
           });
         } else {
           // Initialize new state
-          await this.connectionStateManager.initializeState(
-            userId,
-            phoneNumber,
-            this.config.instanceUrl,
-          );
+          await this.connectionStateManager.initializeState(userId, phoneNumber, this.config.instanceUrl);
         }
       }
 
@@ -759,15 +580,14 @@ export class ConnectionPool extends EventEmitter {
 
       // Create connection with proxy and custom browser name
       // Skip proxy creation during recovery since SessionRecoveryService already has one
-      const { socket, sessionExists } =
-        await this.sessionManager.createConnection(
-          userId,
-          phoneNumber,
-          proxyCountry,
-          browserName,
-          isRecovery, // Skip proxy creation if this is a recovery
-          forceNew, // Force fresh connection, delete existing sessions
-        );
+      const { socket, sessionExists } = await this.sessionManager.createConnection(
+        userId,
+        phoneNumber,
+        proxyCountry,
+        browserName,
+        isRecovery, // Skip proxy creation if this is a recovery
+        forceNew // Force fresh connection, delete existing sessions
+      );
 
       // Determine if handshake should be skipped:
       // - Recovery connections skip handshake (already authenticated)
@@ -783,9 +603,7 @@ export class ConnectionPool extends EventEmitter {
           sessionExists,
           skipHandshake,
         },
-        skipHandshake
-          ? "Skipping handshake validation - existing session or recovery"
-          : "Requiring handshake validation - new QR connection",
+        skipHandshake ? "Skipping handshake validation - existing session or recovery" : "Requiring handshake validation - new QR connection"
       );
 
       const connection: WhatsAppConnection = {
@@ -814,10 +632,7 @@ export class ConnectionPool extends EventEmitter {
 
       // Update session activity in instance coordinator
       if (!isRecovery) {
-        await this.instanceCoordinator.updateSessionActivity(
-          userId,
-          phoneNumber,
-        );
+        await this.instanceCoordinator.updateSessionActivity(userId, phoneNumber);
       }
 
       // Update Firestore
@@ -831,15 +646,12 @@ export class ConnectionPool extends EventEmitter {
           totalConnections: this.connections.size,
           isRecovery,
         },
-        "Added new connection to pool",
+        "Added new connection to pool"
       );
 
       return true;
     } catch (error) {
-      this.logger.error(
-        { userId, phoneNumber, error },
-        "Failed to add connection",
-      );
+      this.logger.error({ userId, phoneNumber, error }, "Failed to add connection");
       return false;
     }
   }
@@ -851,12 +663,7 @@ export class ConnectionPool extends EventEmitter {
    * @param skipLogout - If true, preserve session for reconnection; if false, perform full logout
    * @param reason - The reason for disconnection (e.g., "deleted", "manual", "disabled")
    */
-  async removeConnection(
-    userId: string,
-    phoneNumber: string,
-    skipLogout = false,
-    reason?: string,
-  ): Promise<void> {
+  async removeConnection(userId: string, phoneNumber: string, skipLogout = false, reason?: string): Promise<void> {
     // Format phone number for consistency
     const formattedPhone = formatPhoneNumberSafe(phoneNumber);
     if (formattedPhone) {
@@ -867,10 +674,7 @@ export class ConnectionPool extends EventEmitter {
     const connection = this.connections.get(connectionKey);
 
     if (!connection) {
-      this.logger.debug(
-        { userId, phoneNumber, connectionKey },
-        "Connection not found for removal (might already be removed)",
-      );
+      this.logger.debug({ userId, phoneNumber, connectionKey }, "Connection not found for removal (might already be removed)");
       return;
     }
 
@@ -888,21 +692,12 @@ export class ConnectionPool extends EventEmitter {
       if (!skipLogout) {
         try {
           await connection.socket.logout();
-          this.logger.info(
-            { userId, phoneNumber },
-            "WhatsApp session logged out successfully",
-          );
+          this.logger.info({ userId, phoneNumber }, "WhatsApp session logged out successfully");
         } catch (logoutError) {
-          this.logger.warn(
-            { userId, phoneNumber, logoutError },
-            "Failed to logout cleanly, proceeding with connection end",
-          );
+          this.logger.warn({ userId, phoneNumber, logoutError }, "Failed to logout cleanly, proceeding with connection end");
         }
       } else {
-        this.logger.info(
-          { userId, phoneNumber },
-          "Gracefully closing connection without logout to preserve session",
-        );
+        this.logger.info({ userId, phoneNumber }, "Gracefully closing connection without logout to preserve session");
       }
 
       // Close the socket
@@ -919,13 +714,9 @@ export class ConnectionPool extends EventEmitter {
       // Clean up associated caches
       const sessionKey = `${userId}-${phoneNumber}`;
       if (this.processedContactsCache.has(sessionKey)) {
-        const cacheSize =
-          this.processedContactsCache.get(sessionKey)?.size || 0;
+        const cacheSize = this.processedContactsCache.get(sessionKey)?.size || 0;
         this.processedContactsCache.delete(sessionKey);
-        this.logger.debug(
-          { userId, phoneNumber, cacheSize },
-          "Cleared deduplication cache for disconnected session",
-        );
+        this.logger.debug({ userId, phoneNumber, cacheSize }, "Cleared deduplication cache for disconnected session");
       }
       this.importListRefs.delete(sessionKey);
       this.syncedContactInfo.clear(); // Clear synced contact info as it's session-specific
@@ -938,62 +729,32 @@ export class ConnectionPool extends EventEmitter {
         // Don't update Firestore status for permanent deletions
         // The document is being deleted, so writing "disconnected" status would recreate it
         if (reason !== "deleted") {
-          await this.updateConnectionStatus(
-            userId,
-            phoneNumber,
-            "disconnected",
-          );
+          await this.updateConnectionStatus(userId, phoneNumber, "disconnected");
           // Remove from recovery tracking since it's a normal disconnect
           await this.removeSessionFromRecovery(userId, phoneNumber);
-          this.logger.info(
-            { userId, phoneNumber, reason },
-            "Updated connection status to disconnected",
-          );
+          this.logger.info({ userId, phoneNumber, reason }, "Updated connection status to disconnected");
         } else {
-          this.logger.info(
-            { userId, phoneNumber },
-            "Skipping status update for permanent deletion - document is being removed",
-          );
+          this.logger.info({ userId, phoneNumber }, "Skipping status update for permanent deletion - document is being removed");
         }
       } else {
         // Mark session as pending recovery for graceful shutdown
-        await this.updateSessionForRecovery(
-          userId,
-          phoneNumber,
-          "pending_recovery",
-          connection.proxyCountry,
-        );
-        this.logger.info(
-          { userId, phoneNumber },
-          "Session preserved for recovery in users subcollection",
-        );
+        await this.updateSessionForRecovery(userId, phoneNumber, "pending_recovery", connection.proxyCountry);
+        this.logger.info({ userId, phoneNumber }, "Session preserved for recovery in users subcollection");
       }
 
       // Release session ownership in instance coordinator
-      await this.instanceCoordinator.releaseSessionOwnership(
-        userId,
-        phoneNumber,
-      );
+      await this.instanceCoordinator.releaseSessionOwnership(userId, phoneNumber);
 
-      this.logger.info(
-        { userId, phoneNumber, totalConnections: this.connections.size },
-        "Removed connection from pool and released proxy",
-      );
+      this.logger.info({ userId, phoneNumber, totalConnections: this.connections.size }, "Removed connection from pool and released proxy");
     } catch (error) {
-      this.logger.error(
-        { userId, phoneNumber, error },
-        "Error removing connection",
-      );
+      this.logger.error({ userId, phoneNumber, error }, "Error removing connection");
     }
   }
 
   /**
    * Get a connection from the pool
    */
-  getConnection(
-    userId: string,
-    phoneNumber: string,
-  ): WhatsAppConnection | null {
+  getConnection(userId: string, phoneNumber: string): WhatsAppConnection | null {
     const connectionKey = this.getConnectionKey(userId, phoneNumber);
     return this.connections.get(connectionKey) || null;
   }
@@ -1016,12 +777,7 @@ export class ConnectionPool extends EventEmitter {
   /**
    * Send a message using a connection from the pool
    */
-  async sendMessage(
-    userId: string,
-    phoneNumber: string,
-    toNumber: string,
-    content: WAMessageContent,
-  ): Promise<WAMessageKey | null> {
+  async sendMessage(userId: string, phoneNumber: string, toNumber: string, content: WAMessageContent): Promise<WAMessageKey | null> {
     const sendStartTime = Date.now();
     const messageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
@@ -1032,15 +788,12 @@ export class ConnectionPool extends EventEmitter {
         userId,
         phoneNumber: phoneNumber,
         toNumber: toNumber,
-        body:
-          (content as any).text ||
-          (content as any).caption ||
-          "[Media Message]",
+        body: (content as any).text || (content as any).caption || "[Media Message]",
         contentType: (content as any).text ? "text" : Object.keys(content)[0],
         hasCaption: !!(content as any).caption,
         operation: "send_message_attempt",
       },
-      "Attempting to send WhatsApp message",
+      "Attempting to send WhatsApp message"
     );
 
     const connection = this.getConnection(userId, phoneNumber);
@@ -1053,13 +806,10 @@ export class ConnectionPool extends EventEmitter {
           userId,
           phoneNumber: phoneNumber,
           toNumber: toNumber,
-          body:
-            (content as any).text ||
-            (content as any).caption ||
-            "[Media Message]",
+          body: (content as any).text || (content as any).caption || "[Media Message]",
           error: "no_connection",
         },
-        "No connection found for phone number",
+        "No connection found for phone number"
       );
       return null;
     }
@@ -1067,10 +817,7 @@ export class ConnectionPool extends EventEmitter {
     // If connection exists but is not open, queue the message if it's recovering
     if (connection.state.connection !== "open") {
       // Check if connection is recovering (recently connected or has session)
-      const isRecovering =
-        connection.hasConnectedSuccessfully ||
-        connection.isRecovery ||
-        connection.handshakeCompleted;
+      const isRecovering = connection.hasConnectedSuccessfully || connection.isRecovery || connection.handshakeCompleted;
 
       if (!isRecovering) {
         // Connection never connected successfully, reject immediately
@@ -1080,14 +827,11 @@ export class ConnectionPool extends EventEmitter {
             userId,
             phoneNumber: phoneNumber,
             toNumber: toNumber,
-            body:
-              (content as any).text ||
-              (content as any).caption ||
-              "[Media Message]",
+            body: (content as any).text || (content as any).caption || "[Media Message]",
             connectionState: connection.state.connection,
             error: "connection_not_established",
           },
-          "Connection not established yet, cannot send message",
+          "Connection not established yet, cannot send message"
         );
         return null;
       }
@@ -1109,7 +853,7 @@ export class ConnectionPool extends EventEmitter {
           messageCount: connection.messageCount,
           lastActivity: connection.lastActivity,
         },
-        "Sending message via WhatsApp socket",
+        "Sending message via WhatsApp socket"
       );
 
       const socketSendStart = Date.now();
@@ -1123,10 +867,7 @@ export class ConnectionPool extends EventEmitter {
           userId,
           phoneNumber: phoneNumber,
           toNumber: toNumber,
-          body:
-            (content as any).text ||
-            (content as any).caption ||
-            "[Media Message]",
+          body: (content as any).text || (content as any).caption || "[Media Message]",
           whatsappMessageId: result?.key?.id,
           whatsappStatus: result?.status,
           serverMessageId: result?.key?.id,
@@ -1137,7 +878,7 @@ export class ConnectionPool extends EventEmitter {
           totalDuration: Date.now() - sendStartTime,
           timestamp: new Date().toISOString(),
         },
-        "WhatsApp message response received",
+        "WhatsApp message response received"
       );
 
       connection.lastActivity = new Date();
@@ -1154,7 +895,7 @@ export class ConnectionPool extends EventEmitter {
           () => {
             this.sentMessageIds.delete(messageId);
           },
-          5 * 60 * 1000,
+          5 * 60 * 1000
         );
 
         const publishStart = Date.now();
@@ -1173,7 +914,7 @@ export class ConnectionPool extends EventEmitter {
             publishDuration: Date.now() - publishStart,
             totalMessageCount: connection.messageCount,
           },
-          "Message sent event published",
+          "Message sent event published"
         );
 
         // Update contact with outgoing message timestamp
@@ -1194,15 +935,9 @@ export class ConnectionPool extends EventEmitter {
               channel: "whatsapp_web",
             });
 
-            this.logger.debug(
-              { userId, toNumber, messageId },
-              "Updated contact with outgoing message timestamp",
-            );
+            this.logger.debug({ userId, toNumber, messageId }, "Updated contact with outgoing message timestamp");
           } else {
-            this.logger.warn(
-              { userId, toNumber, messageId },
-              "Contact not found for outgoing message timestamp update",
-            );
+            this.logger.warn({ userId, toNumber, messageId }, "Contact not found for outgoing message timestamp update");
           }
         } catch (error) {
           // Log but don't fail the send operation
@@ -1213,7 +948,7 @@ export class ConnectionPool extends EventEmitter {
               error,
               messageId,
             },
-            "Failed to update contact with outgoing timestamp",
+            "Failed to update contact with outgoing timestamp"
           );
         }
 
@@ -1226,7 +961,7 @@ export class ConnectionPool extends EventEmitter {
             totalDuration: Date.now() - sendStartTime,
             success: true,
           },
-          "Message send completed successfully",
+          "Message send completed successfully"
         );
 
         return result.key;
@@ -1240,7 +975,7 @@ export class ConnectionPool extends EventEmitter {
           result: result ? "result_exists_but_no_key" : "no_result",
           duration: Date.now() - sendStartTime,
         },
-        "Message sent but no key returned",
+        "Message sent but no key returned"
       );
 
       return null;
@@ -1262,7 +997,7 @@ export class ConnectionPool extends EventEmitter {
           connectionState: connection.state.connection,
           isProxyError: this.isProxyError(error),
         },
-        "Failed to send message via WhatsApp",
+        "Failed to send message via WhatsApp"
       );
 
       // Check if we need to rotate proxy
@@ -1274,7 +1009,7 @@ export class ConnectionPool extends EventEmitter {
             phoneNumber: phoneNumber?.substring(0, 6) + "***",
             error: "proxy_error_detected",
           },
-          "Proxy error detected, initiating rotation",
+          "Proxy error detected, initiating rotation"
         );
 
         await this.handleProxyError(userId, phoneNumber);
@@ -1287,12 +1022,7 @@ export class ConnectionPool extends EventEmitter {
   /**
    * Queue a message for sending when connection reopens (zero message loss during recovery)
    */
-  private queueMessage(
-    connection: WhatsAppConnection,
-    toNumber: string,
-    content: WAMessageContent,
-    messageId: string,
-  ): Promise<WAMessageKey | null> {
+  private queueMessage(connection: WhatsAppConnection, toNumber: string, content: WAMessageContent, messageId: string): Promise<WAMessageKey | null> {
     const MAX_QUEUE_SIZE = 50;
     const QUEUE_TIMEOUT_MS = 30000; // 30 seconds
 
@@ -1311,7 +1041,7 @@ export class ConnectionPool extends EventEmitter {
           queueSize: connection.messageQueue.length,
           error: "queue_full",
         },
-        "Message queue full, rejecting message",
+        "Message queue full, rejecting message"
       );
       return Promise.resolve(null);
     }
@@ -1321,9 +1051,7 @@ export class ConnectionPool extends EventEmitter {
       // Setup timeout
       const timeoutId = setTimeout(() => {
         // Remove from queue
-        const index = connection.messageQueue!.findIndex(
-          (m) => m.timeoutId === timeoutId,
-        );
+        const index = connection.messageQueue!.findIndex((m) => m.timeoutId === timeoutId);
         if (index >= 0) {
           connection.messageQueue!.splice(index, 1);
         }
@@ -1337,7 +1065,7 @@ export class ConnectionPool extends EventEmitter {
             queueTime: QUEUE_TIMEOUT_MS,
             error: "queue_timeout",
           },
-          "Message queue timeout - connection did not reopen in time",
+          "Message queue timeout - connection did not reopen in time"
         );
 
         resolve(null); // Resolve with null instead of rejecting to match API behavior
@@ -1359,14 +1087,11 @@ export class ConnectionPool extends EventEmitter {
           userId: connection.userId,
           phoneNumber: connection.phoneNumber,
           toNumber: toNumber,
-          body:
-            (content as any).text ||
-            (content as any).caption ||
-            "[Media Message]",
+          body: (content as any).text || (content as any).caption || "[Media Message]",
           queueSize: connection.messageQueue!.length,
           queueTimeout: QUEUE_TIMEOUT_MS,
         },
-        "Message queued for sending when connection reopens",
+        "Message queued for sending when connection reopens"
       );
     });
   }
@@ -1374,9 +1099,7 @@ export class ConnectionPool extends EventEmitter {
   /**
    * Flush message queue when connection reopens (send all queued messages)
    */
-  private async flushMessageQueue(
-    connection: WhatsAppConnection,
-  ): Promise<void> {
+  private async flushMessageQueue(connection: WhatsAppConnection): Promise<void> {
     if (!connection.messageQueue || connection.messageQueue.length === 0) {
       return; // No messages to flush
     }
@@ -1390,7 +1113,7 @@ export class ConnectionPool extends EventEmitter {
         phoneNumber: connection.phoneNumber,
         queueSize,
       },
-      "Flushing message queue after connection reopened",
+      "Flushing message queue after connection reopened"
     );
 
     // Process all queued messages
@@ -1415,15 +1138,12 @@ export class ConnectionPool extends EventEmitter {
             toNumber: queuedMsg.toNumber,
             queueDuration,
           },
-          "Sending queued message",
+          "Sending queued message"
         );
 
         // Send the message using the actual socket
         const jid = this.formatJid(queuedMsg.toNumber);
-        const result = await connection.socket.sendMessage(
-          jid,
-          queuedMsg.content as any,
-        );
+        const result = await connection.socket.sendMessage(jid, queuedMsg.content as any);
 
         if (result && result.key) {
           queuedMsg.resolve(result.key);
@@ -1437,7 +1157,7 @@ export class ConnectionPool extends EventEmitter {
               messageId: result.key.id,
               queueDuration,
             },
-            "Queued message sent successfully",
+            "Queued message sent successfully"
           );
         } else {
           queuedMsg.resolve(null);
@@ -1450,7 +1170,7 @@ export class ConnectionPool extends EventEmitter {
               toNumber: queuedMsg.toNumber,
               queueDuration,
             },
-            "Queued message sent but no key returned",
+            "Queued message sent but no key returned"
           );
         }
       } catch (error: any) {
@@ -1464,7 +1184,7 @@ export class ConnectionPool extends EventEmitter {
             toNumber: queuedMsg.toNumber,
             error: error.message,
           },
-          "Failed to send queued message",
+          "Failed to send queued message"
         );
       }
     }
@@ -1480,7 +1200,7 @@ export class ConnectionPool extends EventEmitter {
         failedCount,
         flushDuration,
       },
-      "Message queue flush completed",
+      "Message queue flush completed"
     );
   }
 
@@ -1501,7 +1221,7 @@ export class ConnectionPool extends EventEmitter {
         connectionId: connId,
         createdAt: connection.createdAt,
       },
-      "Setting up event handlers for new connection instance",
+      "Setting up event handlers for new connection instance"
     );
 
     // Track if sync has been completed to avoid duplicate events
@@ -1525,7 +1245,7 @@ export class ConnectionPool extends EventEmitter {
           hasQR: !!qr,
           updateKeys: Object.keys(update),
         },
-        "Connection update received",
+        "Connection update received"
       );
 
       // Emit connecting state if applicable
@@ -1543,10 +1263,7 @@ export class ConnectionPool extends EventEmitter {
       }
 
       if (qr) {
-        this.logger.info(
-          { userId, phoneNumber, qrLength: qr.length },
-          "QR code received from Baileys",
-        );
+        this.logger.info({ userId, phoneNumber, qrLength: qr.length }, "QR code received from Baileys");
         connection.qrCode = qr;
         await this.handleQRCode(userId, phoneNumber, qr);
 
@@ -1566,10 +1283,7 @@ export class ConnectionPool extends EventEmitter {
           const currentConnection = this.connections.get(connectionKey);
 
           if (!currentConnection) {
-            this.logger.debug(
-              { userId, phoneNumber, capturedConnectionId },
-              "QR timeout fired but connection no longer exists - ignoring",
-            );
+            this.logger.debug({ userId, phoneNumber, capturedConnectionId }, "QR timeout fired but connection no longer exists - ignoring");
             return;
           }
 
@@ -1581,7 +1295,7 @@ export class ConnectionPool extends EventEmitter {
                 ghostConnectionId: capturedConnectionId,
                 currentConnectionId: currentConnection.connectionId,
               },
-              "Ghost QR timeout fired from old connection - ignoring to protect active connection",
+              "Ghost QR timeout fired from old connection - ignoring to protect active connection"
             );
             return;
           }
@@ -1589,21 +1303,15 @@ export class ConnectionPool extends EventEmitter {
           if (!currentConnection.hasConnectedSuccessfully) {
             this.logger.warn(
               { userId, phoneNumber, connectionId: capturedConnectionId },
-              "QR code expired without connection - removing connection to prevent proxy leak",
+              "QR code expired without connection - removing connection to prevent proxy leak"
             );
             await this.removeConnection(userId, phoneNumber);
           } else {
-            this.logger.debug(
-              { userId, phoneNumber, connectionId: capturedConnectionId },
-              "QR timeout fired but connection is active - ignoring",
-            );
+            this.logger.debug({ userId, phoneNumber, connectionId: capturedConnectionId }, "QR timeout fired but connection is active - ignoring");
           }
         }, 90000); // 90 seconds timeout
 
-        this.logger.debug(
-          { userId, phoneNumber, connectionId: capturedConnectionId },
-          "QR timeout set for 90 seconds",
-        );
+        this.logger.debug({ userId, phoneNumber, connectionId: capturedConnectionId }, "QR timeout set for 90 seconds");
       }
 
       if (state === "open") {
@@ -1621,18 +1329,10 @@ export class ConnectionPool extends EventEmitter {
         // For first-time connections, defer until sync completes
         if (this.connectionStateManager && connection.isRecovery) {
           // Ensure state exists in memory before marking as connected
-          await this.connectionStateManager.ensureStateForConnection(
-            userId,
-            phoneNumber,
-            this.config.instanceUrl,
-            "connected",
-          );
+          await this.connectionStateManager.ensureStateForConnection(userId, phoneNumber, this.config.instanceUrl, "connected");
 
           await this.connectionStateManager.markConnected(userId, phoneNumber);
-          this.logger.info(
-            { userId, phoneNumber },
-            "Marked connection as connected in state manager (recovery)",
-          );
+          this.logger.info({ userId, phoneNumber }, "Marked connection as connected in state manager (recovery)");
         }
 
         // Update sessionExists flag for connections with existing session files
@@ -1645,7 +1345,7 @@ export class ConnectionPool extends EventEmitter {
           });
           this.logger.debug(
             { userId, phoneNumber, handshakeCompleted: true },
-            "Updated status=connected and sessionExists=true for connection with existing session files",
+            "Updated status=connected and sessionExists=true for connection with existing session files"
           );
         }
 
@@ -1676,7 +1376,7 @@ export class ConnectionPool extends EventEmitter {
                   proxySessionId: currentConnection.proxySessionId,
                   delaySeconds: 30,
                 },
-                "Proxy released after stable connection - tunnel persists for cost optimization",
+                "Proxy released after stable connection - tunnel persists for cost optimization"
               );
             } else {
               this.logger.debug(
@@ -1688,13 +1388,13 @@ export class ConnectionPool extends EventEmitter {
                   alreadyReleased: currentConnection?.proxyReleased,
                   hasConnected: currentConnection?.hasConnectedSuccessfully,
                 },
-                "Skipping proxy release - connection not stable or already released",
+                "Skipping proxy release - connection not stable or already released"
               );
             }
           } catch (error) {
             this.logger.warn(
               { userId, phoneNumber, error: (error as any).message },
-              "Failed to release proxy after stable connection, but connection continues",
+              "Failed to release proxy after stable connection, but connection continues"
             );
           }
         }, 30000); // 30 seconds to avoid pairing restart issues
@@ -1703,10 +1403,7 @@ export class ConnectionPool extends EventEmitter {
         // First-time connections: Show "importing_messages" so users see the import
         // Reconnections/Recovery: Show "connected" immediately for instant messaging
         // Manual reconnects with existing sessions also skip to "connected"
-        const initialStatus =
-          connection.isRecovery || connection.handshakeCompleted
-            ? "connected"
-            : "importing_messages";
+        const initialStatus = connection.isRecovery || connection.handshakeCompleted ? "connected" : "importing_messages";
 
         // Update phone number status for UI
         await this.updatePhoneNumberStatus(userId, phoneNumber, initialStatus);
@@ -1717,7 +1414,7 @@ export class ConnectionPool extends EventEmitter {
           userId,
           phoneNumber,
           "connected", // Always "connected" for recovery tracking, regardless of UI status
-          connection.proxyCountry,
+          connection.proxyCountry
         );
 
         // Emit connection established event
@@ -1734,7 +1431,7 @@ export class ConnectionPool extends EventEmitter {
             isRecovery: connection.isRecovery,
             initialStatus,
           },
-          "WhatsApp connection established",
+          "WhatsApp connection established"
         );
 
         // Emit sync started event with small delay to ensure WebSocket clients are ready
@@ -1747,7 +1444,7 @@ export class ConnectionPool extends EventEmitter {
                 isRecovery: connection.isRecovery,
                 handshakeCompleted: connection.handshakeCompleted,
               },
-              "Reconnection: Starting background sync - keeping status as 'connected' to allow messaging",
+              "Reconnection: Starting background sync - keeping status as 'connected' to allow messaging"
             );
           } else {
             this.logger.info(
@@ -1757,7 +1454,7 @@ export class ConnectionPool extends EventEmitter {
                 isRecovery: false,
                 handshakeCompleted: false,
               },
-              "First-time connection: Starting import - status will show 'importing_messages'",
+              "First-time connection: Starting import - status will show 'importing_messages'"
             );
           }
 
@@ -1768,7 +1465,7 @@ export class ConnectionPool extends EventEmitter {
               phoneNumber,
               0, // contacts count (starting)
               0, // messages count (starting)
-              false, // not completed yet
+              false // not completed yet
             );
           }
 
@@ -1792,17 +1489,14 @@ export class ConnectionPool extends EventEmitter {
             isRecovery: connection.isRecovery,
             timeoutSeconds: syncTimeout / 1000,
           },
-          "Setting sync timeout",
+          "Setting sync timeout"
         );
 
         setTimeout(async () => {
           // Only emit if sync hasn't completed yet
           if (!syncCompleted) {
             syncCompleted = true;
-            this.logger.info(
-              { userId, phoneNumber, isRecovery: connection.isRecovery },
-              "Sync timeout reached, completing sync",
-            );
+            this.logger.info({ userId, phoneNumber, isRecovery: connection.isRecovery }, "Sync timeout reached, completing sync");
 
             // Mark sync as completed in database
             if (this.connectionStateManager) {
@@ -1811,7 +1505,7 @@ export class ConnectionPool extends EventEmitter {
                 phoneNumber,
                 totalContactsSynced,
                 totalMessagesSynced,
-                true, // sync completed
+                true // sync completed
               );
             }
 
@@ -1820,26 +1514,14 @@ export class ConnectionPool extends EventEmitter {
             // - Recovery connection (already authenticated)
             // - Handshake completed (manual reconnects with existing sessions)
             // - Data was synced (new QR connections with history)
-            if (
-              connection.isRecovery ||
-              connection.handshakeCompleted ||
-              totalContactsSynced > 0 ||
-              totalMessagesSynced > 0
-            ) {
+            if (connection.isRecovery || connection.handshakeCompleted || totalContactsSynced > 0 || totalMessagesSynced > 0) {
               // For recovery, this is a no-op (status already "connected")
               // For manual reconnects with existing sessions, transition to "connected"
               // For new connections with data, transition from "importing" to "connected"
-              await this.updatePhoneNumberStatus(
-                userId,
-                phoneNumber,
-                "connected",
-              );
+              await this.updatePhoneNumberStatus(userId, phoneNumber, "connected");
             } else {
               // No data synced and no existing session - keep as importing_messages
-              this.logger.warn(
-                { userId, phoneNumber },
-                "Sync timeout with no data - keeping import status instead of connected",
-              );
+              this.logger.warn({ userId, phoneNumber }, "Sync timeout with no data - keeping import status instead of connected");
               // Don't change status - let it remain as "importing_messages"
               // The connectionStateManager.updateSyncProgress above will handle the status
             }
@@ -1857,8 +1539,7 @@ export class ConnectionPool extends EventEmitter {
       }
 
       if (state === "close") {
-        const disconnectReason = (lastDisconnect?.error as any)?.output
-          ?.statusCode;
+        const disconnectReason = (lastDisconnect?.error as any)?.output?.statusCode;
         const disconnectError = lastDisconnect?.error;
 
         // Handle expected restart after QR pairing (error code 515)
@@ -1872,14 +1553,11 @@ export class ConnectionPool extends EventEmitter {
               disconnectReason,
               pairingTimestamp,
               errorMessage: disconnectError?.message,
-              errorStack: disconnectError?.stack
-                ?.split("\n")
-                .slice(0, 3)
-                .join(" | "),
+              errorStack: disconnectError?.stack?.split("\n").slice(0, 3).join(" | "),
               proxyCountry: connection.proxyCountry,
               proxyActive: !!connection.proxyCountry,
             },
-            "Connection restart required after pairing - this is expected. Full error context logged for diagnostics.",
+            "Connection restart required after pairing - this is expected. Full error context logged for diagnostics."
           );
 
           connection.qrCode = undefined; // Clear QR as we're now paired
@@ -1890,10 +1568,7 @@ export class ConnectionPool extends EventEmitter {
           if (connection.qrTimeout) {
             clearTimeout(connection.qrTimeout);
             connection.qrTimeout = undefined;
-            this.logger.debug(
-              { userId, phoneNumber },
-              "Cleared QR timeout before restart to prevent race condition",
-            );
+            this.logger.debug({ userId, phoneNumber }, "Cleared QR timeout before restart to prevent race condition");
           }
 
           // Log pre-reconnection state for diagnostics
@@ -1906,7 +1581,7 @@ export class ConnectionPool extends EventEmitter {
               connectionId: connection.connectionId,
               timestamp: new Date().toISOString(),
             },
-            "Pre-reconnection state check - waiting for session save and network stabilization",
+            "Pre-reconnection state check - waiting for session save and network stabilization"
           );
 
           // Emit status update
@@ -1921,12 +1596,10 @@ export class ConnectionPool extends EventEmitter {
           const stabilizationDelay = 5000; // 5 seconds for Cloud Storage upload + network stabilization + WhatsApp server processing
           this.logger.info(
             { userId, phoneNumber, delayMs: stabilizationDelay },
-            `Waiting ${stabilizationDelay}ms for session save and network stabilization before reconnection`,
+            `Waiting ${stabilizationDelay}ms for session save and network stabilization before reconnection`
           );
 
-          await new Promise((resolve) =>
-            setTimeout(resolve, stabilizationDelay),
-          );
+          await new Promise((resolve) => setTimeout(resolve, stabilizationDelay));
 
           // Verify old connection is fully closed
           const connectionKey = this.getConnectionKey(userId, phoneNumber);
@@ -1935,15 +1608,9 @@ export class ConnectionPool extends EventEmitter {
             try {
               // Ensure socket is properly closed
               existingConnection.socket.end(undefined);
-              this.logger.info(
-                { userId, phoneNumber },
-                "Explicitly closed old socket before reconnection",
-              );
+              this.logger.info({ userId, phoneNumber }, "Explicitly closed old socket before reconnection");
             } catch (error) {
-              this.logger.warn(
-                { userId, phoneNumber, error },
-                "Failed to close old socket, continuing with reconnection",
-              );
+              this.logger.warn({ userId, phoneNumber, error }, "Failed to close old socket, continuing with reconnection");
             }
           }
 
@@ -1954,7 +1621,7 @@ export class ConnectionPool extends EventEmitter {
               phoneNumber,
               timestamp: new Date().toISOString(),
             },
-            "Stabilization period complete, initiating reconnection",
+            "Stabilization period complete, initiating reconnection"
           );
 
           await this.reconnect(userId, phoneNumber, 0);
@@ -1970,7 +1637,7 @@ export class ConnectionPool extends EventEmitter {
               disconnectReason,
               hasConnectedSuccessfully: connection.hasConnectedSuccessfully,
             },
-            "Connection replaced - checking if this is during initial connection or session takeover",
+            "Connection replaced - checking if this is during initial connection or session takeover"
           );
 
           // If connection never succeeded, this might be a conflict during reconnection
@@ -1979,7 +1646,7 @@ export class ConnectionPool extends EventEmitter {
           if (!connection.hasConnectedSuccessfully) {
             this.logger.info(
               { userId, phoneNumber },
-              "Connection replaced during initial connection - may be reconnection conflict, keeping in pool to allow recovery",
+              "Connection replaced during initial connection - may be reconnection conflict, keeping in pool to allow recovery"
             );
 
             // Set a timeout to clean up if connection doesn't recover
@@ -1988,25 +1655,15 @@ export class ConnectionPool extends EventEmitter {
               const currentConnection = this.connections.get(key);
 
               // Only delete if still not connected after 10 seconds
-              if (
-                currentConnection &&
-                currentConnection.state.connection !== "open"
-              ) {
-                this.logger.warn(
-                  { userId, phoneNumber },
-                  "Connection did not recover after replacement, removing from pool",
-                );
+              if (currentConnection && currentConnection.state.connection !== "open") {
+                this.logger.warn({ userId, phoneNumber }, "Connection did not recover after replacement, removing from pool");
 
                 // Update state manager
                 if (this.connectionStateManager) {
-                  await this.connectionStateManager.updateState(
-                    userId,
-                    phoneNumber,
-                    {
-                      status: "disconnected",
-                      lastError: "Connection replaced and did not recover",
-                    },
-                  );
+                  await this.connectionStateManager.updateState(userId, phoneNumber, {
+                    status: "disconnected",
+                    lastError: "Connection replaced and did not recover",
+                  });
                 }
 
                 this.connections.delete(key);
@@ -2017,14 +1674,8 @@ export class ConnectionPool extends EventEmitter {
                   phoneNumber,
                   status: "disconnected",
                 });
-              } else if (
-                currentConnection &&
-                currentConnection.state.connection === "open"
-              ) {
-                this.logger.info(
-                  { userId, phoneNumber },
-                  "Connection recovered successfully after replacement",
-                );
+              } else if (currentConnection && currentConnection.state.connection === "open") {
+                this.logger.info({ userId, phoneNumber }, "Connection recovered successfully after replacement");
               }
             }, 10000); // 10 second timeout
 
@@ -2032,10 +1683,7 @@ export class ConnectionPool extends EventEmitter {
           }
 
           // If connection was previously successful, this is a real takeover - remove it
-          this.logger.warn(
-            { userId, phoneNumber },
-            "Previously connected session replaced by another instance, removing",
-          );
+          this.logger.warn({ userId, phoneNumber }, "Previously connected session replaced by another instance, removing");
 
           // Update state manager if available
           if (this.connectionStateManager) {
@@ -2069,11 +1717,7 @@ export class ConnectionPool extends EventEmitter {
               lastError: `Disconnect reason: ${disconnectReason}`,
             });
           } else {
-            await this.connectionStateManager.markDisconnected(
-              userId,
-              phoneNumber,
-              "Logged out",
-            );
+            await this.connectionStateManager.markDisconnected(userId, phoneNumber, "Logged out");
           }
         }
 
@@ -2085,43 +1729,30 @@ export class ConnectionPool extends EventEmitter {
         });
 
         if (shouldReconnect && !this.isShuttingDown) {
-          this.logger.info(
-            { userId, phoneNumber, disconnectReason },
-            "Connection closed, attempting reconnect with error handling",
-          );
+          this.logger.info({ userId, phoneNumber, disconnectReason }, "Connection closed, attempting reconnect with error handling");
 
           // Use error handler for graceful reconnection
           try {
             const lastError = lastDisconnect?.error as Error;
-            const errorHandled = await this.errorHandler.handleError(
-              lastError ||
-                new Error(`Connection closed with reason: ${disconnectReason}`),
-              {
-                userId,
-                phoneNumber,
-                connectionId: connId,
-                operation: "connection_update_reconnect",
-                errorCode: String(disconnectReason),
-                timestamp: new Date(),
-              },
-            );
+            const errorHandled = await this.errorHandler.handleError(lastError || new Error(`Connection closed with reason: ${disconnectReason}`), {
+              userId,
+              phoneNumber,
+              connectionId: connId,
+              operation: "connection_update_reconnect",
+              errorCode: String(disconnectReason),
+              timestamp: new Date(),
+            });
 
             if (!errorHandled) {
               // Fallback to direct reconnection if error handler can't handle it
               await this.reconnect(userId, phoneNumber);
             }
           } catch (error) {
-            this.logger.error(
-              { userId, phoneNumber, error },
-              "Error handling failed, attempting direct reconnection",
-            );
+            this.logger.error({ userId, phoneNumber, error }, "Error handling failed, attempting direct reconnection");
             await this.reconnect(userId, phoneNumber);
           }
         } else if (shouldReconnect && this.isShuttingDown) {
-          this.logger.info(
-            { userId, phoneNumber, disconnectReason },
-            "Skipping reconnection during graceful shutdown",
-          );
+          this.logger.info({ userId, phoneNumber, disconnectReason }, "Skipping reconnection during graceful shutdown");
         } else {
           await this.removeConnection(userId, phoneNumber);
         }
@@ -2132,10 +1763,7 @@ export class ConnectionPool extends EventEmitter {
     socket.ev.on("messages.upsert", async (upsert) => {
       try {
         // Update session activity for any message activity
-        await this.instanceCoordinator.updateSessionActivity(
-          userId,
-          phoneNumber,
-        );
+        await this.instanceCoordinator.updateSessionActivity(userId, phoneNumber);
 
         // Determine if these are history messages or real-time messages
         // Only "append" type is for history sync, "notify" is for real-time incoming messages
@@ -2184,25 +1812,15 @@ export class ConnectionPool extends EventEmitter {
                   }
                 : null,
             },
-            "Processing history messages from upsert",
+            "Processing history messages from upsert"
           );
 
-          const count = await this.processSyncedMessages(
-            userId,
-            phoneNumber,
-            historyMessages,
-          );
+          const count = await this.processSyncedMessages(userId, phoneNumber, historyMessages);
           totalMessagesSynced += count;
 
           // Update sync progress in database
           if (this.connectionStateManager) {
-            await this.connectionStateManager.updateSyncProgress(
-              userId,
-              phoneNumber,
-              totalContactsSynced,
-              totalMessagesSynced,
-              false,
-            );
+            await this.connectionStateManager.updateSyncProgress(userId, phoneNumber, totalContactsSynced, totalMessagesSynced, false);
           }
 
           // Emit progress event
@@ -2304,9 +1922,7 @@ export class ConnectionPool extends EventEmitter {
           contacts: history.contacts?.length || 0,
           messages: history.messages?.length || 0,
           syncType: history.syncType,
-          syncTypeString: history.syncType
-            ? proto.HistorySync.HistorySyncType[history.syncType]
-            : "unknown",
+          syncTypeString: history.syncType ? proto.HistorySync.HistorySyncType[history.syncType] : "unknown",
           isLatest: history.isLatest,
           progress: history.progress,
           hasMessages: !!history.messages && history.messages.length > 0,
@@ -2317,7 +1933,7 @@ export class ConnectionPool extends EventEmitter {
             timestamp: m.messageTimestamp,
           })),
         },
-        "Processing history sync data",
+        "Processing history sync data"
       );
 
       try {
@@ -2339,7 +1955,7 @@ export class ConnectionPool extends EventEmitter {
               phoneNumber,
               contactsCount: history.contacts.length,
             },
-            "Skipping bulk contact import - will only import contacts with chat history",
+            "Skipping bulk contact import - will only import contacts with chat history"
           );
 
           // Update sync progress in database
@@ -2349,7 +1965,7 @@ export class ConnectionPool extends EventEmitter {
               phoneNumber,
               0, // contacts count (skipped)
               totalMessagesSynced,
-              false,
+              false
             );
           }
 
@@ -2366,32 +1982,17 @@ export class ConnectionPool extends EventEmitter {
         // Process chats (conversations) - pass socket for message history fetching
         // This will only create contacts that have actual chat history
         if (history.chats && history.chats.length > 0) {
-          await this.processSyncedChats(
-            userId,
-            phoneNumber,
-            history.chats,
-            socket,
-          );
+          await this.processSyncedChats(userId, phoneNumber, history.chats, socket);
         }
 
         // Process messages
         if (history.messages && history.messages.length > 0) {
-          const count = await this.processSyncedMessages(
-            userId,
-            phoneNumber,
-            history.messages,
-          );
+          const count = await this.processSyncedMessages(userId, phoneNumber, history.messages);
           totalMessagesSynced += count;
 
           // Update sync progress in database
           if (this.connectionStateManager) {
-            await this.connectionStateManager.updateSyncProgress(
-              userId,
-              phoneNumber,
-              totalContactsSynced,
-              totalMessagesSynced,
-              false,
-            );
+            await this.connectionStateManager.updateSyncProgress(userId, phoneNumber, totalContactsSynced, totalMessagesSynced, false);
           }
 
           // Check if this is a recovery connection
@@ -2402,11 +2003,7 @@ export class ConnectionPool extends EventEmitter {
           // Update phone number status for UI - only for first-time connections
           // Recovery/reconnection keeps status as "connected" for background sync
           if (!isRecoveryConnection) {
-            await this.updatePhoneNumberStatus(
-              userId,
-              phoneNumber,
-              "importing_messages",
-            );
+            await this.updatePhoneNumberStatus(userId, phoneNumber, "importing_messages");
           }
 
           // Emit message sync progress for UI updates
@@ -2444,7 +2041,7 @@ export class ConnectionPool extends EventEmitter {
               totalMessages: totalMessagesSynced,
               isRecovery: isRecoveryConnection,
             },
-            "Latest history batch received, completing sync",
+            "Latest history batch received, completing sync"
           );
 
           // Mark sync as completed in database
@@ -2454,7 +2051,7 @@ export class ConnectionPool extends EventEmitter {
               phoneNumber,
               totalContactsSynced,
               totalMessagesSynced,
-              true, // sync completed
+              true // sync completed
             );
           }
 
@@ -2468,7 +2065,7 @@ export class ConnectionPool extends EventEmitter {
                 totalContacts: totalContactsSynced,
                 totalMessages: totalMessagesSynced,
               },
-              "Recovery connection: Sync completed in background, status remains 'connected'",
+              "Recovery connection: Sync completed in background, status remains 'connected'"
             );
 
             // Mark sync as completed for this connection
@@ -2486,11 +2083,7 @@ export class ConnectionPool extends EventEmitter {
           } else {
             // First-time connection: Show importing status with grace period
             // Ensure status is set to importing_messages before the grace period
-            await this.updatePhoneNumberStatus(
-              userId,
-              phoneNumber,
-              "importing_messages",
-            );
+            await this.updatePhoneNumberStatus(userId, phoneNumber, "importing_messages");
 
             // Add a grace period before marking as connected
             // This ensures the UI shows "importing" status for a reasonable duration
@@ -2503,7 +2096,7 @@ export class ConnectionPool extends EventEmitter {
                 phoneNumber,
                 delayMs: SYNC_COMPLETION_DELAY,
               },
-              "First-time connection: Waiting for grace period before marking as fully synced",
+              "First-time connection: Waiting for grace period before marking as fully synced"
             );
 
             setTimeout(async () => {
@@ -2515,7 +2108,7 @@ export class ConnectionPool extends EventEmitter {
                     totalContacts: totalContactsSynced,
                     totalMessages: totalMessagesSynced,
                   },
-                  "Grace period completed, marking connection as synced",
+                  "Grace period completed, marking connection as synced"
                 );
 
                 // Mark sync as completed for this connection BEFORE updating status
@@ -2524,38 +2117,20 @@ export class ConnectionPool extends EventEmitter {
                 const conn = this.connections.get(connKey);
                 if (conn) {
                   conn.syncCompleted = true;
-                  this.logger.info(
-                    { userId, phoneNumber },
-                    "Marked connection as syncCompleted=true",
-                  );
+                  this.logger.info({ userId, phoneNumber }, "Marked connection as syncCompleted=true");
                 }
 
                 // Update phone number status for UI - sync completed
                 // Now the defensive check will allow "connected" status
-                await this.updatePhoneNumberStatus(
-                  userId,
-                  phoneNumber,
-                  "connected",
-                );
+                await this.updatePhoneNumberStatus(userId, phoneNumber, "connected");
 
                 // Mark as connected in ConnectionStateManager now that sync is complete
                 if (this.connectionStateManager) {
                   // Ensure state exists in memory before marking as connected
-                  await this.connectionStateManager.ensureStateForConnection(
-                    userId,
-                    phoneNumber,
-                    this.config.instanceUrl,
-                    "connected",
-                  );
+                  await this.connectionStateManager.ensureStateForConnection(userId, phoneNumber, this.config.instanceUrl, "connected");
 
-                  await this.connectionStateManager.markConnected(
-                    userId,
-                    phoneNumber,
-                  );
-                  this.logger.info(
-                    { userId, phoneNumber },
-                    "Marked connection as connected in state manager (first-time, after sync)",
-                  );
+                  await this.connectionStateManager.markConnected(userId, phoneNumber);
+                  this.logger.info({ userId, phoneNumber }, "Marked connection as connected in state manager (first-time, after sync)");
                 }
 
                 // Emit sync completion event with cumulative totals
@@ -2566,19 +2141,13 @@ export class ConnectionPool extends EventEmitter {
                   messages: totalMessagesSynced,
                 });
               } catch (error) {
-                this.logger.error(
-                  { userId, phoneNumber, error },
-                  "Failed to complete sync status update after grace period",
-                );
+                this.logger.error({ userId, phoneNumber, error }, "Failed to complete sync status update after grace period");
               }
             }, SYNC_COMPLETION_DELAY);
           }
         }
       } catch (error) {
-        this.logger.error(
-          { userId, phoneNumber, error },
-          "Failed to process history sync",
-        );
+        this.logger.error({ userId, phoneNumber, error }, "Failed to process history sync");
       }
     });
 
@@ -2590,15 +2159,11 @@ export class ConnectionPool extends EventEmitter {
           phoneNumber,
           count: contacts?.length || 0,
         },
-        "Contacts upsert event received",
+        "Contacts upsert event received"
       );
 
       if (contacts && contacts.length > 0) {
-        const count = await this.processSyncedContacts(
-          userId,
-          phoneNumber,
-          contacts,
-        );
+        const count = await this.processSyncedContacts(userId, phoneNumber, contacts);
         totalContactsSynced += count;
 
         // Only emit sync event if we have substantial data (more than 10 contacts)
@@ -2606,21 +2171,11 @@ export class ConnectionPool extends EventEmitter {
         if (contacts.length > 10) {
           // Update sync progress in database
           if (this.connectionStateManager) {
-            await this.connectionStateManager.updateSyncProgress(
-              userId,
-              phoneNumber,
-              totalContactsSynced,
-              totalMessagesSynced,
-              false,
-            );
+            await this.connectionStateManager.updateSyncProgress(userId, phoneNumber, totalContactsSynced, totalMessagesSynced, false);
           }
 
           // Update phone number status for UI
-          await this.updatePhoneNumberStatus(
-            userId,
-            phoneNumber,
-            "importing_contacts",
-          );
+          await this.updatePhoneNumberStatus(userId, phoneNumber, "importing_contacts");
 
           // Emit sync event for UI
           this.emit("contacts-synced", {
@@ -2635,7 +2190,7 @@ export class ConnectionPool extends EventEmitter {
               phoneNumber,
               count: contacts.length,
             },
-            "Small initial contacts batch, not emitting to UI yet",
+            "Small initial contacts batch, not emitting to UI yet"
           );
         }
       }
@@ -2649,7 +2204,7 @@ export class ConnectionPool extends EventEmitter {
           phoneNumber,
           count: chats?.length || 0,
         },
-        "Chats upsert event received",
+        "Chats upsert event received"
       );
 
       if (chats && chats.length > 0) {
@@ -2665,17 +2220,13 @@ export class ConnectionPool extends EventEmitter {
           phoneNumber,
           count: updates?.length || 0,
         },
-        "Contacts update event received",
+        "Contacts update event received"
       );
 
       for (const update of updates || []) {
         if (update.id) {
           const contactNumber = update.id.replace("@s.whatsapp.net", "");
-          const contactRef = this.firestore
-            .collection("users")
-            .doc(userId)
-            .collection("contacts")
-            .doc(contactNumber);
+          const contactRef = this.firestore.collection("users").doc(userId).collection("contacts").doc(contactNumber);
 
           await contactRef.set(
             {
@@ -2683,7 +2234,7 @@ export class ConnectionPool extends EventEmitter {
               whatsapp_name: update.name || update.notify || null,
               updated_at: new Date(),
             },
-            { merge: true },
+            { merge: true }
           );
         }
       }
@@ -2702,30 +2253,20 @@ export class ConnectionPool extends EventEmitter {
         qr,
       });
 
-      this.logger.info(
-        { userId, phoneNumber, qrLength: qr.length },
-        "QR code event emitted to WebSocket clients",
-      );
+      this.logger.info({ userId, phoneNumber, qrLength: qr.length }, "QR code event emitted to WebSocket clients");
 
       // Update phone number status for UI immediately
       await this.updatePhoneNumberStatus(userId, phoneNumber, "qr_pending");
 
       // Store QR code in Firestore (async, don't block)
-      const sessionRef = this.firestore
-        .collection("users")
-        .doc(userId)
-        .collection("phone_numbers")
-        .doc(phoneNumber);
+      const sessionRef = this.firestore.collection("users").doc(userId).collection("phone_numbers").doc(phoneNumber);
 
       // Check if document exists before storing QR code
       sessionRef
         .get()
         .then((doc) => {
           if (!doc.exists) {
-            this.logger.info(
-              { userId, phoneNumber },
-              "Phone number document doesn't exist (was deleted), skipping QR code storage",
-            );
+            this.logger.info({ userId, phoneNumber }, "Phone number document doesn't exist (was deleted), skipping QR code storage");
             return;
           }
           return sessionRef.update({
@@ -2736,16 +2277,10 @@ export class ConnectionPool extends EventEmitter {
           });
         })
         .catch((error) => {
-          this.logger.error(
-            { userId, phoneNumber, error },
-            "Failed to store QR code in Firestore",
-          );
+          this.logger.error({ userId, phoneNumber, error }, "Failed to store QR code in Firestore");
         });
     } catch (error) {
-      this.logger.error(
-        { userId, phoneNumber, error },
-        "Failed to handle QR code",
-      );
+      this.logger.error({ userId, phoneNumber, error }, "Failed to handle QR code");
       // Still try to emit the event even if there's an error
       this.emit("qr-generated", {
         userId,
@@ -2758,17 +2293,11 @@ export class ConnectionPool extends EventEmitter {
   /**
    * Handle incoming messages
    */
-  private async handleIncomingMessage(
-    userId: string,
-    phoneNumber: string,
-    message: any,
-  ) {
+  private async handleIncomingMessage(userId: string, phoneNumber: string, message: any) {
     try {
       // Extract sender info
       const fromJid = message.key.remoteJid || "";
-      const fromNumber = fromJid
-        .replace("@s.whatsapp.net", "")
-        .replace("@g.us", "");
+      const fromNumber = fromJid.replace("@s.whatsapp.net", "").replace("@g.us", "");
       const isGroup = fromJid.includes("@g.us");
 
       // Extract message text
@@ -2785,41 +2314,27 @@ export class ConnectionPool extends EventEmitter {
           isGroup,
           timestamp: message.messageTimestamp,
         },
-        "Incoming WhatsApp Web message received",
+        "Incoming WhatsApp Web message received"
       );
 
       // Skip group messages
       if (isGroup) {
-        this.logger.debug(
-          { userId, phoneNumber, fromJid },
-          "Skipping group message",
-        );
+        this.logger.debug({ userId, phoneNumber, fromJid }, "Skipping group message");
         return;
       }
 
       // Skip special WhatsApp identifiers (status updates, broadcasts, etc.)
       if (this.isSpecialWhatsAppIdentifier(fromJid)) {
-        this.logger.debug(
-          { userId, phoneNumber, fromJid, fromNumber },
-          "Skipping special WhatsApp identifier (status/broadcast/newsletter)",
-        );
+        this.logger.debug({ userId, phoneNumber, fromJid, fromNumber }, "Skipping special WhatsApp identifier (status/broadcast/newsletter)");
         return;
       }
 
       // Format phone numbers
-      const formattedFromPhone = fromNumber.startsWith("+")
-        ? fromNumber
-        : `+${fromNumber}`;
-      const formattedToPhone = phoneNumber.startsWith("+")
-        ? phoneNumber
-        : `+${phoneNumber}`;
+      const formattedFromPhone = fromNumber.startsWith("+") ? fromNumber : `+${fromNumber}`;
+      const formattedToPhone = phoneNumber.startsWith("+") ? phoneNumber : `+${phoneNumber}`;
 
       // Handle media if present (downloads from WhatsApp, uploads to Cloud Storage)
-      const mediaInfo = await this.handleMediaMessage(
-        message,
-        userId,
-        phoneNumber,
-      );
+      const mediaInfo = await this.handleMediaMessage(message, userId, phoneNumber);
 
       // Build normalized message payload for Cloud Function
       const messagePayload = {
@@ -2867,24 +2382,17 @@ export class ConnectionPool extends EventEmitter {
           messageId: message.key.id,
           pubsubMessageId: result.messageId,
         },
-        "WhatsApp Web message sent to Cloud Function successfully",
+        "WhatsApp Web message sent to Cloud Function successfully"
       );
     } catch (error) {
-      this.logger.error(
-        { userId, phoneNumber, error },
-        "Failed to send message to Cloud Function",
-      );
+      this.logger.error({ userId, phoneNumber, error }, "Failed to send message to Cloud Function");
     }
   }
 
   /**
    * Handle outgoing messages (both API-sent and manual from phone)
    */
-  private async handleOutgoingMessage(
-    userId: string,
-    phoneNumber: string,
-    message: any,
-  ) {
+  private async handleOutgoingMessage(userId: string, phoneNumber: string, message: any) {
     try {
       // Check if this was sent via our API
       const isApiSent = this.sentMessageIds.has(message.key.id);
@@ -2897,24 +2405,19 @@ export class ConnectionPool extends EventEmitter {
             phoneNumber,
             messageId: message.key.id,
           },
-          "Skipping API-sent message (already processed)",
+          "Skipping API-sent message (already processed)"
         );
         return;
       }
 
       // This is a MANUAL message sent from phone!
       const toJid = message.key.remoteJid || "";
-      const toNumber = toJid
-        .replace("@s.whatsapp.net", "")
-        .replace("@g.us", "");
+      const toNumber = toJid.replace("@s.whatsapp.net", "").replace("@g.us", "");
       const isGroup = toJid.includes("@g.us");
 
       // Skip group messages
       if (isGroup) {
-        this.logger.debug(
-          { userId, phoneNumber, toJid },
-          "Skipping group message",
-        );
+        this.logger.debug({ userId, phoneNumber, toJid }, "Skipping group message");
         return;
       }
 
@@ -2932,16 +2435,12 @@ export class ConnectionPool extends EventEmitter {
           manual: true,
           timestamp: message.messageTimestamp,
         },
-        "Manual WhatsApp message detected",
+        "Manual WhatsApp message detected"
       );
 
       // Format phone numbers
-      const formattedToPhone = toNumber.startsWith("+")
-        ? toNumber
-        : `+${toNumber}`;
-      const formattedFromPhone = phoneNumber.startsWith("+")
-        ? phoneNumber
-        : `+${phoneNumber}`;
+      const formattedToPhone = toNumber.startsWith("+") ? toNumber : `+${toNumber}`;
+      const formattedFromPhone = phoneNumber.startsWith("+") ? phoneNumber : `+${phoneNumber}`;
 
       // Get or create contact
       const userRef = this.firestore.collection("users").doc(userId);
@@ -2992,15 +2491,10 @@ export class ConnectionPool extends EventEmitter {
           tags: [],
         };
 
-        const newContactRef = await this.firestore
-          .collection("contacts")
-          .add(newContactData);
+        const newContactRef = await this.firestore.collection("contacts").add(newContactData);
         contactRef = newContactRef;
 
-        this.logger.info(
-          { userId, phoneNumber, toNumber: formattedToPhone },
-          "Created new contact from manual message",
-        );
+        this.logger.info({ userId, phoneNumber, toNumber: formattedToPhone }, "Created new contact from manual message");
       } else {
         contactRef = existingContacts.docs[0].ref;
 
@@ -3019,11 +2513,7 @@ export class ConnectionPool extends EventEmitter {
 
       // Store the manual message
       // Handle media if present
-      const mediaInfo = await this.handleMediaMessage(
-        message,
-        userId,
-        phoneNumber,
-      );
+      const mediaInfo = await this.handleMediaMessage(message, userId, phoneNumber);
 
       const messageData = {
         // Core fields
@@ -3034,9 +2524,7 @@ export class ConnectionPool extends EventEmitter {
         direction: "outbound",
         status: "sent",
         channel: "whatsapp_web",
-        timestamp: admin.firestore.Timestamp.fromMillis(
-          message.messageTimestamp * 1000,
-        ),
+        timestamp: admin.firestore.Timestamp.fromMillis(message.messageTimestamp * 1000),
         created_at: currentTimestamp,
 
         // CRITICAL FLAGS for manual messages
@@ -3076,17 +2564,11 @@ export class ConnectionPool extends EventEmitter {
       };
 
       // Check for duplicate message before adding
-      const existingMessage = await contactRef
-        .collection("messages")
-        .where("message_sid", "==", message.key.id)
-        .limit(1)
-        .get();
+      const existingMessage = await contactRef.collection("messages").where("message_sid", "==", message.key.id).limit(1).get();
 
       if (existingMessage.empty) {
         // Add message to contact's messages subcollection
-        const messageRef = await contactRef
-          .collection("messages")
-          .add(messageData);
+        const messageRef = await contactRef.collection("messages").add(messageData);
 
         // Update last_message
         await contactRef.update({
@@ -3110,7 +2592,7 @@ export class ConnectionPool extends EventEmitter {
             aiPaused: true,
             creditsUsed: 0,
           },
-          "Manual message stored, AI paused, no credits deducted",
+          "Manual message stored, AI paused, no credits deducted"
         );
       } else {
         this.logger.debug(
@@ -3120,7 +2602,7 @@ export class ConnectionPool extends EventEmitter {
             messageId: message.key.id,
             toNumber: formattedToPhone,
           },
-          "Skipped duplicate manual outgoing message",
+          "Skipped duplicate manual outgoing message"
         );
         return; // Exit early for duplicates
       }
@@ -3134,21 +2616,14 @@ export class ConnectionPool extends EventEmitter {
         timestamp: new Date().toISOString(),
       });
     } catch (error) {
-      this.logger.error(
-        { userId, phoneNumber, error },
-        "Failed to handle outgoing message",
-      );
+      this.logger.error({ userId, phoneNumber, error }, "Failed to handle outgoing message");
     }
   }
 
   /**
    * Handle message status updates
    */
-  private async handleMessageUpdate(
-    userId: string,
-    phoneNumber: string,
-    update: any,
-  ) {
+  private async handleMessageUpdate(userId: string, phoneNumber: string, update: any) {
     try {
       await this.publishEvent("message-update", {
         userId,
@@ -3158,21 +2633,14 @@ export class ConnectionPool extends EventEmitter {
         timestamp: new Date().toISOString(),
       });
     } catch (error) {
-      this.logger.error(
-        { userId, phoneNumber, error },
-        "Failed to handle message update",
-      );
+      this.logger.error({ userId, phoneNumber, error }, "Failed to handle message update");
     }
   }
 
   /**
    * Handle presence updates
    */
-  private async handlePresenceUpdate(
-    userId: string,
-    phoneNumber: string,
-    presence: any,
-  ) {
+  private async handlePresenceUpdate(userId: string, phoneNumber: string, presence: any) {
     try {
       await this.publishEvent("presence-update", {
         userId,
@@ -3182,22 +2650,14 @@ export class ConnectionPool extends EventEmitter {
         timestamp: new Date().toISOString(),
       });
     } catch (error) {
-      this.logger.error(
-        { userId, phoneNumber, error },
-        "Failed to handle presence update",
-      );
+      this.logger.error({ userId, phoneNumber, error }, "Failed to handle presence update");
     }
   }
 
   /**
    * Handle typing indicators
    */
-  private async handleTypingIndicator(
-    userId: string,
-    phoneNumber: string,
-    chatId: string,
-    isTyping: boolean,
-  ) {
+  private async handleTypingIndicator(userId: string, phoneNumber: string, chatId: string, isTyping: boolean) {
     try {
       await this.publishEvent("typing-indicator", {
         userId,
@@ -3207,42 +2667,28 @@ export class ConnectionPool extends EventEmitter {
         timestamp: new Date().toISOString(),
       });
     } catch (error) {
-      this.logger.error(
-        { userId, phoneNumber, error },
-        "Failed to handle typing indicator",
-      );
+      this.logger.error({ userId, phoneNumber, error }, "Failed to handle typing indicator");
     }
   }
 
   /**
    * Create or find existing import list for WhatsApp Web contacts
    */
-  private async createImportList(
-    userId: string,
-    phoneNumber: string,
-  ): Promise<DocumentReference | null> {
+  private async createImportList(userId: string, phoneNumber: string): Promise<DocumentReference | null> {
     try {
       const userRef = this.firestore.collection("users").doc(userId);
       // Use a consistent naming pattern based on phone number (no timestamp)
       const listName = `WhatsApp Import - ${phoneNumber}`;
 
       // Check if a list with this name already exists for this user
-      const existingLists = await this.firestore
-        .collection("lists")
-        .where("user", "==", userRef)
-        .where("name", "==", listName)
-        .limit(1)
-        .get();
+      const existingLists = await this.firestore.collection("lists").where("user", "==", userRef).where("name", "==", listName).limit(1).get();
 
       if (!existingLists.empty) {
         const existingList = existingLists.docs[0];
         const existingData = existingList.data();
 
         // Check if it's a soft-deleted list we can reactivate
-        if (
-          existingData.status === "deleted" ||
-          existingData.status === "archived"
-        ) {
+        if (existingData.status === "deleted" || existingData.status === "archived") {
           this.logger.info(
             {
               userId,
@@ -3251,7 +2697,7 @@ export class ConnectionPool extends EventEmitter {
               listName,
               previousStatus: existingData.status,
             },
-            "Reactivating soft-deleted/archived import list for WhatsApp Web sync",
+            "Reactivating soft-deleted/archived import list for WhatsApp Web sync"
           );
 
           // Reactivate the soft-deleted list
@@ -3274,7 +2720,7 @@ export class ConnectionPool extends EventEmitter {
             listId: existingList.id,
             listName,
           },
-          "Reusing existing import list for WhatsApp Web sync",
+          "Reusing existing import list for WhatsApp Web sync"
         );
 
         // Update the last_modified_at timestamp
@@ -3309,15 +2755,12 @@ export class ConnectionPool extends EventEmitter {
           listId: listRef.id,
           listName,
         },
-        "Created new import list for WhatsApp Web sync",
+        "Created new import list for WhatsApp Web sync"
       );
 
       return listRef;
     } catch (error) {
-      this.logger.error(
-        { userId, phoneNumber, error },
-        "Failed to create or find import list",
-      );
+      this.logger.error({ userId, phoneNumber, error }, "Failed to create or find import list");
       return null;
     }
   }
@@ -3371,7 +2814,7 @@ export class ConnectionPool extends EventEmitter {
   private async handleMediaMessage(
     message: any,
     userId: string,
-    phoneNumber: string,
+    phoneNumber: string
   ): Promise<{
     media_url: string | null;
     media_content_type: string | null;
@@ -3399,8 +2842,7 @@ export class ConnectionPool extends EventEmitter {
         mimetype = messageContent.audioMessage.mimetype || "audio/ogg";
       } else if (messageContent.documentMessage) {
         mediaType = "document";
-        mimetype =
-          messageContent.documentMessage.mimetype || "application/octet-stream";
+        mimetype = messageContent.documentMessage.mimetype || "application/octet-stream";
       } else if (messageContent.stickerMessage) {
         mediaType = "sticker";
         mimetype = "image/webp";
@@ -3417,15 +2859,11 @@ export class ConnectionPool extends EventEmitter {
           mediaType,
           mimetype,
         },
-        "Processing media message",
+        "Processing media message"
       );
 
       // Download media from WhatsApp
-      const mediaBuffer = (await downloadMediaMessage(
-        message,
-        "buffer",
-        {},
-      )) as Buffer;
+      const mediaBuffer = (await downloadMediaMessage(message, "buffer", {})) as Buffer;
 
       if (!mediaBuffer) {
         this.logger.warn(
@@ -3435,7 +2873,7 @@ export class ConnectionPool extends EventEmitter {
             messageId: message.key.id,
             mediaType,
           },
-          "Failed to download media from WhatsApp",
+          "Failed to download media from WhatsApp"
         );
         return {
           media_url: null,
@@ -3453,7 +2891,7 @@ export class ConnectionPool extends EventEmitter {
           originalname: `whatsapp_${mediaType}_${message.key.id}`,
         },
         userId,
-        phoneNumber,
+        phoneNumber
       );
 
       this.logger.info(
@@ -3465,7 +2903,7 @@ export class ConnectionPool extends EventEmitter {
           mediaUrl: uploadResult.url,
           fileSize: uploadResult.size,
         },
-        "Media uploaded successfully",
+        "Media uploaded successfully"
       );
 
       return {
@@ -3481,7 +2919,7 @@ export class ConnectionPool extends EventEmitter {
           phoneNumber,
           messageId: message.key.id,
         },
-        "Failed to process media message",
+        "Failed to process media message"
       );
 
       // Return basic info even if upload fails
@@ -3512,17 +2950,10 @@ export class ConnectionPool extends EventEmitter {
    */
   private isRealConversation(messages: any[]): boolean {
     // Check if we have actual text messages
-    const hasTextMessages = messages.some(
-      (msg) =>
-        msg.message?.conversation || msg.message?.extendedTextMessage?.text,
-    );
+    const hasTextMessages = messages.some((msg) => msg.message?.conversation || msg.message?.extendedTextMessage?.text);
 
     // Check if we have media with meaningful captions
-    const hasMediaWithCaptions = messages.some(
-      (msg) =>
-        msg.message?.imageMessage?.caption ||
-        msg.message?.videoMessage?.caption,
-    );
+    const hasMediaWithCaptions = messages.some((msg) => msg.message?.imageMessage?.caption || msg.message?.videoMessage?.caption);
 
     // Check if we have back-and-forth conversation (messages from both sides)
     const hasInbound = messages.some((msg) => !msg.key.fromMe);
@@ -3537,12 +2968,7 @@ export class ConnectionPool extends EventEmitter {
     // - Has media with captions, OR
     // - Has back-and-forth messages, OR
     // - Has multiple messages (not just a single [Media])
-    return (
-      hasTextMessages ||
-      hasMediaWithCaptions ||
-      hasBackAndForth ||
-      (hasMultipleMessages && messages.length > 2)
-    );
+    return hasTextMessages || hasMediaWithCaptions || hasBackAndForth || (hasMultipleMessages && messages.length > 2);
   }
 
   /**
@@ -3560,27 +2986,13 @@ export class ConnectionPool extends EventEmitter {
     const name = fullName.trim();
 
     // Common titles to skip
-    const titles = [
-      "Dr.",
-      "Dr",
-      "Mr.",
-      "Mr",
-      "Mrs.",
-      "Mrs",
-      "Ms.",
-      "Ms",
-      "Prof.",
-      "Prof",
-    ];
+    const titles = ["Dr.", "Dr", "Mr.", "Mr", "Mrs.", "Mrs", "Ms.", "Ms", "Prof.", "Prof"];
 
     // Split the name into parts
     const parts = name.split(/\s+/).filter((part) => part.length > 0);
 
     // Remove title if present
-    if (
-      parts.length > 0 &&
-      titles.some((title) => parts[0].toLowerCase() === title.toLowerCase())
-    ) {
+    if (parts.length > 0 && titles.some((title) => parts[0].toLowerCase() === title.toLowerCase())) {
       parts.shift();
     }
 
@@ -3598,18 +3010,7 @@ export class ConnectionPool extends EventEmitter {
       const lowerParts = parts.map((p) => p.toLowerCase());
 
       // Common particles that indicate start of last name
-      const particles = [
-        "van",
-        "von",
-        "de",
-        "del",
-        "der",
-        "den",
-        "la",
-        "le",
-        "bin",
-        "ibn",
-      ];
+      const particles = ["van", "von", "de", "del", "der", "den", "la", "le", "bin", "ibn"];
 
       // Find if any particle exists
       let lastNameStartIndex = -1;
@@ -3640,33 +3041,20 @@ export class ConnectionPool extends EventEmitter {
    * Process synced contacts from history
    * Optimized to batch load contacts and batch write updates
    */
-  private async processSyncedContacts(
-    userId: string,
-    phoneNumber: string,
-    contacts: any[],
-  ): Promise<number> {
+  private async processSyncedContacts(userId: string, phoneNumber: string, contacts: any[]): Promise<number> {
     try {
       let syncedCount = 0;
       const userRef = this.firestore.collection("users").doc(userId);
       const currentTimestamp = admin.firestore.Timestamp.now();
       const startTime = Date.now();
 
-      this.logger.info(
-        { userId, phoneNumber, contactCount: contacts.length },
-        "Starting optimized contact sync",
-      );
+      this.logger.info({ userId, phoneNumber, contactCount: contacts.length }, "Starting optimized contact sync");
 
       // OPTIMIZATION: Load ALL existing contacts for user in ONE query
-      const existingContactsSnapshot = await this.firestore
-        .collection("contacts")
-        .where("user", "==", userRef)
-        .get();
+      const existingContactsSnapshot = await this.firestore.collection("contacts").where("user", "==", userRef).get();
 
       // Create Map for O(1) lookups by phone number
-      const existingContactsMap = new Map<
-        string,
-        FirebaseFirestore.QueryDocumentSnapshot
-      >();
+      const existingContactsMap = new Map<string, FirebaseFirestore.QueryDocumentSnapshot>();
       existingContactsSnapshot.docs.forEach((doc) => {
         const phoneNum = doc.data().phone_number;
         if (phoneNum) {
@@ -3681,7 +3069,7 @@ export class ConnectionPool extends EventEmitter {
           existingCount: existingContactsMap.size,
           loadTimeMs: Date.now() - startTime,
         },
-        "Loaded existing contacts for batch processing",
+        "Loaded existing contacts for batch processing"
       );
 
       // Collect batch updates
@@ -3699,10 +3087,7 @@ export class ConnectionPool extends EventEmitter {
         // Use consistent phone number normalization
         const formattedPhone = formatPhoneNumberSafe(contactNumber);
         if (!formattedPhone) {
-          this.logger.debug(
-            { userId, phoneNumber, rawContactNumber: contactNumber },
-            "Skipping contact - invalid phone number format",
-          );
+          this.logger.debug({ userId, phoneNumber, rawContactNumber: contactNumber }, "Skipping contact - invalid phone number format");
           continue;
         }
 
@@ -3722,23 +3107,14 @@ export class ConnectionPool extends EventEmitter {
           const existingData = existingDoc.data();
 
           // Extract first and last name from WhatsApp name if current name is Unknown
-          const { firstName, lastName } = this.extractNames(
-            contact.name || contact.notify,
-          );
+          const { firstName, lastName } = this.extractNames(contact.name || contact.notify);
 
           batchUpdates.push({
             docRef: existingDoc.ref,
             data: {
               whatsapp_name: contact.name || contact.notify || null,
-              first_name:
-                existingData.first_name === "Unknown" ||
-                !existingData.first_name
-                  ? firstName || "Unknown"
-                  : existingData.first_name,
-              last_name:
-                existingData.last_name === "Unknown" || !existingData.last_name
-                  ? lastName || "Unknown"
-                  : existingData.last_name,
+              first_name: existingData.first_name === "Unknown" || !existingData.first_name ? firstName || "Unknown" : existingData.first_name,
+              last_name: existingData.last_name === "Unknown" || !existingData.last_name ? lastName || "Unknown" : existingData.last_name,
               last_modified_at: currentTimestamp,
               last_updated_by: "whatsapp_web_sync",
               channel: "whatsapp_web",
@@ -3748,18 +3124,12 @@ export class ConnectionPool extends EventEmitter {
         } else {
           // Skip creating new contacts without chat history
           // Contacts will be created when actual messages are received
-          this.logger.debug(
-            { userId, phoneNumber, contactNumber: formattedPhone },
-            "Skipping contact creation - no chat history",
-          );
+          this.logger.debug({ userId, phoneNumber, contactNumber: formattedPhone }, "Skipping contact creation - no chat history");
         }
 
         // Log progress every 100 contacts (processed, not yet written)
         if (syncedCount % 100 === 0 && syncedCount > 0) {
-          this.logger.info(
-            { userId, phoneNumber, syncedCount },
-            "Contacts sync progress",
-          );
+          this.logger.info({ userId, phoneNumber, syncedCount }, "Contacts sync progress");
 
           // Update sync progress in database every 100 contacts for UI polling
           if (this.connectionStateManager) {
@@ -3768,7 +3138,7 @@ export class ConnectionPool extends EventEmitter {
               phoneNumber,
               syncedCount,
               0, // messages count not available in this context
-              false,
+              false
             );
           }
         }
@@ -3776,10 +3146,7 @@ export class ConnectionPool extends EventEmitter {
 
       // Execute batch writes - Firestore supports max 500 operations per batch
       if (batchUpdates.length > 0) {
-        this.logger.info(
-          { userId, phoneNumber, updateCount: batchUpdates.length },
-          "Executing batch contact updates",
-        );
+        this.logger.info({ userId, phoneNumber, updateCount: batchUpdates.length }, "Executing batch contact updates");
 
         const BATCH_SIZE = 500;
         for (let i = 0; i < batchUpdates.length; i += BATCH_SIZE) {
@@ -3799,7 +3166,7 @@ export class ConnectionPool extends EventEmitter {
               batchNumber: Math.floor(i / BATCH_SIZE) + 1,
               updatesInBatch: batchSlice.length,
             },
-            "Batch committed successfully",
+            "Batch committed successfully"
           );
         }
 
@@ -3812,13 +3179,10 @@ export class ConnectionPool extends EventEmitter {
             totalTimeMs,
             averageTimePerContact: Math.round(totalTimeMs / contacts.length),
           },
-          "Contacts sync completed with batch optimization",
+          "Contacts sync completed with batch optimization"
         );
       } else {
-        this.logger.info(
-          { userId, phoneNumber, totalSynced: syncedCount },
-          "Contacts sync completed - no updates needed",
-        );
+        this.logger.info({ userId, phoneNumber, totalSynced: syncedCount }, "Contacts sync completed - no updates needed");
       }
 
       // Update sync progress in database
@@ -3828,7 +3192,7 @@ export class ConnectionPool extends EventEmitter {
           phoneNumber,
           syncedCount,
           0, // messages count not available here
-          false,
+          false
         );
       }
 
@@ -3841,10 +3205,7 @@ export class ConnectionPool extends EventEmitter {
 
       return syncedCount;
     } catch (error) {
-      this.logger.error(
-        { userId, phoneNumber, error },
-        "Failed to process synced contacts",
-      );
+      this.logger.error({ userId, phoneNumber, error }, "Failed to process synced contacts");
       return 0;
     }
   }
@@ -3852,12 +3213,7 @@ export class ConnectionPool extends EventEmitter {
   /**
    * Process synced chats from history
    */
-  private async processSyncedChats(
-    userId: string,
-    phoneNumber: string,
-    chats: any[],
-    socket?: any,
-  ) {
+  private async processSyncedChats(userId: string, phoneNumber: string, chats: any[], socket?: any) {
     try {
       let processedCount = 0;
       const userRef = this.firestore.collection("users").doc(userId);
@@ -3881,10 +3237,7 @@ export class ConnectionPool extends EventEmitter {
         // Use consistent phone number normalization
         const formattedPhone = formatPhoneNumberSafe(contactNumber);
         if (!formattedPhone) {
-          this.logger.debug(
-            { userId, phoneNumber, rawContactNumber: contactNumber },
-            "Skipping contact - invalid phone number format",
-          );
+          this.logger.debug({ userId, phoneNumber, rawContactNumber: contactNumber }, "Skipping contact - invalid phone number format");
           continue;
         }
 
@@ -3907,11 +3260,7 @@ export class ConnectionPool extends EventEmitter {
           const { firstName, lastName } = this.extractNames(chat.name || null);
 
           const updateData: any = {
-            last_activity_at: chat.conversationTimestamp
-              ? admin.firestore.Timestamp.fromMillis(
-                  chat.conversationTimestamp * 1000,
-                )
-              : currentTimestamp,
+            last_activity_at: chat.conversationTimestamp ? admin.firestore.Timestamp.fromMillis(chat.conversationTimestamp * 1000) : currentTimestamp,
             last_modified_at: currentTimestamp,
             has_had_activity: true,
             channel: "whatsapp_web",
@@ -3920,20 +3269,10 @@ export class ConnectionPool extends EventEmitter {
           };
 
           // Update names if they are currently Unknown, empty, or null
-          if (
-            (!existingData.first_name ||
-              existingData.first_name === "Unknown" ||
-              existingData.first_name === "") &&
-            firstName !== "Unknown"
-          ) {
+          if ((!existingData.first_name || existingData.first_name === "Unknown" || existingData.first_name === "") && firstName !== "Unknown") {
             updateData.first_name = firstName;
           }
-          if (
-            (!existingData.last_name ||
-              existingData.last_name === "Unknown" ||
-              existingData.last_name === "") &&
-            lastName !== "Unknown"
-          ) {
+          if ((!existingData.last_name || existingData.last_name === "Unknown" || existingData.last_name === "") && lastName !== "Unknown") {
             updateData.last_name = lastName;
           }
 
@@ -3960,7 +3299,7 @@ export class ConnectionPool extends EventEmitter {
                         contactPhone: formattedPhone,
                         listId: listRef.id,
                       },
-                      "Removing reference to hard-deleted list from contact in chat sync",
+                      "Removing reference to hard-deleted list from contact in chat sync"
                     );
                   } else if (listDoc.data()?.status !== "live") {
                     // List is soft-deleted or archived
@@ -3971,7 +3310,7 @@ export class ConnectionPool extends EventEmitter {
                         listId: listRef.id,
                         status: listDoc.data()?.status,
                       },
-                      "Removing reference to soft-deleted/archived list from contact in chat sync",
+                      "Removing reference to soft-deleted/archived list from contact in chat sync"
                     );
                   } else {
                     // List exists and is live
@@ -3986,16 +3325,14 @@ export class ConnectionPool extends EventEmitter {
                       listId: listRef.id,
                       error,
                     },
-                    "Removing inaccessible list reference from contact in chat sync",
+                    "Removing inaccessible list reference from contact in chat sync"
                   );
                 }
               }
             }
 
             // Check if import list is already in valid lists
-            const hasImportList = validLists.some(
-              (listRef: any) => listRef.id === importListRef.id,
-            );
+            const hasImportList = validLists.some((listRef: any) => listRef.id === importListRef.id);
 
             if (!hasImportList) {
               validLists.push(importListRef);
@@ -4005,7 +3342,7 @@ export class ConnectionPool extends EventEmitter {
                   phoneNumber: formattedPhone,
                   listId: importListRef.id,
                 },
-                "Adding existing contact to import list from chat sync",
+                "Adding existing contact to import list from chat sync"
               );
             }
 
@@ -4015,8 +3352,7 @@ export class ConnectionPool extends EventEmitter {
 
           // Preserve important fields
           updateData.tags = existingData.tags || updateData.tags || [];
-          updateData.campaigns =
-            existingData.campaigns || updateData.campaigns || [];
+          updateData.campaigns = existingData.campaigns || updateData.campaigns || [];
 
           await contactRef.update(updateData);
 
@@ -4026,7 +3362,7 @@ export class ConnectionPool extends EventEmitter {
               phoneNumber: formattedPhone,
               fieldsUpdated: Object.keys(updateData),
             },
-            "Updated existing contact from chat sync with merge logic",
+            "Updated existing contact from chat sync with merge logic"
           );
         } else {
           // Don't create new contact here - will be created when messages arrive
@@ -4038,7 +3374,7 @@ export class ConnectionPool extends EventEmitter {
               chatName: chat.name,
               conversationTimestamp: chat.conversationTimestamp,
             },
-            "Skipping contact creation in chat sync - will create from messages",
+            "Skipping contact creation in chat sync - will create from messages"
           );
 
           // Store chat metadata temporarily for use in message processing
@@ -4070,7 +3406,7 @@ export class ConnectionPool extends EventEmitter {
                 chatJid,
                 contactNumber: formattedPhone,
               },
-              "Attempting to fetch message history for chat",
+              "Attempting to fetch message history for chat"
             );
 
             // Try to fetch messages for this specific chat
@@ -4078,7 +3414,7 @@ export class ConnectionPool extends EventEmitter {
             const historyId = await socket.fetchMessageHistory(
               50, // Number of messages to fetch
               lastMessageKey, // Message key with chat JID
-              chat.conversationTimestamp * 1000, // Convert to milliseconds if needed
+              chat.conversationTimestamp * 1000 // Convert to milliseconds if needed
             );
 
             this.logger.info(
@@ -4088,7 +3424,7 @@ export class ConnectionPool extends EventEmitter {
                 chatJid,
                 historyId,
               },
-              "Message history fetch request sent for chat",
+              "Message history fetch request sent for chat"
             );
 
             // Emit progress event
@@ -4107,32 +3443,22 @@ export class ConnectionPool extends EventEmitter {
                 chatJid,
                 error: error instanceof Error ? error.message : error,
               },
-              "Could not fetch history for chat - this is expected for some chats",
+              "Could not fetch history for chat - this is expected for some chats"
             );
           }
         }
       }
 
-      this.logger.info(
-        { userId, phoneNumber, totalProcessed: processedCount },
-        "Chats sync completed",
-      );
+      this.logger.info({ userId, phoneNumber, totalProcessed: processedCount }, "Chats sync completed");
     } catch (error) {
-      this.logger.error(
-        { userId, phoneNumber, error },
-        "Failed to process synced chats",
-      );
+      this.logger.error({ userId, phoneNumber, error }, "Failed to process synced chats");
     }
   }
 
   /**
    * Process synced messages from history
    */
-  private async processSyncedMessages(
-    userId: string,
-    phoneNumber: string,
-    messages: any[],
-  ): Promise<number> {
+  private async processSyncedMessages(userId: string, phoneNumber: string, messages: any[]): Promise<number> {
     try {
       this.logger.info(
         {
@@ -4148,7 +3474,7 @@ export class ConnectionPool extends EventEmitter {
               }
             : null,
         },
-        "Starting to process synced messages",
+        "Starting to process synced messages"
       );
 
       let syncedCount = 0;
@@ -4162,10 +3488,7 @@ export class ConnectionPool extends EventEmitter {
       // Initialize deduplication cache for this session if not exists
       if (!this.processedContactsCache.has(sessionKey)) {
         this.processedContactsCache.set(sessionKey, new Set<string>());
-        this.logger.info(
-          { userId, phoneNumber },
-          "Initialized deduplication cache for import session",
-        );
+        this.logger.info({ userId, phoneNumber }, "Initialized deduplication cache for import session");
       }
       const processedContacts = this.processedContactsCache.get(sessionKey)!;
 
@@ -4185,10 +3508,7 @@ export class ConnectionPool extends EventEmitter {
         // Use consistent phone number normalization
         const formattedContactPhone = formatPhoneNumberSafe(contactNumber);
         if (!formattedContactPhone) {
-          this.logger.debug(
-            { userId, phoneNumber, rawContactNumber: contactNumber },
-            "Skipping message - invalid contact phone number format",
-          );
+          this.logger.debug({ userId, phoneNumber, rawContactNumber: contactNumber }, "Skipping message - invalid contact phone number format");
           continue;
         }
 
@@ -4200,10 +3520,7 @@ export class ConnectionPool extends EventEmitter {
       }
 
       // Process each contact's messages
-      for (const [
-        formattedContactPhone,
-        contactMessages,
-      ] of messagesByContact) {
+      for (const [formattedContactPhone, contactMessages] of messagesByContact) {
         // Check if this contact was already processed in this session
         if (processedContacts.has(formattedContactPhone)) {
           this.logger.debug(
@@ -4212,7 +3529,7 @@ export class ConnectionPool extends EventEmitter {
               phoneNumber,
               contactPhone: formattedContactPhone,
             },
-            "Skipping contact - already processed in this import session",
+            "Skipping contact - already processed in this import session"
           );
           continue;
         }
@@ -4226,13 +3543,12 @@ export class ConnectionPool extends EventEmitter {
               messageCount: contactMessages.length,
               firstMessage: this.extractMessageText(contactMessages[0]),
             },
-            "Skipping contact - not a real conversation",
+            "Skipping contact - not a real conversation"
           );
           continue;
         }
 
-        const formattedUserPhone =
-          formatPhoneNumberSafe(phoneNumber) || phoneNumber;
+        const formattedUserPhone = formatPhoneNumberSafe(phoneNumber) || phoneNumber;
 
         // Find or create contact
         let contactRef;
@@ -4261,28 +3577,15 @@ export class ConnectionPool extends EventEmitter {
           };
 
           // Update names if they're null/empty/Unknown
-          if (
-            !existingData.first_name ||
-            existingData.first_name === "" ||
-            existingData.first_name === "Unknown"
-          ) {
+          if (!existingData.first_name || existingData.first_name === "" || existingData.first_name === "Unknown") {
             const contactKey = `${userId}-${formattedContactPhone}`;
             const syncedInfo = this.syncedContactInfo.get(contactKey);
             const pushName = contactMessages.find((m) => m.pushName)?.pushName;
-            const nameToExtract =
-              pushName ||
-              syncedInfo?.notify ||
-              syncedInfo?.name ||
-              syncedInfo?.verifiedName ||
-              null;
+            const nameToExtract = pushName || syncedInfo?.notify || syncedInfo?.name || syncedInfo?.verifiedName || null;
             const { firstName, lastName } = this.extractNames(nameToExtract);
             updateData.first_name = firstName || "Unknown";
             updateData.last_name = lastName || "Unknown";
-            updateData.whatsapp_name =
-              syncedInfo?.notify ||
-              pushName ||
-              syncedInfo?.verifiedName ||
-              null;
+            updateData.whatsapp_name = syncedInfo?.notify || pushName || syncedInfo?.verifiedName || null;
           }
 
           // Merge lists - add to import list if not already present
@@ -4304,7 +3607,7 @@ export class ConnectionPool extends EventEmitter {
                         contactPhone: formattedContactPhone,
                         listId: listRef.id,
                       },
-                      "Removing reference to hard-deleted list from contact",
+                      "Removing reference to hard-deleted list from contact"
                     );
                   } else if (listDoc.data()?.status !== "live") {
                     // List is soft-deleted or archived
@@ -4315,7 +3618,7 @@ export class ConnectionPool extends EventEmitter {
                         listId: listRef.id,
                         status: listDoc.data()?.status,
                       },
-                      "Removing reference to soft-deleted/archived list from contact",
+                      "Removing reference to soft-deleted/archived list from contact"
                     );
                   } else {
                     // List exists and is live
@@ -4330,16 +3633,14 @@ export class ConnectionPool extends EventEmitter {
                       listId: listRef.id,
                       error,
                     },
-                    "Removing inaccessible list reference from contact",
+                    "Removing inaccessible list reference from contact"
                   );
                 }
               }
             }
 
             // Check if import list is already in valid lists
-            const hasImportList = validLists.some(
-              (listRef: any) => listRef.id === importListRef.id,
-            );
+            const hasImportList = validLists.some((listRef: any) => listRef.id === importListRef.id);
 
             if (!hasImportList) {
               validLists.push(importListRef);
@@ -4349,7 +3650,7 @@ export class ConnectionPool extends EventEmitter {
                   phoneNumber: formattedContactPhone,
                   listId: importListRef.id,
                 },
-                "Adding existing contact to import list",
+                "Adding existing contact to import list"
               );
             }
 
@@ -4359,8 +3660,7 @@ export class ConnectionPool extends EventEmitter {
 
           // Preserve important fields that shouldn't be overwritten
           updateData.tags = existingData.tags || updateData.tags || [];
-          updateData.campaigns =
-            existingData.campaigns || updateData.campaigns || [];
+          updateData.campaigns = existingData.campaigns || updateData.campaigns || [];
 
           // Update existing contact with merged data
           await contactRef.update(updateData);
@@ -4371,7 +3671,7 @@ export class ConnectionPool extends EventEmitter {
               phoneNumber: formattedContactPhone,
               fieldsUpdated: Object.keys(updateData),
             },
-            "Merged existing contact with new WhatsApp sync data",
+            "Merged existing contact with new WhatsApp sync data"
           );
         } else {
           // Create contact for real conversation
@@ -4389,21 +3689,10 @@ export class ConnectionPool extends EventEmitter {
           const pushName = contactMessages.find((m) => m.pushName)?.pushName;
 
           // Use the first available name source in priority order
-          const nameToExtract =
-            pushName ||
-            syncedInfo?.notify ||
-            syncedInfo?.name ||
-            syncedInfo?.verifiedName ||
-            pendingMetadata?.name ||
-            null;
+          const nameToExtract = pushName || syncedInfo?.notify || syncedInfo?.name || syncedInfo?.verifiedName || pendingMetadata?.name || null;
 
           // Store the actual WhatsApp display name
-          const whatsappDisplayName =
-            syncedInfo?.notify ||
-            pushName ||
-            syncedInfo?.verifiedName ||
-            syncedInfo?.name ||
-            null;
+          const whatsappDisplayName = syncedInfo?.notify || pushName || syncedInfo?.verifiedName || syncedInfo?.name || null;
 
           const { firstName, lastName } = this.extractNames(nameToExtract);
 
@@ -4433,10 +3722,7 @@ export class ConnectionPool extends EventEmitter {
             process_incoming_message_cloud_task_name: null,
             credits_used: 0,
             last_updated_by: "whatsapp_web_sync",
-            lists:
-              pendingMetadata?.importListRef || importListRef
-                ? [pendingMetadata?.importListRef || importListRef]
-                : [],
+            lists: pendingMetadata?.importListRef || importListRef ? [pendingMetadata?.importListRef || importListRef] : [],
             campaigns: [],
             tags: [],
             // Import tracking fields
@@ -4445,9 +3731,7 @@ export class ConnectionPool extends EventEmitter {
             imported_from_messages: true,
             whatsapp_name: whatsappDisplayName,
           };
-          const newContactRef = await this.firestore
-            .collection("contacts")
-            .add(newContactData);
+          const newContactRef = await this.firestore.collection("contacts").add(newContactData);
           contactRef = newContactRef;
 
           // Clean up pending metadata
@@ -4464,14 +3748,9 @@ export class ConnectionPool extends EventEmitter {
 
         // Process all messages for this contact with bulk deduplication
         // Get all existing message IDs for this contact in ONE query
-        const existingMessagesSnapshot = await contactRef
-          .collection("messages")
-          .select("message_sid")
-          .get();
+        const existingMessagesSnapshot = await contactRef.collection("messages").select("message_sid").get();
 
-        const existingMessageIds = new Set(
-          existingMessagesSnapshot.docs.map((doc) => doc.data().message_sid),
-        );
+        const existingMessageIds = new Set(existingMessagesSnapshot.docs.map((doc) => doc.data().message_sid));
 
         // Filter out duplicates
         const newMessages = [];
@@ -4495,7 +3774,7 @@ export class ConnectionPool extends EventEmitter {
               newCount: newMessages.length,
               totalAttempted: contactMessages.length,
             },
-            "Skipped duplicate messages during bulk import",
+            "Skipped duplicate messages during bulk import"
           );
         }
 
@@ -4509,29 +3788,19 @@ export class ConnectionPool extends EventEmitter {
           const messageText = this.extractMessageText(msg);
 
           // Handle media if present
-          const mediaInfo = await this.handleMediaMessage(
-            msg,
-            userId,
-            phoneNumber,
-          );
+          const mediaInfo = await this.handleMediaMessage(msg, userId, phoneNumber);
 
           // Create message as subcollection of contact
           const messageData = {
             // Core message fields
             message_sid: msg.key.id,
-            from_phone_number: msg.key.fromMe
-              ? formattedUserPhone
-              : formattedContactPhone,
-            to_phone_number: msg.key.fromMe
-              ? formattedContactPhone
-              : formattedUserPhone,
+            from_phone_number: msg.key.fromMe ? formattedUserPhone : formattedContactPhone,
+            to_phone_number: msg.key.fromMe ? formattedContactPhone : formattedUserPhone,
             body: messageText,
             direction: msg.key.fromMe ? "outbound" : "inbound",
             status: msg.key.fromMe ? "sent" : "received",
             channel: "whatsapp_web",
-            timestamp: admin.firestore.Timestamp.fromMillis(
-              msg.messageTimestamp * 1000,
-            ),
+            timestamp: admin.firestore.Timestamp.fromMillis(msg.messageTimestamp * 1000),
             created_at: currentTimestamp,
             synced_from_history: true,
 
@@ -4577,10 +3846,7 @@ export class ConnectionPool extends EventEmitter {
           batchCount++;
 
           // Track the last message for this contact
-          if (
-            !lastMessageData ||
-            msg.messageTimestamp > lastMessageData.messageTimestamp
-          ) {
+          if (!lastMessageData || msg.messageTimestamp > lastMessageData.messageTimestamp) {
             lastMessageData = msg;
             lastMessageRef = messageDocRef;
           }
@@ -4614,24 +3880,15 @@ export class ConnectionPool extends EventEmitter {
               body: lastMessageText,
               status: lastMessageData.key.fromMe ? "sent" : "received",
               messageRef: lastMessageRef,
-              timestamp: admin.firestore.Timestamp.fromMillis(
-                lastMessageData.messageTimestamp * 1000,
-              ),
+              timestamp: admin.firestore.Timestamp.fromMillis(lastMessageData.messageTimestamp * 1000),
             },
-            last_message_timestamp: admin.firestore.Timestamp.fromMillis(
-              lastMessageData.messageTimestamp * 1000,
-            ),
-            last_activity_at: admin.firestore.Timestamp.fromMillis(
-              lastMessageData.messageTimestamp * 1000,
-            ),
+            last_message_timestamp: admin.firestore.Timestamp.fromMillis(lastMessageData.messageTimestamp * 1000),
+            last_activity_at: admin.firestore.Timestamp.fromMillis(lastMessageData.messageTimestamp * 1000),
             has_had_activity: true,
           };
 
           if (!lastMessageData.key.fromMe) {
-            lastMessageUpdate.last_incoming_message_at =
-              admin.firestore.Timestamp.fromMillis(
-                lastMessageData.messageTimestamp * 1000,
-              );
+            lastMessageUpdate.last_incoming_message_at = admin.firestore.Timestamp.fromMillis(lastMessageData.messageTimestamp * 1000);
           }
 
           await contactRef.update(lastMessageUpdate);
@@ -4641,12 +3898,8 @@ export class ConnectionPool extends EventEmitter {
         const connection = this.connections.get(`${userId}-${phoneNumber}`);
         if (connection?.socket && contactRef) {
           try {
-            const contactJid =
-              formattedContactPhone.replace("+", "") + "@s.whatsapp.net";
-            const profilePicUrl = await connection.socket.profilePictureUrl(
-              contactJid,
-              "image",
-            );
+            const contactJid = formattedContactPhone.replace("+", "") + "@s.whatsapp.net";
+            const profilePicUrl = await connection.socket.profilePictureUrl(contactJid, "image");
 
             if (profilePicUrl) {
               await contactRef.update({
@@ -4654,17 +3907,11 @@ export class ConnectionPool extends EventEmitter {
                 avatar_fetched_at: currentTimestamp,
               });
 
-              this.logger.debug(
-                { userId, contactPhone: formattedContactPhone },
-                "Profile picture fetched and saved",
-              );
+              this.logger.debug({ userId, contactPhone: formattedContactPhone }, "Profile picture fetched and saved");
             }
           } catch (error) {
             // Profile picture might be private or unavailable
-            this.logger.debug(
-              { userId, contactPhone: formattedContactPhone, error },
-              "Could not fetch profile picture",
-            );
+            this.logger.debug({ userId, contactPhone: formattedContactPhone, error }, "Could not fetch profile picture");
           }
         }
 
@@ -4677,14 +3924,11 @@ export class ConnectionPool extends EventEmitter {
             contactPhone: formattedContactPhone,
             cacheSize: processedContacts.size,
           },
-          "Added contact to deduplication cache",
+          "Added contact to deduplication cache"
         );
       }
 
-      this.logger.info(
-        { userId, phoneNumber, totalSynced: syncedCount },
-        "Messages sync completed",
-      );
+      this.logger.info({ userId, phoneNumber, totalSynced: syncedCount }, "Messages sync completed");
 
       // Emit event for UI updates
       this.emit("messages-synced", {
@@ -4695,10 +3939,7 @@ export class ConnectionPool extends EventEmitter {
 
       return syncedCount;
     } catch (error) {
-      this.logger.error(
-        { userId, phoneNumber, error },
-        "Failed to process synced messages",
-      );
+      this.logger.error({ userId, phoneNumber, error }, "Failed to process synced messages");
       return 0;
     }
   }
@@ -4706,11 +3947,7 @@ export class ConnectionPool extends EventEmitter {
   /**
    * Reconnect a connection
    */
-  private async reconnect(
-    userId: string,
-    phoneNumber: string,
-    attempt: number = 1,
-  ) {
+  private async reconnect(userId: string, phoneNumber: string, attempt: number = 1) {
     const connectionKey = this.getConnectionKey(userId, phoneNumber);
     const maxAttempts = 5;
     const baseDelay = 5000;
@@ -4719,7 +3956,7 @@ export class ConnectionPool extends EventEmitter {
     if (this.reconnectionInProgress.get(connectionKey)) {
       this.logger.warn(
         { userId, phoneNumber, attempt },
-        "Reconnection already in progress for this connection, skipping duplicate attempt to prevent conflict",
+        "Reconnection already in progress for this connection, skipping duplicate attempt to prevent conflict"
       );
       return;
     }
@@ -4731,8 +3968,7 @@ export class ConnectionPool extends EventEmitter {
       // Get existing connection's state BEFORE deleting
       const existingConnection = this.connections.get(connectionKey);
       const storedProxyCountry = existingConnection?.proxyCountry;
-      const handshakeWasCompleted =
-        existingConnection?.handshakeCompleted || false;
+      const handshakeWasCompleted = existingConnection?.handshakeCompleted || false;
 
       // Properly cleanup old connection to prevent ghost handlers
       if (existingConnection) {
@@ -4742,7 +3978,7 @@ export class ConnectionPool extends EventEmitter {
             phoneNumber,
             connectionId: existingConnection.connectionId,
           },
-          "Cleaning up old connection before reconnection",
+          "Cleaning up old connection before reconnection"
         );
 
         // Clear QR timeout to prevent it from killing new connection
@@ -4755,7 +3991,7 @@ export class ConnectionPool extends EventEmitter {
               phoneNumber,
               connectionId: existingConnection.connectionId,
             },
-            "Cleared QR timeout from old connection",
+            "Cleared QR timeout from old connection"
           );
         }
 
@@ -4770,13 +4006,10 @@ export class ConnectionPool extends EventEmitter {
               phoneNumber,
               connectionId: existingConnection.connectionId,
             },
-            "Removed all event listeners from old socket",
+            "Removed all event listeners from old socket"
           );
         } catch (error) {
-          this.logger.warn(
-            { userId, phoneNumber, error },
-            "Failed to remove event listeners from old socket",
-          );
+          this.logger.warn({ userId, phoneNumber, error }, "Failed to remove event listeners from old socket");
         }
 
         // Unregister from WebSocket manager
@@ -4788,13 +4021,10 @@ export class ConnectionPool extends EventEmitter {
               phoneNumber,
               connectionId: existingConnection.connectionId,
             },
-            "Unregistered old connection from WebSocket manager",
+            "Unregistered old connection from WebSocket manager"
           );
         } catch (error) {
-          this.logger.warn(
-            { userId, phoneNumber, error },
-            "Failed to unregister from WebSocket manager",
-          );
+          this.logger.warn({ userId, phoneNumber, error }, "Failed to unregister from WebSocket manager");
         }
 
         // Close old socket
@@ -4806,13 +4036,10 @@ export class ConnectionPool extends EventEmitter {
               phoneNumber,
               connectionId: existingConnection.connectionId,
             },
-            "Closed old socket",
+            "Closed old socket"
           );
         } catch (error) {
-          this.logger.warn(
-            { userId, phoneNumber, error },
-            "Failed to close old socket",
-          );
+          this.logger.warn({ userId, phoneNumber, error }, "Failed to close old socket");
         }
       }
 
@@ -4821,10 +4048,7 @@ export class ConnectionPool extends EventEmitter {
 
       // Skip attempt check for immediate reconnect (attempt = 0)
       if (attempt > 0 && attempt > maxAttempts) {
-        this.logger.error(
-          { userId, phoneNumber },
-          "Max reconnection attempts reached, giving up",
-        );
+        this.logger.error({ userId, phoneNumber }, "Max reconnection attempts reached, giving up");
         await this.updateConnectionStatus(userId, phoneNumber, "failed");
         return;
       }
@@ -4832,16 +4056,10 @@ export class ConnectionPool extends EventEmitter {
       // No delay for immediate reconnect (attempt = 0), otherwise exponential backoff
       if (attempt > 0) {
         const delay = baseDelay * Math.pow(2, attempt - 1);
-        this.logger.info(
-          { userId, phoneNumber, attempt, delay },
-          "Waiting before reconnection attempt",
-        );
+        this.logger.info({ userId, phoneNumber, attempt, delay }, "Waiting before reconnection attempt");
         await new Promise((resolve) => setTimeout(resolve, delay));
       } else {
-        this.logger.info(
-          { userId, phoneNumber },
-          "Immediate reconnection after pairing",
-        );
+        this.logger.info({ userId, phoneNumber }, "Immediate reconnection after pairing");
       }
 
       // Defensive checks before reconnection attempt (moved out of inner try block)
@@ -4849,10 +4067,7 @@ export class ConnectionPool extends EventEmitter {
 
       if (this.sessionManager) {
         try {
-          hasValidSession = await this.sessionManager.sessionExists(
-            userId,
-            phoneNumber,
-          );
+          hasValidSession = await this.sessionManager.sessionExists(userId, phoneNumber);
 
           this.logger.info(
             {
@@ -4862,20 +4077,14 @@ export class ConnectionPool extends EventEmitter {
               hasProxyCountry: !!storedProxyCountry,
               attempt,
             },
-            "Pre-reconnection validation check",
+            "Pre-reconnection validation check"
           );
 
           if (!hasValidSession) {
-            this.logger.warn(
-              { userId, phoneNumber },
-              "No valid session found before reconnection - reconnection may require new QR scan",
-            );
+            this.logger.warn({ userId, phoneNumber }, "No valid session found before reconnection - reconnection may require new QR scan");
           }
         } catch (sessionError) {
-          this.logger.warn(
-            { userId, phoneNumber, error: sessionError },
-            "Failed to validate session before reconnection",
-          );
+          this.logger.warn({ userId, phoneNumber, error: sessionError }, "Failed to validate session before reconnection");
         }
       }
 
@@ -4888,7 +4097,7 @@ export class ConnectionPool extends EventEmitter {
         phoneNumber,
         storedProxyCountry,
         undefined, // countryCode
-        true, // isRecovery - treat manual reconnects as session recovery
+        true // isRecovery - treat manual reconnects as session recovery
       );
       const reconnectDuration = Date.now() - reconnectStartTime;
 
@@ -4901,7 +4110,7 @@ export class ConnectionPool extends EventEmitter {
           attempt,
           handshakeWasCompleted, // Log for debugging
         },
-        "Reconnection attempt completed",
+        "Reconnection attempt completed"
       );
 
       // Note: handshakeCompleted is now set correctly during addConnection (isRecovery=true)
@@ -4913,10 +4122,7 @@ export class ConnectionPool extends EventEmitter {
 
         // If addConnection failed, try again (only increment if not immediate reconnect)
         const nextAttempt = attempt === 0 ? 1 : attempt + 1;
-        this.logger.warn(
-          { userId, phoneNumber, attempt, nextAttempt },
-          "Reconnection failed, scheduling retry",
-        );
+        this.logger.warn({ userId, phoneNumber, attempt, nextAttempt }, "Reconnection failed, scheduling retry");
         await this.reconnect(userId, phoneNumber, nextAttempt);
       }
     } catch (error) {
@@ -4927,12 +4133,9 @@ export class ConnectionPool extends EventEmitter {
           attempt,
           error,
           errorMessage: error instanceof Error ? error.message : String(error),
-          errorStack:
-            error instanceof Error
-              ? error.stack?.split("\n").slice(0, 5).join(" | ")
-              : undefined,
+          errorStack: error instanceof Error ? error.stack?.split("\n").slice(0, 5).join(" | ") : undefined,
         },
-        "Reconnection attempt failed with exception",
+        "Reconnection attempt failed with exception"
       );
 
       // Clear mutex before retry to allow new reconnection attempt
@@ -4954,7 +4157,7 @@ export class ConnectionPool extends EventEmitter {
   async waitForConnectionState(
     userId: string,
     phoneNumber: string,
-    timeout: number = 30000, // 30 seconds default
+    timeout: number = 30000 // 30 seconds default
   ): Promise<{ success: boolean; state: string; error?: string }> {
     const connectionKey = this.getConnectionKey(userId, phoneNumber);
     const connection = this.connections.get(connectionKey);
@@ -4986,11 +4189,7 @@ export class ConnectionPool extends EventEmitter {
         });
       }, timeout);
 
-      const onStateChange = (update: {
-        userId: string;
-        phoneNumber: string;
-        status: string;
-      }) => {
+      const onStateChange = (update: { userId: string; phoneNumber: string; status: string }) => {
         if (update.userId === userId && update.phoneNumber === phoneNumber) {
           const currentConnection = this.connections.get(connectionKey);
 
@@ -5057,10 +4256,7 @@ export class ConnectionPool extends EventEmitter {
    * Handle proxy errors
    */
   private async handleProxyError(userId: string, phoneNumber: string) {
-    this.logger.info(
-      { userId, phoneNumber },
-      "Handling proxy error, rotating proxy",
-    );
+    this.logger.info({ userId, phoneNumber }, "Handling proxy error, rotating proxy");
 
     // Rotate proxy
     await this.proxyManager.rotateProxy(userId, phoneNumber);
@@ -5072,24 +4268,16 @@ export class ConnectionPool extends EventEmitter {
   /**
    * Update connection status in Firestore
    */
-  private async updateConnectionStatus(
-    userId: string,
-    phoneNumber: string,
-    status: string,
-  ) {
+  private async updateConnectionStatus(userId: string, phoneNumber: string, status: string) {
     try {
-      const sessionRef = this.firestore
-        .collection("users")
-        .doc(userId)
-        .collection("phone_numbers")
-        .doc(phoneNumber);
+      const sessionRef = this.firestore.collection("users").doc(userId).collection("phone_numbers").doc(phoneNumber);
 
       // Check if document exists before updating
       const doc = await sessionRef.get();
       if (!doc.exists) {
         this.logger.info(
           { userId, phoneNumber, status },
-          "Phone number document doesn't exist (was deleted), skipping connection status update to respect deletion",
+          "Phone number document doesn't exist (was deleted), skipping connection status update to respect deletion"
         );
         return;
       }
@@ -5100,10 +4288,7 @@ export class ConnectionPool extends EventEmitter {
         updated_at: new Date(),
       });
     } catch (error) {
-      this.logger.error(
-        { userId, phoneNumber, error },
-        "Failed to update connection status",
-      );
+      this.logger.error({ userId, phoneNumber, error }, "Failed to update connection status");
     }
   }
 
@@ -5113,15 +4298,7 @@ export class ConnectionPool extends EventEmitter {
   private async updatePhoneNumberStatus(
     userId: string,
     phoneNumber: string,
-    status:
-      | "connecting"
-      | "connected"
-      | "disconnected"
-      | "failed"
-      | "qr_pending"
-      | "importing"
-      | "importing_contacts"
-      | "importing_messages",
+    status: "connecting" | "connected" | "disconnected" | "failed" | "qr_pending" | "importing" | "importing_contacts" | "importing_messages"
   ) {
     try {
       const connectionKey = this.getConnectionKey(userId, phoneNumber);
@@ -5133,13 +4310,7 @@ export class ConnectionPool extends EventEmitter {
       // 2. Always allow disconnected/failed status (critical for cleanup)
       // 3. Always allow updates for recovery connections (already authenticated)
       // 4. After 30 seconds, allow updates regardless (handshake timeout)
-      if (
-        connection &&
-        !connection.handshakeCompleted &&
-        status !== "qr_pending" &&
-        status !== "disconnected" &&
-        status !== "failed"
-      ) {
+      if (connection && !connection.handshakeCompleted && status !== "qr_pending" && status !== "disconnected" && status !== "failed") {
         // For recovery connections, bypass handshake check entirely
         if (connection.isRecovery) {
           this.logger.info(
@@ -5149,7 +4320,7 @@ export class ConnectionPool extends EventEmitter {
               requestedStatus: status,
               isRecovery: connection.isRecovery,
             },
-            "Bypassing handshake check for recovery connection - allowing status update",
+            "Bypassing handshake check for recovery connection - allowing status update"
           );
           // Continue to update status
         } else {
@@ -5167,7 +4338,7 @@ export class ConnectionPool extends EventEmitter {
                 handshakeTimeout,
                 handshakeCompleted: connection.handshakeCompleted,
               },
-              "Handshake timeout exceeded - forcing status update despite incomplete handshake",
+              "Handshake timeout exceeded - forcing status update despite incomplete handshake"
             );
             // Force handshakeCompleted to prevent future blocks
             connection.handshakeCompleted = true;
@@ -5181,7 +4352,7 @@ export class ConnectionPool extends EventEmitter {
                 handshakeCompleted: connection.handshakeCompleted,
                 connectionAge,
               },
-              "Skipping status update during handshake phase - will write after disconnect code 515 or timeout",
+              "Skipping status update during handshake phase - will write after disconnect code 515 or timeout"
             );
             return; // Skip Firestore write during handshake
           }
@@ -5192,13 +4363,7 @@ export class ConnectionPool extends EventEmitter {
       // This prevents status regression during import phase
       // Allow "connecting" status so UI can show progress
       // Skip this check for connections with handshakeCompleted (manual reconnects with existing sessions)
-      if (
-        status === "connected" &&
-        connection &&
-        !connection.isRecovery &&
-        !connection.handshakeCompleted &&
-        !connection.syncCompleted
-      ) {
+      if (status === "connected" && connection && !connection.isRecovery && !connection.handshakeCompleted && !connection.syncCompleted) {
         this.logger.warn(
           {
             userId,
@@ -5208,25 +4373,18 @@ export class ConnectionPool extends EventEmitter {
             handshakeCompleted: connection.handshakeCompleted,
             syncCompleted: connection.syncCompleted,
           },
-          "DEFENSIVE BLOCK: Preventing premature 'connected' status during sync - keeping import status",
+          "DEFENSIVE BLOCK: Preventing premature 'connected' status during sync - keeping import status"
         );
         // Override to importing_messages until sync is complete
         status = "importing_messages";
       }
 
-      const phoneNumberRef = this.firestore
-        .collection("users")
-        .doc(userId)
-        .collection("phone_numbers")
-        .doc(phoneNumber);
+      const phoneNumberRef = this.firestore.collection("users").doc(userId).collection("phone_numbers").doc(phoneNumber);
 
       // Check if document exists before updating
       const phoneDoc = await phoneNumberRef.get();
       if (!phoneDoc.exists) {
-        this.logger.info(
-          { userId, phoneNumber, status },
-          "Phone number document doesn't exist (was deleted), skipping status update to respect deletion",
-        );
+        this.logger.info({ userId, phoneNumber, status }, "Phone number document doesn't exist (was deleted), skipping status update to respect deletion");
         return;
       }
 
@@ -5238,16 +4396,11 @@ export class ConnectionPool extends EventEmitter {
 
       // Also update in-memory state to prevent stale state during shutdown
       if (this.connectionStateManager) {
-        this.connectionStateManager.updateInMemoryStatus(
-          userId,
-          phoneNumber,
-          status,
-        );
+        this.connectionStateManager.updateInMemoryStatus(userId, phoneNumber, status);
       }
 
       // Enhanced logging: Critical status transitions logged at ERROR level for monitoring
-      const isCriticalDisconnection =
-        status === "disconnected" || status === "failed";
+      const isCriticalDisconnection = status === "disconnected" || status === "failed";
       const isCriticalReconnection = status === "connected";
 
       if (isCriticalDisconnection) {
@@ -5262,12 +4415,10 @@ export class ConnectionPool extends EventEmitter {
             phoneNumber,
             status,
             previousStatus,
-            connectionAge: connection
-              ? Date.now() - connection.createdAt.getTime()
-              : undefined,
+            connectionAge: connection ? Date.now() - connection.createdAt.getTime() : undefined,
             timestamp: new Date().toISOString(),
           },
-          `CRITICAL STATUS TRANSITION: Connection ${status === "failed" ? "FAILED" : "DISCONNECTED"}`,
+          `CRITICAL STATUS TRANSITION: Connection ${status === "failed" ? "FAILED" : "DISCONNECTED"}`
         );
       } else if (isCriticalReconnection) {
         this.logger.info(
@@ -5277,18 +4428,15 @@ export class ConnectionPool extends EventEmitter {
             status,
             timestamp: new Date().toISOString(),
           },
-          "CRITICAL STATUS TRANSITION: Connection RECONNECTED",
+          "CRITICAL STATUS TRANSITION: Connection RECONNECTED"
         );
       } else {
-        this.logger.info(
-          { userId, phoneNumber, status },
-          "Updated phone number status in nested structure and in-memory state",
-        );
+        this.logger.info({ userId, phoneNumber, status }, "Updated phone number status in nested structure and in-memory state");
       }
     } catch (error) {
       this.logger.error(
         { userId, phoneNumber, status, error },
-        "CRITICAL: Failed to update phone number status in Firestore - this WILL cause synchronization issues!",
+        "CRITICAL: Failed to update phone number status in Firestore - this WILL cause synchronization issues!"
       );
     }
   }
@@ -5298,14 +4446,8 @@ export class ConnectionPool extends EventEmitter {
    */
   private async publishEvent(eventType: string, data: any) {
     // Skip Pub/Sub in local development
-    if (
-      process.env.NODE_ENV === "development" ||
-      process.env.FIRESTORE_EMULATOR_HOST
-    ) {
-      this.logger.debug(
-        { eventType, data },
-        "Event (local mode - not published to Pub/Sub)",
-      );
+    if (process.env.NODE_ENV === "development" || process.env.FIRESTORE_EMULATOR_HOST) {
+      this.logger.debug({ eventType, data }, "Event (local mode - not published to Pub/Sub)");
       return;
     }
 
@@ -5327,10 +4469,7 @@ export class ConnectionPool extends EventEmitter {
 
         // Remove connections idle for more than 90 days
         if (idleTime > 7776000000) {
-          this.logger.info(
-            { userId: connection.userId, phoneNumber: connection.phoneNumber },
-            "Removing idle connection",
-          );
+          this.logger.info({ userId: connection.userId, phoneNumber: connection.phoneNumber }, "Removing idle connection");
           this.removeConnection(connection.userId, connection.phoneNumber);
         }
 
@@ -5373,10 +4512,7 @@ export class ConnectionPool extends EventEmitter {
     const jid = formatWhatsAppJid(phoneNumber);
     if (!jid) {
       // Fallback to basic cleaning if formatting fails
-      this.logger.warn(
-        { phoneNumber },
-        "Failed to format phone number for JID, using fallback",
-      );
+      this.logger.warn({ phoneNumber }, "Failed to format phone number for JID, using fallback");
       const cleaned = phoneNumber.replace(/\D/g, "");
       return `${cleaned}@s.whatsapp.net`;
     }
@@ -5419,17 +4555,9 @@ export class ConnectionPool extends EventEmitter {
    * Get stored country for a phone number from Firestore
    * Reads from users/{userId}/phone_numbers subcollection
    */
-  private async getStoredCountry(
-    userId: string,
-    phoneNumber: string,
-  ): Promise<string | undefined> {
+  private async getStoredCountry(userId: string, phoneNumber: string): Promise<string | undefined> {
     try {
-      const phoneDoc = await this.firestore
-        .collection("users")
-        .doc(userId)
-        .collection("phone_numbers")
-        .doc(phoneNumber)
-        .get();
+      const phoneDoc = await this.firestore.collection("users").doc(userId).collection("phone_numbers").doc(phoneNumber).get();
 
       if (!phoneDoc.exists) {
         return undefined;
@@ -5438,10 +4566,7 @@ export class ConnectionPool extends EventEmitter {
       const data = phoneDoc.data();
       return data?.proxy_country || data?.country_code;
     } catch (error) {
-      this.logger.debug(
-        { error, userId, phoneNumber },
-        "Failed to get stored country from Firestore",
-      );
+      this.logger.debug({ error, userId, phoneNumber }, "Failed to get stored country from Firestore");
       return undefined;
     }
   }
@@ -5489,9 +4614,7 @@ export class ConnectionPool extends EventEmitter {
     try {
       // For cgroup v1
       if (fs.existsSync("/sys/fs/cgroup/memory/memory.limit_in_bytes")) {
-        const limitStr = fs
-          .readFileSync("/sys/fs/cgroup/memory/memory.limit_in_bytes", "utf8")
-          .trim();
+        const limitStr = fs.readFileSync("/sys/fs/cgroup/memory/memory.limit_in_bytes", "utf8").trim();
         const limit = parseInt(limitStr);
         // Ignore unrealistic limits (like 9223372036854775807)
         if (limit > 0 && limit < Number.MAX_SAFE_INTEGER / 2) {
@@ -5500,9 +4623,7 @@ export class ConnectionPool extends EventEmitter {
       }
       // For cgroup v2
       if (fs.existsSync("/sys/fs/cgroup/memory.max")) {
-        const limitStr = fs
-          .readFileSync("/sys/fs/cgroup/memory.max", "utf8")
-          .trim();
+        const limitStr = fs.readFileSync("/sys/fs/cgroup/memory.max", "utf8").trim();
         if (limitStr !== "max") {
           const limit = parseInt(limitStr);
           if (limit > 0) return limit;
@@ -5518,11 +4639,7 @@ export class ConnectionPool extends EventEmitter {
 
   private isProxyError(error: any): boolean {
     // Check if error is related to proxy/network issues
-    return (
-      error?.message?.includes("ECONNREFUSED") ||
-      error?.message?.includes("ETIMEDOUT") ||
-      error?.message?.includes("proxy")
-    );
+    return error?.message?.includes("ECONNREFUSED") || error?.message?.includes("ETIMEDOUT") || error?.message?.includes("proxy");
   }
 
   /**
@@ -5538,12 +4655,8 @@ export class ConnectionPool extends EventEmitter {
 
     return {
       totalConnections: this.connections.size,
-      activeConnections: connections.filter(
-        (c) => c.state.connection === "open",
-      ).length,
-      pendingConnections: connections.filter(
-        (c) => c.state.connection === "connecting",
-      ).length,
+      activeConnections: connections.filter((c) => c.state.connection === "open").length,
+      pendingConnections: connections.filter((c) => c.state.connection === "connecting").length,
       totalMessages: connections.reduce((sum, c) => sum + c.messageCount, 0),
       memoryUsage: this.getMemoryUsage(),
       uptime: process.uptime(),
@@ -5594,24 +4707,14 @@ export class ConnectionPool extends EventEmitter {
 
     // Close all connections
     if (preserveSessions) {
-      this.logger.info(
-        "Gracefully closing connections to preserve sessions for recovery",
-      );
+      this.logger.info("Gracefully closing connections to preserve sessions for recovery");
       for (const connection of this.connections.values()) {
-        await this.removeConnection(
-          connection.userId,
-          connection.phoneNumber,
-          true,
-        ); // skipLogout = true
+        await this.removeConnection(connection.userId, connection.phoneNumber, true); // skipLogout = true
       }
     } else {
       this.logger.info("Fully logging out all connections");
       for (const connection of this.connections.values()) {
-        await this.removeConnection(
-          connection.userId,
-          connection.phoneNumber,
-          false,
-        ); // skipLogout = false
+        await this.removeConnection(connection.userId, connection.phoneNumber, false); // skipLogout = false
       }
     }
 
@@ -5637,33 +4740,24 @@ export class ConnectionPool extends EventEmitter {
     userId: string,
     phoneNumber: string,
     status: "connected" | "pending_recovery" | "failed",
-    proxyCountry?: string,
+    proxyCountry?: string
   ): Promise<void> {
     try {
-      const sessionRef = this.firestore
-        .collection("users")
-        .doc(userId)
-        .collection("phone_numbers")
-        .doc(phoneNumber);
+      const sessionRef = this.firestore.collection("users").doc(userId).collection("phone_numbers").doc(phoneNumber);
 
       // Check if document already exists to preserve country_code
       const existingDoc = await sessionRef.get();
 
       // Don't recreate deleted documents - respect user/system deletions
       if (!existingDoc.exists) {
-        this.logger.info(
-          { userId, phoneNumber },
-          "Phone number document doesn't exist (was deleted), skipping session recovery update to respect deletion",
-        );
+        this.logger.info({ userId, phoneNumber }, "Phone number document doesn't exist (was deleted), skipping session recovery update to respect deletion");
         return;
       }
 
       const existingData = existingDoc.data() || {};
 
       // Determine if instance is localhost
-      const isLocalhost =
-        this.config.instanceUrl.includes("localhost") ||
-        this.config.instanceUrl.includes("127.0.0.1");
+      const isLocalhost = this.config.instanceUrl.includes("localhost") || this.config.instanceUrl.includes("127.0.0.1");
 
       // Build session data using NESTED FIELD UPDATES to preserve existing whatsapp_web fields
       // This prevents overwriting status and sync progress set by other functions
@@ -5685,15 +4779,9 @@ export class ConnectionPool extends EventEmitter {
       // This prevents overwriting "importing_messages" status set during initial sync
       if (status === "pending_recovery" || status === "failed") {
         sessionData["whatsapp_web.status"] = status;
-        this.logger.debug(
-          { userId, phoneNumber, status },
-          "Updating status for recovery state",
-        );
+        this.logger.debug({ userId, phoneNumber, status }, "Updating status for recovery state");
       } else {
-        this.logger.debug(
-          { userId, phoneNumber, status },
-          "Skipping status update - preserving UI status set by updatePhoneNumberStatus",
-        );
+        this.logger.debug({ userId, phoneNumber, status }, "Skipping status update - preserving UI status set by updatePhoneNumberStatus");
       }
 
       // Add proxy country if available
@@ -5702,8 +4790,7 @@ export class ConnectionPool extends EventEmitter {
       }
 
       // Use phone's country from existing data (user-selected from frontend)
-      const phoneCountry =
-        existingData?.whatsapp_web?.phone_country || existingData?.country_code;
+      const phoneCountry = existingData?.whatsapp_web?.phone_country || existingData?.country_code;
 
       if (phoneCountry) {
         sessionData["whatsapp_web.phone_country"] = phoneCountry;
@@ -5719,27 +4806,18 @@ export class ConnectionPool extends EventEmitter {
             existing_country: existingData.country_code,
             proxy_country: proxyCountry,
           },
-          "Preserving existing country_code during session update",
+          "Preserving existing country_code during session update"
         );
       } else if (phoneCountry) {
         sessionData.country_code = phoneCountry;
-        this.logger.info(
-          { userId, phoneNumber, country_code: phoneCountry },
-          "Setting initial country_code for new session",
-        );
+        this.logger.info({ userId, phoneNumber, country_code: phoneCountry }, "Setting initial country_code for new session");
       }
 
       await sessionRef.update(sessionData);
 
-      this.logger.info(
-        { userId, phoneNumber, status, proxyCountry },
-        "Updated session for recovery in users subcollection",
-      );
+      this.logger.info({ userId, phoneNumber, status, proxyCountry }, "Updated session for recovery in users subcollection");
     } catch (error) {
-      this.logger.error(
-        { userId, phoneNumber, status, error },
-        "Failed to update session for recovery",
-      );
+      this.logger.error({ userId, phoneNumber, status, error }, "Failed to update session for recovery");
     }
   }
 
@@ -5747,24 +4825,14 @@ export class ConnectionPool extends EventEmitter {
    * Remove session from recovery tracking
    * IMPORTANT: This should NOT delete the phone number document, only clear recovery metadata
    */
-  private async removeSessionFromRecovery(
-    userId: string,
-    phoneNumber: string,
-  ): Promise<void> {
+  private async removeSessionFromRecovery(userId: string, phoneNumber: string): Promise<void> {
     try {
-      const sessionRef = this.firestore
-        .collection("users")
-        .doc(userId)
-        .collection("phone_numbers")
-        .doc(phoneNumber);
+      const sessionRef = this.firestore.collection("users").doc(userId).collection("phone_numbers").doc(phoneNumber);
 
       // Check if document exists before updating
       const doc = await sessionRef.get();
       if (!doc.exists) {
-        this.logger.info(
-          { userId, phoneNumber },
-          "Phone number document doesn't exist (was deleted), skipping recovery tracking removal",
-        );
+        this.logger.info({ userId, phoneNumber }, "Phone number document doesn't exist (was deleted), skipping recovery tracking removal");
         return;
       }
 
@@ -5776,15 +4844,9 @@ export class ConnectionPool extends EventEmitter {
         updated_at: new Date(),
       });
 
-      this.logger.info(
-        { userId, phoneNumber },
-        "Removed session from recovery tracking (phone number preserved)",
-      );
+      this.logger.info({ userId, phoneNumber }, "Removed session from recovery tracking (phone number preserved)");
     } catch (error) {
-      this.logger.error(
-        { userId, phoneNumber, error },
-        "Failed to remove session from recovery tracking",
-      );
+      this.logger.error({ userId, phoneNumber, error }, "Failed to remove session from recovery tracking");
     }
   }
 
@@ -5807,11 +4869,7 @@ export class ConnectionPool extends EventEmitter {
         .collectionGroup("phone_numbers")
         .where("type", "==", "whatsapp_web")
         .where("whatsapp_web.status", "in", ["connected", "pending_recovery"])
-        .where(
-          "whatsapp_web.last_activity",
-          ">=",
-          admin.firestore.Timestamp.fromDate(cutoffTime),
-        )
+        .where("whatsapp_web.last_activity", ">=", admin.firestore.Timestamp.fromDate(cutoffTime))
         .get();
 
       const sessions: Array<{
@@ -5829,23 +4887,16 @@ export class ConnectionPool extends EventEmitter {
             userId,
             phoneNumber: data.phone_number,
             proxyCountry: data.proxy_country || data.country_code,
-            lastActivity:
-              data.whatsapp_web?.last_activity?.toDate() || new Date(),
+            lastActivity: data.whatsapp_web?.last_activity?.toDate() || new Date(),
           });
         }
       });
 
-      this.logger.info(
-        { count: sessions.length },
-        "Retrieved active sessions for recovery",
-      );
+      this.logger.info({ count: sessions.length }, "Retrieved active sessions for recovery");
 
       return sessions;
     } catch (error) {
-      this.logger.error(
-        { error },
-        "Failed to get active sessions for recovery",
-      );
+      this.logger.error({ error }, "Failed to get active sessions for recovery");
       return [];
     }
   }
