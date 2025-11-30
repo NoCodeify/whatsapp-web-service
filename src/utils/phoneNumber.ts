@@ -20,10 +20,7 @@ export interface ParsedPhoneNumber {
  * @param defaultCountry - Optional default country code if number doesn't include country code
  * @returns Formatted E.164 phone number or null if invalid
  */
-export function formatPhoneNumber(
-  phoneNumber: string,
-  defaultCountry?: CountryCode,
-): string | null {
+export function formatPhoneNumber(phoneNumber: string, defaultCountry?: CountryCode): string | null {
   try {
     // Clean the input - remove spaces, dashes, parentheses, etc.
     let cleaned = phoneNumber.replace(/[\s\-\(\)\.]/g, "");
@@ -49,19 +46,13 @@ export function formatPhoneNumber(
     if (!parsed) {
       // If parsing failed and we have a default country, try with that
       if (defaultCountry) {
-        const parsedWithCountry = parsePhoneNumberFromString(
-          phoneNumber,
-          defaultCountry,
-        );
+        const parsedWithCountry = parsePhoneNumberFromString(phoneNumber, defaultCountry);
         if (parsedWithCountry && parsedWithCountry.isValid()) {
           return parsedWithCountry.number as string;
         }
       }
 
-      logger.warn(
-        { phoneNumber, defaultCountry },
-        "Failed to parse phone number",
-      );
+      logger.warn({ phoneNumber, defaultCountry }, "Failed to parse phone number");
       return null;
     }
 
@@ -74,7 +65,7 @@ export function formatPhoneNumber(
           country: parsed.country,
           isPossible: parsed.isPossible(),
         },
-        "Phone number is not valid",
+        "Phone number is not valid"
       );
 
       // Even if not fully valid, if it's possible, return the formatted version
@@ -101,10 +92,7 @@ export function formatPhoneNumber(
  * @param defaultCountry - Optional default country code
  * @returns Parsed phone number details or null if invalid
  */
-export function parsePhoneNumber(
-  phoneNumber: string,
-  defaultCountry?: CountryCode,
-): ParsedPhoneNumber | null {
+export function parsePhoneNumber(phoneNumber: string, defaultCountry?: CountryCode): ParsedPhoneNumber | null {
   try {
     // Use the formatter to clean and validate
     const formatted = formatPhoneNumber(phoneNumber, defaultCountry);
@@ -140,10 +128,7 @@ export function parsePhoneNumber(
  * @param defaultCountry - Optional default country code
  * @returns WhatsApp JID format (e.g., "31658015937@s.whatsapp.net")
  */
-export function formatWhatsAppJid(
-  phoneNumber: string,
-  defaultCountry?: CountryCode,
-): string | null {
+export function formatWhatsAppJid(phoneNumber: string, defaultCountry?: CountryCode): string | null {
   const formatted = formatPhoneNumber(phoneNumber, defaultCountry);
   if (!formatted) {
     return null;
@@ -161,10 +146,7 @@ export function formatWhatsAppJid(
  * @param defaultCountry - Optional default country code
  * @returns True if valid, false otherwise
  */
-export function isValidPhoneNumber(
-  phoneNumber: string,
-  defaultCountry?: CountryCode,
-): boolean {
+export function isValidPhoneNumber(phoneNumber: string, defaultCountry?: CountryCode): boolean {
   const formatted = formatPhoneNumber(phoneNumber, defaultCountry);
   return formatted !== null;
 }
@@ -213,6 +195,9 @@ export function preprocessPhoneNumber(phoneNumber: string): string {
     { pattern: /^\+48\s*0/, replacement: "+48" },
     // Portugal: +351 0 -> +351
     { pattern: /^\+351\s*0/, replacement: "+351" },
+    // Mexico: +521 -> +52 (remove legacy mobile "1" prefix, valid since Aug 2019)
+    // Mexican numbers changed format: the "1" after country code is no longer used
+    { pattern: /^\+521(\d{10})$/, replacement: "+52$1" },
   ];
 
   for (const { pattern, replacement } of patterns) {
@@ -224,7 +209,7 @@ export function preprocessPhoneNumber(phoneNumber: string): string {
           processed,
           pattern: pattern.toString(),
         },
-        "Preprocessed phone number to remove leading zero",
+        "Preprocessed phone number to correct country-specific format"
       );
       break;
     }
@@ -241,10 +226,7 @@ export function preprocessPhoneNumber(phoneNumber: string): string {
  * @param defaultCountry - Optional default country code
  * @returns Formatted E.164 phone number or null if invalid
  */
-export function formatPhoneNumberSafe(
-  phoneNumber: string,
-  defaultCountry?: CountryCode,
-): string | null {
+export function formatPhoneNumberSafe(phoneNumber: string, defaultCountry?: CountryCode): string | null {
   // BUG #1 FIX: Reject excessively long phone numbers (DoS prevention)
   // E.164 format allows max 15 digits + country code + formatting characters
   const MAX_PHONE_LENGTH = 20;
@@ -254,17 +236,14 @@ export function formatPhoneNumberSafe(
         phoneNumber: phoneNumber?.substring(0, 50),
         length: phoneNumber?.length,
       },
-      "Phone number exceeds maximum allowed length",
+      "Phone number exceeds maximum allowed length"
     );
     return null;
   }
 
   // BUG #3 FIX: Reject strings containing null bytes (filesystem security)
   if (phoneNumber.includes("\x00")) {
-    logger.warn(
-      { phoneNumber: phoneNumber.substring(0, 50) },
-      "Phone number contains null byte",
-    );
+    logger.warn({ phoneNumber: phoneNumber.substring(0, 50) }, "Phone number contains null byte");
     return null;
   }
 
@@ -272,10 +251,7 @@ export function formatPhoneNumberSafe(
   // Valid characters: digits, +, -, (, ), and spaces
   const validCharsRegex = /^[\d\s\+\-\(\)]+$/;
   if (!validCharsRegex.test(phoneNumber)) {
-    logger.warn(
-      { phoneNumber: phoneNumber.substring(0, 50) },
-      "Phone number contains invalid characters",
-    );
+    logger.warn({ phoneNumber: phoneNumber.substring(0, 50) }, "Phone number contains invalid characters");
     return null;
   }
 
