@@ -24,10 +24,8 @@ require("dotenv").config();
 
 const SESSION_STORAGE_TYPE = process.env.SESSION_STORAGE_TYPE || "local";
 const SESSION_STORAGE_PATH = process.env.SESSION_STORAGE_PATH || "./sessions";
-const STORAGE_BUCKET =
-  process.env.STORAGE_BUCKET || "whatzai-whatsapp-sessions";
-const SESSION_ENCRYPTION_KEY =
-  process.env.SESSION_ENCRYPTION_KEY || crypto.randomBytes(32).toString("hex");
+const STORAGE_BUCKET = process.env.STORAGE_BUCKET || "whatzai-whatsapp-sessions";
+const SESSION_ENCRYPTION_KEY = process.env.SESSION_ENCRYPTION_KEY || crypto.randomBytes(32).toString("hex");
 
 console.log("🔍 Session Persistence Test");
 console.log("===========================");
@@ -226,9 +224,7 @@ async function testPersistence() {
     console.log(`Found ${cloudSessions.length} cloud session(s):`);
     for (const session of cloudSessions) {
       const sizeMB = (session.size / 1024 / 1024).toFixed(2);
-      console.log(
-        `  • ${session.name} (${session.fileCount} files, ${sizeMB} MB)`,
-      );
+      console.log(`  • ${session.name} (${session.fileCount} files, ${sizeMB} MB)`);
     }
 
     // Test with first session
@@ -270,16 +266,12 @@ async function testPersistence() {
     if (restored) {
       // Verify restoration
       const afterRestore = await listLocalSessions();
-      const restoredSession = afterRestore.find(
-        (s) => s.name === testSession.name,
-      );
+      const restoredSession = afterRestore.find((s) => s.name === testSession.name);
 
       if (restoredSession) {
         console.log(`✅ Session restored: ${restoredSession.fileCount} files`);
         console.log("\n🎉 SUCCESS: Session persistence is working!");
-        console.log(
-          "Sessions will survive server restarts in hybrid/cloud mode.",
-        );
+        console.log("Sessions will survive server restarts in hybrid/cloud mode.");
       } else {
         console.log("❌ Session restoration verification failed");
       }

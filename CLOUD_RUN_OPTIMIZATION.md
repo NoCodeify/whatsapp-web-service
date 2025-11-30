@@ -154,11 +154,13 @@ The optimized configuration includes enhanced monitoring capabilities:
 ### Cost Breakdown
 
 **Per Instance (2Gi RAM, 1 vCPU):**
+
 - CPU: 1 vCPU × $0.000024/sec × 2,592,000 sec/month = $62.21
 - Memory: 2 GiB × $0.0000025/sec × 2,592,000 sec/month = $12.96
 - **Total per environment**: ~$75/month
 
 **Compared to previous configuration (4Gi/2vCPU):**
+
 - Previous cost: ~$150/month per environment
 - New cost: ~$75/month per environment
 - **Savings: 50% reduction ($150/month total)**

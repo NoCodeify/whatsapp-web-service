@@ -71,20 +71,14 @@ export class BrightDataService {
    */
   private async loadAssignments(): Promise<void> {
     try {
-      const snapshot = await this.firestore
-        .collection("ip_assignments")
-        .where("active", "==", true)
-        .get();
+      const snapshot = await this.firestore.collection("ip_assignments").where("active", "==", true).get();
 
       snapshot.forEach((doc) => {
         const data = doc.data() as IPAssignment;
         this.assignments.set(data.phoneNumber, data);
       });
 
-      this.logger.info(
-        { count: this.assignments.size },
-        "Loaded existing IP assignments from Firestore",
-      );
+      this.logger.info({ count: this.assignments.size }, "Loaded existing IP assignments from Firestore");
     } catch (error) {
       this.logger.error({ error }, "Failed to load IP assignments");
     }
@@ -97,9 +91,7 @@ export class BrightDataService {
     try {
       // For ISP proxies, we typically get a pool of IPs
       // This is a mock implementation as Bright Data's exact API may vary
-      const response = await this.apiClient.get(
-        `/customer/zones/${this.config.zone}/ips`,
-      );
+      const response = await this.apiClient.get(`/customer/zones/${this.config.zone}/ips`);
 
       if (response.data && response.data.ips) {
         response.data.ips.forEach((ip: any) => {
@@ -116,17 +108,11 @@ export class BrightDataService {
           this.staticIPs.set(staticIP.ip, staticIP);
         });
 
-        this.logger.info(
-          { count: this.staticIPs.size },
-          "Synced static IPs from Bright Data",
-        );
+        this.logger.info({ count: this.staticIPs.size }, "Synced static IPs from Bright Data");
       }
     } catch (error) {
       // If API fails, generate session-based IPs as fallback
-      this.logger.warn(
-        { error: (error as any).message },
-        "Failed to sync from API, using session-based approach",
-      );
+      this.logger.warn({ error: (error as any).message }, "Failed to sync from API, using session-based approach");
 
       // For ISP proxies, we can use session-based allocation
       // Each session gets a unique IP from the pool
@@ -154,10 +140,7 @@ export class BrightDataService {
       this.staticIPs.set(sessionId, staticIP);
     }
 
-    this.logger.info(
-      { count: this.staticIPs.size },
-      "Generated session-based IP slots for ISP proxy",
-    );
+    this.logger.info({ count: this.staticIPs.size }, "Generated session-based IP slots for ISP proxy");
   }
 
   /**
@@ -170,20 +153,13 @@ export class BrightDataService {
   /**
    * Get an available static IP for a phone number
    */
-  async assignStaticIP(
-    userId: string,
-    phoneNumber: string,
-    preferredCountry?: string,
-  ): Promise<StaticIP | null> {
+  async assignStaticIP(userId: string, phoneNumber: string, preferredCountry?: string): Promise<StaticIP | null> {
     // Check if already assigned
     const existing = this.assignments.get(phoneNumber);
     if (existing) {
       const ip = this.staticIPs.get(existing.ipAddress);
       if (ip) {
-        this.logger.info(
-          { phoneNumber, ip: ip.ip },
-          "Returning existing IP assignment",
-        );
+        this.logger.info({ phoneNumber, ip: ip.ip }, "Returning existing IP assignment");
         return ip;
       }
     }
@@ -212,10 +188,7 @@ export class BrightDataService {
     }
 
     if (!availableIP) {
-      this.logger.warn(
-        { phoneNumber, preferredCountry },
-        "No available static IPs",
-      );
+      this.logger.warn({ phoneNumber, preferredCountry }, "No available static IPs");
       return null;
     }
 
@@ -254,7 +227,7 @@ export class BrightDataService {
         ip: availableIP.ip,
         country: availableIP.country,
       },
-      "Assigned static IP to phone number",
+      "Assigned static IP to phone number"
     );
 
     return availableIP;
@@ -278,18 +251,12 @@ export class BrightDataService {
     }
 
     // Remove from Firestore
-    await this.firestore
-      .collection("ip_assignments")
-      .doc(phoneNumber)
-      .update({ active: false });
+    await this.firestore.collection("ip_assignments").doc(phoneNumber).update({ active: false });
 
     // Remove from local cache
     this.assignments.delete(phoneNumber);
 
-    this.logger.info(
-      { phoneNumber, ip: assignment.ipAddress },
-      "Released IP assignment",
-    );
+    this.logger.info({ phoneNumber, ip: assignment.ipAddress }, "Released IP assignment");
   }
 
   /**
@@ -356,15 +323,12 @@ export class BrightDataService {
           response: response.data,
           status: response.status,
         },
-        "ISP proxy connection test successful",
+        "ISP proxy connection test successful"
       );
 
       return response.status === 200;
     } catch (error) {
-      this.logger.error(
-        { error: (error as any).message },
-        "ISP proxy connection test failed",
-      );
+      this.logger.error({ error: (error as any).message }, "ISP proxy connection test failed");
       return false;
     }
   }
@@ -380,9 +344,7 @@ export class BrightDataService {
    * Get all available IPs
    */
   getAvailableIPs(): StaticIP[] {
-    return Array.from(this.staticIPs.values()).filter(
-      (ip) => ip.status === "active",
-    );
+    return Array.from(this.staticIPs.values()).filter((ip) => ip.status === "active");
   }
 
   /**
@@ -390,9 +352,7 @@ export class BrightDataService {
    */
   getMetrics() {
     const total = this.staticIPs.size;
-    const assigned = Array.from(this.staticIPs.values()).filter(
-      (ip) => ip.status === "assigned",
-    ).length;
+    const assigned = Array.from(this.staticIPs.values()).filter((ip) => ip.status === "assigned").length;
     const available = total - assigned;
 
     return {

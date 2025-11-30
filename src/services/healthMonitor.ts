@@ -90,7 +90,7 @@ export class HealthMonitor extends EventEmitter {
    */
   setDependencies(
     connectionPool: ConnectionPool,
-    stateManager: ConnectionStateManager,
+    stateManager: ConnectionStateManager
     // messageQueue: MessageQueueService // TODO: Implement message queue service
   ) {
     this.connectionPool = connectionPool;
@@ -175,10 +175,7 @@ export class HealthMonitor extends EventEmitter {
       // Emit status event
       this.emit("health-check", this.status);
 
-      this.logger.debug(
-        { status: this.status.status },
-        "Health check completed",
-      );
+      this.logger.debug({ status: this.status.status }, "Health check completed");
     } catch (error) {
       this.logger.error({ error }, "Health check failed");
       this.recordError("Health check failed: " + (error as Error).message);
@@ -272,9 +269,7 @@ export class HealthMonitor extends EventEmitter {
 
     // Check memory usage
     if (this.status.resources.memory.percentage > this.config.memoryThreshold) {
-      issues.push(
-        `High memory usage: ${this.status.resources.memory.percentage.toFixed(1)}%`,
-      );
+      issues.push(`High memory usage: ${this.status.resources.memory.percentage.toFixed(1)}%`);
     }
 
     // Check error rate
@@ -283,10 +278,7 @@ export class HealthMonitor extends EventEmitter {
     }
 
     // Check connection failures
-    const failureRate =
-      this.status.connections.total > 0
-        ? (this.status.connections.failed / this.status.connections.total) * 100
-        : 0;
+    const failureRate = this.status.connections.total > 0 ? (this.status.connections.failed / this.status.connections.total) * 100 : 0;
 
     if (failureRate > 50) {
       issues.push(`High connection failure rate: ${failureRate.toFixed(1)}%`);
@@ -340,10 +332,7 @@ export class HealthMonitor extends EventEmitter {
           try {
             // Attempt to restart connection
             if (this.connectionPool) {
-              await this.connectionPool.addConnection(
-                conn.userId,
-                conn.phoneNumber,
-              );
+              await this.connectionPool.addConnection(conn.userId, conn.phoneNumber);
             }
 
             action.success = true;
@@ -351,10 +340,7 @@ export class HealthMonitor extends EventEmitter {
           } catch (error) {
             action.success = false;
             action.error = (error as Error).message;
-            this.logger.error(
-              { connection: key, error },
-              "Failed to recover connection",
-            );
+            this.logger.error({ connection: key, error }, "Failed to recover connection");
           } finally {
             this.recoveryInProgress.delete(key);
           }

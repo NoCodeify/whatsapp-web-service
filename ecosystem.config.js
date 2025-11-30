@@ -86,8 +86,7 @@ module.exports = {
       repo: "git@github.com:your-org/whatsapp-web-service.git",
       path: "/var/www/whatsapp-web-service",
       "pre-deploy-local": "",
-      "post-deploy":
-        "npm install && npm run build && pm2 reload ecosystem.config.js --env production",
+      "post-deploy": "npm install && npm run build && pm2 reload ecosystem.config.js --env production",
       "pre-setup": "",
     },
 
@@ -97,8 +96,7 @@ module.exports = {
       ref: "origin/develop",
       repo: "git@github.com:your-org/whatsapp-web-service.git",
       path: "/var/www/whatsapp-web-service-staging",
-      "post-deploy":
-        "npm install && npm run build && pm2 reload ecosystem.config.js --env staging",
+      "post-deploy": "npm install && npm run build && pm2 reload ecosystem.config.js --env staging",
     },
   },
 };

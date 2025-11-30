@@ -39,9 +39,7 @@ describe("phoneNumber Security & Validation", () => {
 
     // ===== BUG #2: XSS prevention (character whitelist) =====
     it("should reject phone numbers with script tags", () => {
-      expect(
-        formatPhoneNumberSafe("+1234<script>alert(1)</script>"),
-      ).toBeNull();
+      expect(formatPhoneNumberSafe("+1234<script>alert(1)</script>")).toBeNull();
     });
 
     it("should reject phone numbers with HTML tags", () => {
@@ -49,9 +47,7 @@ describe("phoneNumber Security & Validation", () => {
     });
 
     it("should reject phone numbers with img tags", () => {
-      expect(
-        formatPhoneNumberSafe("+1234<img src=x onerror=alert(1)>"),
-      ).toBeNull();
+      expect(formatPhoneNumberSafe("+1234<img src=x onerror=alert(1)>")).toBeNull();
     });
 
     it("should reject phone numbers with special chars (except allowed)", () => {
@@ -398,12 +394,8 @@ describe("phoneNumber Security & Validation", () => {
     });
 
     it("should format international numbers correctly", () => {
-      expect(formatWhatsAppJid("+442071234567")).toBe(
-        "442071234567@s.whatsapp.net",
-      );
-      expect(formatWhatsAppJid("+49301234567")).toBe(
-        "49301234567@s.whatsapp.net",
-      );
+      expect(formatWhatsAppJid("+442071234567")).toBe("442071234567@s.whatsapp.net");
+      expect(formatWhatsAppJid("+49301234567")).toBe("49301234567@s.whatsapp.net");
     });
 
     it("should end with @s.whatsapp.net suffix", () => {
@@ -605,13 +597,7 @@ describe("phoneNumber Security & Validation", () => {
     });
 
     it("should process through all functions without errors", () => {
-      const numbers = [
-        "+12025551234",
-        "+31658015937",
-        "+442071234567",
-        "+49301234567",
-        "+33612345678",
-      ];
+      const numbers = ["+12025551234", "+31658015937", "+442071234567", "+49301234567", "+33612345678"];
 
       numbers.forEach((number) => {
         const safe = formatPhoneNumberSafe(number);
@@ -774,13 +760,7 @@ describe("phoneNumber Security & Validation", () => {
     // Edge case: formatted number that might re-parse as null
     it("should handle parsePhoneNumber with edge case formatted number", () => {
       // Try various edge cases
-      const edgeCases = [
-        "+0",
-        "+00",
-        "+000",
-        "+" + "0".repeat(15),
-        "+" + "9".repeat(15),
-      ];
+      const edgeCases = ["+0", "+00", "+000", "+" + "0".repeat(15), "+" + "9".repeat(15)];
 
       edgeCases.forEach((testCase) => {
         const result = parsePhoneNumber(testCase);
