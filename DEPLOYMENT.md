@@ -226,10 +226,10 @@ gcloud run services update whatsapp-web-service-prod \
 
 ## 📊 Deployment Environments
 
-| Environment | Project        | Service Name                | Resources | Min Instances | Purpose              |
-| ----------- | -------------- | --------------------------- | --------- | ------------- | -------------------- |
-| Development | `whatzaidev`   | `whatsapp-web-service-dev`  | 2Gi/1CPU  | 1             | Testing & validation |
-| Production  | `whatzai`      | `whatsapp-web-service-prod` | 2Gi/1CPU  | 1             | Live service         |
+| Environment | Project      | Service Name                | Resources | Min Instances | Purpose              |
+| ----------- | ------------ | --------------------------- | --------- | ------------- | -------------------- |
+| Development | `whatzaidev` | `whatsapp-web-service-dev`  | 2Gi/1CPU  | 1             | Testing & validation |
+| Production  | `whatzai`    | `whatsapp-web-service-prod` | 2Gi/1CPU  | 1             | Live service         |
 
 ## 🔐 Security & Access
 

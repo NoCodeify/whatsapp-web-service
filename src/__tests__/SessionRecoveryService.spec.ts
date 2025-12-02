@@ -4,9 +4,7 @@ import { ConnectionPool } from "../core/ConnectionPool";
 
 // Mock dependencies
 jest.mock("@google-cloud/firestore", () => {
-  const actualTimestamp = jest.requireActual(
-    "@google-cloud/firestore",
-  ).Timestamp;
+  const actualTimestamp = jest.requireActual("@google-cloud/firestore").Timestamp;
   return {
     Firestore: jest.fn(),
     Timestamp: actualTimestamp,
@@ -135,10 +133,7 @@ describe("SessionRecoveryService", () => {
       releaseSessionOwnership: jest.fn().mockResolvedValue(undefined),
     };
 
-    sessionRecoveryService = new SessionRecoveryService(
-      mockFirestore,
-      mockInstanceId,
-    );
+    sessionRecoveryService = new SessionRecoveryService(mockFirestore, mockInstanceId);
     sessionRecoveryService.setConnectionPool(mockConnectionPool);
     sessionRecoveryService.setInstanceCoordinator(mockInstanceCoordinator);
   });
@@ -177,10 +172,7 @@ describe("SessionRecoveryService", () => {
     it("should handle instance startup failures gracefully", async () => {
       mockDoc.set.mockRejectedValueOnce(new Error("Firestore error"));
 
-      const service = new SessionRecoveryService(
-        mockFirestore,
-        "error-instance",
-      );
+      const service = new SessionRecoveryService(mockFirestore, "error-instance");
 
       // Wait for async constructor operations
       await Promise.resolve();
@@ -297,14 +289,8 @@ describe("SessionRecoveryService", () => {
 
       await sessionRecoveryService.recoverActiveSessions();
 
-      expect(mockFirestore.collectionGroup).toHaveBeenCalledWith(
-        "phone_numbers",
-      );
-      expect(mockCollectionGroup.where).toHaveBeenCalledWith(
-        "type",
-        "==",
-        "whatsapp_web",
-      );
+      expect(mockFirestore.collectionGroup).toHaveBeenCalledWith("phone_numbers");
+      expect(mockCollectionGroup.where).toHaveBeenCalledWith("type", "==", "whatsapp_web");
       expect(mockDoc.update).toHaveBeenCalledWith({
         recoveryInProgress: true,
         recoveryStartedAt: expect.any(Timestamp),
@@ -352,9 +338,7 @@ describe("SessionRecoveryService", () => {
     });
 
     it("should handle Firestore query errors", async () => {
-      mockCollectionGroup.get.mockRejectedValue(
-        new Error("Firestore index missing"),
-      );
+      mockCollectionGroup.get.mockRejectedValue(new Error("Firestore index missing"));
 
       await sessionRecoveryService.recoverActiveSessions();
 
@@ -432,13 +416,7 @@ describe("SessionRecoveryService", () => {
     });
 
     it("should handle sessions with different statuses", async () => {
-      const statuses = [
-        "connected",
-        "disconnected",
-        "failed",
-        "initializing",
-        "pending_recovery",
-      ];
+      const statuses = ["connected", "disconnected", "failed", "initializing", "pending_recovery"];
       const mockSessions = statuses.map((status, i) => ({
         id: `+123456789${i}`,
         data: () => ({
@@ -701,7 +679,7 @@ describe("SessionRecoveryService", () => {
         expect.objectContaining({
           status: "stopped",
           gracefulShutdown: true,
-        }),
+        })
       );
       expect(mockBatch.commit).toHaveBeenCalled();
     });
@@ -776,9 +754,7 @@ describe("SessionRecoveryService", () => {
 
       await sessionRecoveryService.recoverActiveSessions();
 
-      expect(
-        mockInstanceCoordinator.updateSessionActivity,
-      ).toHaveBeenCalledWith(mockUserId, mockPhoneNumber);
+      expect(mockInstanceCoordinator.updateSessionActivity).toHaveBeenCalledWith(mockUserId, mockPhoneNumber);
     });
 
     it("should release session ownership on recovery failure", async () => {
@@ -809,9 +785,7 @@ describe("SessionRecoveryService", () => {
 
       await sessionRecoveryService.recoverActiveSessions();
 
-      expect(
-        mockInstanceCoordinator.releaseSessionOwnership,
-      ).toHaveBeenCalledWith(mockUserId, mockPhoneNumber);
+      expect(mockInstanceCoordinator.releaseSessionOwnership).toHaveBeenCalledWith(mockUserId, mockPhoneNumber);
     });
   });
 
@@ -845,10 +819,7 @@ describe("SessionRecoveryService", () => {
         forEach: (callback: any) => mockSessions.forEach(callback),
       });
 
-      mockConnectionPool.addConnection
-        .mockResolvedValueOnce(false)
-        .mockResolvedValueOnce(false)
-        .mockResolvedValueOnce(true);
+      mockConnectionPool.addConnection.mockResolvedValueOnce(false).mockResolvedValueOnce(false).mockResolvedValueOnce(true);
 
       await service.recoverActiveSessions();
 
@@ -916,9 +887,7 @@ describe("SessionRecoveryService", () => {
         forEach: (callback: any) => mockSessions.forEach(callback),
       });
 
-      mockConnectionPool.addConnection
-        .mockRejectedValueOnce(new Error("Connection failed"))
-        .mockResolvedValueOnce(true);
+      mockConnectionPool.addConnection.mockRejectedValueOnce(new Error("Connection failed")).mockResolvedValueOnce(true);
 
       await sessionRecoveryService.recoverActiveSessions();
 
@@ -964,7 +933,7 @@ describe("SessionRecoveryService", () => {
         expect.objectContaining({
           "whatsapp_web.status": "connecting",
           "whatsapp_web.recovery_attempted": true,
-        }),
+        })
       );
     });
 
@@ -1004,7 +973,7 @@ describe("SessionRecoveryService", () => {
         expect.objectContaining({
           "whatsapp_web.status": "failed",
           "whatsapp_web.recovery_attempted": true,
-        }),
+        })
       );
     });
 
@@ -1039,8 +1008,7 @@ describe("SessionRecoveryService", () => {
 
       // Should complete without throwing
       // Check that the last call was to mark recovery as complete
-      const lastUpdateCall =
-        mockDoc.update.mock.calls[mockDoc.update.mock.calls.length - 1][0];
+      const lastUpdateCall = mockDoc.update.mock.calls[mockDoc.update.mock.calls.length - 1][0];
       expect(lastUpdateCall).toEqual({
         recoveryInProgress: false,
         recoveryCompletedAt: expect.any(Timestamp),
@@ -1136,15 +1104,12 @@ describe("SessionRecoveryService", () => {
         "+31612345678",
         "nl",
         "316", // Regex matches up to 3 digits
-        false,
+        false
       );
     });
 
     it("should handle sessions without instance coordinator", async () => {
-      const service = new SessionRecoveryService(
-        mockFirestore,
-        "no-coordinator",
-      );
+      const service = new SessionRecoveryService(mockFirestore, "no-coordinator");
       service.setConnectionPool(mockConnectionPool);
       // Don't set instance coordinator
 

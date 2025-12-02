@@ -56,11 +56,7 @@ async function runTests() {
   try {
     // Test 1: Purchase proxy for available country (US)
     logger.info("📍 Test 1: Purchase proxy for US (should succeed)");
-    const usResult = await proxyService.assignProxy(
-      TEST_USER_ID,
-      TEST_PHONE_US,
-      "us",
-    );
+    const usResult = await proxyService.assignProxy(TEST_USER_ID, TEST_PHONE_US, "us");
     logger.info(
       {
         test: "US Proxy",
@@ -68,16 +64,12 @@ async function runTests() {
         country: usResult.proxy.country,
         fallbackUsed: usResult.fallbackUsed,
       },
-      "✅ US proxy assigned successfully",
+      "✅ US proxy assigned successfully"
     );
 
     // Test 2: Purchase proxy for potentially unavailable country (Belgium)
     logger.info("📍 Test 2: Purchase proxy for Belgium (may use fallback)");
-    const beResult = await proxyService.assignProxy(
-      TEST_USER_ID,
-      TEST_PHONE_BE,
-      "be",
-    );
+    const beResult = await proxyService.assignProxy(TEST_USER_ID, TEST_PHONE_BE, "be");
     logger.info(
       {
         test: "Belgium Proxy",
@@ -86,20 +78,12 @@ async function runTests() {
         assignedCountry: beResult.proxy.country,
         fallbackUsed: beResult.fallbackUsed,
       },
-      beResult.fallbackUsed
-        ? "⚠️ Belgium not available, using fallback"
-        : "✅ Belgium proxy assigned",
+      beResult.fallbackUsed ? "⚠️ Belgium not available, using fallback" : "✅ Belgium proxy assigned"
     );
 
     // Test 3: Purchase proxy for likely unavailable country (Bangladesh)
-    logger.info(
-      "📍 Test 3: Purchase proxy for Bangladesh (likely to use fallback)",
-    );
-    const bdResult = await proxyService.assignProxy(
-      TEST_USER_ID,
-      TEST_PHONE_BD,
-      "bd",
-    );
+    logger.info("📍 Test 3: Purchase proxy for Bangladesh (likely to use fallback)");
+    const bdResult = await proxyService.assignProxy(TEST_USER_ID, TEST_PHONE_BD, "bd");
     logger.info(
       {
         test: "Bangladesh Proxy",
@@ -108,9 +92,7 @@ async function runTests() {
         assignedCountry: bdResult.proxy.country,
         fallbackUsed: bdResult.fallbackUsed,
       },
-      bdResult.fallbackUsed
-        ? "⚠️ Bangladesh not available, using fallback"
-        : "✅ Bangladesh proxy assigned",
+      bdResult.fallbackUsed ? "⚠️ Bangladesh not available, using fallback" : "✅ Bangladesh proxy assigned"
     );
 
     // Test 4: Mark proxy as idle (simulate disconnect)
@@ -119,14 +101,8 @@ async function runTests() {
     logger.info({ ip: usResult.proxy.ip }, "✅ Proxy marked as idle");
 
     // Test 5: Try to get same country proxy (should reuse idle one)
-    logger.info(
-      "📍 Test 5: Request another US proxy (should reuse idle proxy)",
-    );
-    const usReuse = await proxyService.assignProxy(
-      "another_user",
-      "+14155559999",
-      "us",
-    );
+    logger.info("📍 Test 5: Request another US proxy (should reuse idle proxy)");
+    const usReuse = await proxyService.assignProxy("another_user", "+14155559999", "us");
     const reused = usReuse.proxy.ip === usResult.proxy.ip;
     logger.info(
       {
@@ -135,7 +111,7 @@ async function runTests() {
         newIp: usReuse.proxy.ip,
         reused: reused,
       },
-      reused ? "✅ Successfully reused idle proxy" : "⚠️ Got different proxy",
+      reused ? "✅ Successfully reused idle proxy" : "⚠️ Got different proxy"
     );
 
     // Test 6: Get metrics
@@ -150,7 +126,7 @@ async function runTests() {
         byCountry: metrics.byCountry,
         estimatedMonthlyCost: `$${metrics.estimatedMonthlyCost}`,
       },
-      "✅ Metrics retrieved successfully",
+      "✅ Metrics retrieved successfully"
     );
 
     // Test 7: Check availability for various countries
@@ -158,12 +134,7 @@ async function runTests() {
     const testCountries = ["us", "gb", "de", "be", "bd", "pk", "ng"];
     for (const country of testCountries) {
       const available = await proxyService.checkAvailability(country);
-      logger.info(
-        { country, available },
-        available
-          ? `✅ ${country.toUpperCase()} is available`
-          : `❌ ${country.toUpperCase()} is not available`,
-      );
+      logger.info({ country, available }, available ? `✅ ${country.toUpperCase()} is available` : `❌ ${country.toUpperCase()} is not available`);
     }
 
     // Test 8: Test fallback chain
@@ -182,7 +153,7 @@ async function runTests() {
           fallback: fallback,
           expectedChain: test.expected,
         },
-        `Fallback for ${test.requested.toUpperCase()} → ${fallback.toUpperCase()}`,
+        `Fallback for ${test.requested.toUpperCase()} → ${fallback.toUpperCase()}`
       );
     }
 
@@ -208,7 +179,7 @@ async function runTests() {
       idleProxies: finalMetrics.idle,
       totalCost: `$${finalMetrics.estimatedMonthlyCost}/month`,
     },
-    "📊 Final proxy inventory",
+    "📊 Final proxy inventory"
   );
 
   process.exit(0);

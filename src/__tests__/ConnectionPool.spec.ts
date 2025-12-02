@@ -28,9 +28,7 @@ jest.mock("../utils/phoneNumber", () => ({
     }
     return phone;
   }),
-  formatWhatsAppJid: jest.fn(
-    (phone) => `${phone.replace("+", "")}@s.whatsapp.net`,
-  ),
+  formatWhatsAppJid: jest.fn((phone) => `${phone.replace("+", "")}@s.whatsapp.net`),
 }));
 jest.mock("pino", () => {
   const mockLogger = {
@@ -182,7 +180,7 @@ describe("ConnectionPool", () => {
         mockConnectionStateManager,
         mockWsManager,
         mockErrorHandler,
-        mockInstanceCoordinator,
+        mockInstanceCoordinator
       );
 
       expect(connectionPool).toBeInstanceOf(ConnectionPool);
@@ -198,65 +196,31 @@ describe("ConnectionPool", () => {
         mockConnectionStateManager,
         mockWsManager,
         mockErrorHandler,
-        mockInstanceCoordinator,
+        mockInstanceCoordinator
       );
 
       // WebSocket manager listeners
-      expect(mockWsManager.on).toHaveBeenCalledWith(
-        "connection-error",
-        expect.any(Function),
-      );
+      expect(mockWsManager.on).toHaveBeenCalledWith("connection-error", expect.any(Function));
 
       // Error handler listeners
-      expect(mockErrorHandler.on).toHaveBeenCalledWith(
-        "websocket-recovery-needed",
-        expect.any(Function),
-      );
-      expect(mockErrorHandler.on).toHaveBeenCalledWith(
-        "connection-restart-needed",
-        expect.any(Function),
-      );
-      expect(mockErrorHandler.on).toHaveBeenCalledWith(
-        "connection-refresh-needed",
-        expect.any(Function),
-      );
-      expect(mockErrorHandler.on).toHaveBeenCalledWith(
-        "reconnection-needed",
-        expect.any(Function),
-      );
-      expect(mockErrorHandler.on).toHaveBeenCalledWith(
-        "graceful-shutdown",
-        expect.any(Function),
-      );
+      expect(mockErrorHandler.on).toHaveBeenCalledWith("websocket-recovery-needed", expect.any(Function));
+      expect(mockErrorHandler.on).toHaveBeenCalledWith("connection-restart-needed", expect.any(Function));
+      expect(mockErrorHandler.on).toHaveBeenCalledWith("connection-refresh-needed", expect.any(Function));
+      expect(mockErrorHandler.on).toHaveBeenCalledWith("reconnection-needed", expect.any(Function));
+      expect(mockErrorHandler.on).toHaveBeenCalledWith("graceful-shutdown", expect.any(Function));
 
       // Instance coordinator listeners
-      expect(mockInstanceCoordinator.on).toHaveBeenCalledWith(
-        "session-transfer-needed",
-        expect.any(Function),
-      );
-      expect(mockInstanceCoordinator.on).toHaveBeenCalledWith(
-        "load-balance-recommendation",
-        expect.any(Function),
-      );
-      expect(mockInstanceCoordinator.on).toHaveBeenCalledWith(
-        "instance-health-changed",
-        expect.any(Function),
-      );
+      expect(mockInstanceCoordinator.on).toHaveBeenCalledWith("session-transfer-needed", expect.any(Function));
+      expect(mockInstanceCoordinator.on).toHaveBeenCalledWith("load-balance-recommendation", expect.any(Function));
+      expect(mockInstanceCoordinator.on).toHaveBeenCalledWith("instance-health-changed", expect.any(Function));
     });
 
     it("should create default services when not provided", () => {
       // Mock the InstanceCoordinator constructor to return our mock
-      const InstanceCoordinatorMock = InstanceCoordinator as jest.MockedClass<
-        typeof InstanceCoordinator
-      >;
+      const InstanceCoordinatorMock = InstanceCoordinator as jest.MockedClass<typeof InstanceCoordinator>;
       InstanceCoordinatorMock.mockImplementation(() => mockInstanceCoordinator);
 
-      connectionPool = new ConnectionPool(
-        mockProxyManager,
-        mockSessionManager,
-        mockFirestore,
-        mockPubsub,
-      );
+      connectionPool = new ConnectionPool(mockProxyManager, mockSessionManager, mockFirestore, mockPubsub);
 
       expect(connectionPool).toBeInstanceOf(ConnectionPool);
     });
@@ -272,7 +236,7 @@ describe("ConnectionPool", () => {
         mockConnectionStateManager,
         mockWsManager,
         mockErrorHandler,
-        mockInstanceCoordinator,
+        mockInstanceCoordinator
       );
 
       mockSessionManager.createConnection.mockResolvedValue({
@@ -282,47 +246,19 @@ describe("ConnectionPool", () => {
     });
 
     it("should successfully add a new connection", async () => {
-      const result = await connectionPool.addConnection(
-        "user123",
-        "+1234567890",
-        "nl",
-      );
+      const result = await connectionPool.addConnection("user123", "+1234567890", "nl");
 
       expect(result).toBe(true);
-      expect(mockConnectionStateManager.initializeState).toHaveBeenCalledWith(
-        "user123",
-        "+1234567890",
-        "http://test-instance:8080",
-      );
-      expect(mockSessionManager.createConnection).toHaveBeenCalledWith(
-        "user123",
-        "+1234567890",
-        "nl",
-        undefined,
-        false,
-        undefined,
-      );
-      expect(
-        mockInstanceCoordinator.updateSessionActivity,
-      ).toHaveBeenCalledWith("user123", "+1234567890");
+      expect(mockConnectionStateManager.initializeState).toHaveBeenCalledWith("user123", "+1234567890", "http://test-instance:8080");
+      expect(mockSessionManager.createConnection).toHaveBeenCalledWith("user123", "+1234567890", "nl", undefined, false, undefined);
+      expect(mockInstanceCoordinator.updateSessionActivity).toHaveBeenCalledWith("user123", "+1234567890");
     });
 
     it("should format phone numbers to E.164 format", async () => {
-      const result = await connectionPool.addConnection(
-        "user123",
-        "+1234567890",
-        "nl",
-      );
+      const result = await connectionPool.addConnection("user123", "+1234567890", "nl");
 
       expect(result).toBe(true);
-      expect(mockSessionManager.createConnection).toHaveBeenCalledWith(
-        "user123",
-        expect.stringMatching(/^\+/),
-        "nl",
-        undefined,
-        false,
-        undefined,
-      );
+      expect(mockSessionManager.createConnection).toHaveBeenCalledWith("user123", expect.stringMatching(/^\+/), "nl", undefined, false, undefined);
     });
 
     it("should reject connections when at capacity", async () => {
@@ -332,11 +268,7 @@ describe("ConnectionPool", () => {
       }
 
       // Try to add one more
-      const result = await connectionPool.addConnection(
-        "user456",
-        "+9999999999",
-        "nl",
-      );
+      const result = await connectionPool.addConnection("user456", "+9999999999", "nl");
 
       expect(result).toBe(false);
     });
@@ -345,11 +277,7 @@ describe("ConnectionPool", () => {
       await connectionPool.addConnection("user123", "+1234567890", "nl");
 
       // Try to add same connection again
-      const result = await connectionPool.addConnection(
-        "user123",
-        "+1234567890",
-        "nl",
-      );
+      const result = await connectionPool.addConnection("user123", "+1234567890", "nl");
 
       expect(result).toBe(true);
       expect(mockSessionManager.createConnection).toHaveBeenCalledTimes(1);
@@ -359,20 +287,11 @@ describe("ConnectionPool", () => {
       mockInstanceCoordinator.shouldHandleSession.mockResolvedValue(false);
       mockInstanceCoordinator.requestSessionOwnership.mockResolvedValue(false);
 
-      const result = await connectionPool.addConnection(
-        "user123",
-        "+1234567890",
-        "nl",
-      );
+      const result = await connectionPool.addConnection("user123", "+1234567890", "nl");
 
       expect(result).toBe(false);
-      expect(mockInstanceCoordinator.shouldHandleSession).toHaveBeenCalledWith(
-        "user123",
-        "+1234567890",
-      );
-      expect(
-        mockInstanceCoordinator.requestSessionOwnership,
-      ).toHaveBeenCalledWith("user123", "+1234567890");
+      expect(mockInstanceCoordinator.shouldHandleSession).toHaveBeenCalledWith("user123", "+1234567890");
+      expect(mockInstanceCoordinator.requestSessionOwnership).toHaveBeenCalledWith("user123", "+1234567890");
     });
 
     it("should handle recovery mode correctly", async () => {
@@ -381,41 +300,29 @@ describe("ConnectionPool", () => {
         "+1234567890",
         "nl",
         undefined,
-        true, // isRecovery
+        true // isRecovery
       );
 
       expect(result).toBe(true);
-      expect(mockConnectionStateManager.updateState).toHaveBeenCalledWith(
-        "user123",
-        "+1234567890",
-        {
-          instanceUrl: "http://test-instance:8080",
-        },
-      );
+      expect(mockConnectionStateManager.updateState).toHaveBeenCalledWith("user123", "+1234567890", {
+        instanceUrl: "http://test-instance:8080",
+      });
       expect(mockSessionManager.createConnection).toHaveBeenCalledWith(
         "user123",
         "+1234567890",
         "nl",
         undefined,
         true, // Skip proxy creation in recovery
-        undefined,
+        undefined
       );
       // Should not update session activity in recovery mode
-      expect(
-        mockInstanceCoordinator.updateSessionActivity,
-      ).not.toHaveBeenCalled();
+      expect(mockInstanceCoordinator.updateSessionActivity).not.toHaveBeenCalled();
     });
 
     it("should handle connection creation errors", async () => {
-      mockSessionManager.createConnection.mockRejectedValue(
-        new Error("Connection failed"),
-      );
+      mockSessionManager.createConnection.mockRejectedValue(new Error("Connection failed"));
 
-      const result = await connectionPool.addConnection(
-        "user123",
-        "+1234567890",
-        "nl",
-      );
+      const result = await connectionPool.addConnection("user123", "+1234567890", "nl");
 
       expect(result).toBe(false);
     });
@@ -446,7 +353,7 @@ describe("ConnectionPool", () => {
         mockConnectionStateManager,
         mockWsManager,
         mockErrorHandler,
-        mockInstanceCoordinator,
+        mockInstanceCoordinator
       );
 
       mockSessionManager.createConnection.mockResolvedValue({
@@ -463,16 +370,9 @@ describe("ConnectionPool", () => {
       expect(mockSocket.logout).toHaveBeenCalled();
       expect(mockSocket.end).toHaveBeenCalled();
       expect(mockSocket.ev.removeAllListeners).toHaveBeenCalled();
-      expect(mockProxyManager.releaseProxy).toHaveBeenCalledWith(
-        "user123",
-        "+1234567890",
-      );
-      expect(mockWsManager.unregisterConnection).toHaveBeenCalledWith(
-        "user123:+1234567890",
-      );
-      expect(
-        mockInstanceCoordinator.releaseSessionOwnership,
-      ).toHaveBeenCalledWith("user123", "+1234567890");
+      expect(mockProxyManager.releaseProxy).toHaveBeenCalledWith("user123", "+1234567890");
+      expect(mockWsManager.unregisterConnection).toHaveBeenCalledWith("user123:+1234567890");
+      expect(mockInstanceCoordinator.releaseSessionOwnership).toHaveBeenCalledWith("user123", "+1234567890");
     });
 
     it("should remove connection without logout when skipLogout is true", async () => {
@@ -486,9 +386,7 @@ describe("ConnectionPool", () => {
     });
 
     it("should handle removal of non-existent connection gracefully", async () => {
-      await expect(
-        connectionPool.removeConnection("user999", "+9999999999"),
-      ).resolves.not.toThrow();
+      await expect(connectionPool.removeConnection("user999", "+9999999999")).resolves.not.toThrow();
     });
 
     it("should handle logout errors gracefully", async () => {
@@ -496,9 +394,7 @@ describe("ConnectionPool", () => {
 
       mockSocket.logout.mockRejectedValue(new Error("Logout failed"));
 
-      await expect(
-        connectionPool.removeConnection("user123", "+1234567890"),
-      ).resolves.not.toThrow();
+      await expect(connectionPool.removeConnection("user123", "+1234567890")).resolves.not.toThrow();
 
       expect(mockSocket.end).toHaveBeenCalled();
     });
@@ -527,7 +423,7 @@ describe("ConnectionPool", () => {
         mockConnectionStateManager,
         mockWsManager,
         mockErrorHandler,
-        mockInstanceCoordinator,
+        mockInstanceCoordinator
       );
 
       mockSessionManager.createConnection.mockResolvedValue({
@@ -580,7 +476,7 @@ describe("ConnectionPool", () => {
         mockConnectionStateManager,
         mockWsManager,
         mockErrorHandler,
-        mockInstanceCoordinator,
+        mockInstanceCoordinator
       );
 
       mockSessionManager.createConnection.mockResolvedValue({
@@ -594,11 +490,7 @@ describe("ConnectionPool", () => {
 
       // Try to add 6 connections (max is 5)
       for (let i = 0; i < 6; i++) {
-        const result = await connectionPool.addConnection(
-          "user123",
-          `+123456789${i}`,
-          "nl",
-        );
+        const result = await connectionPool.addConnection("user123", `+123456789${i}`, "nl");
         results.push(result);
       }
 
@@ -613,22 +505,14 @@ describe("ConnectionPool", () => {
       }
 
       // Try to add one more (should fail)
-      let result = await connectionPool.addConnection(
-        "user456",
-        "+9999999999",
-        "nl",
-      );
+      let result = await connectionPool.addConnection("user456", "+9999999999", "nl");
       expect(result).toBe(false);
 
       // Remove one connection
       await connectionPool.removeConnection("user123", "+1234567890");
 
       // Now should succeed
-      result = await connectionPool.addConnection(
-        "user456",
-        "+9999999999",
-        "nl",
-      );
+      result = await connectionPool.addConnection("user456", "+9999999999", "nl");
       expect(result).toBe(true);
     });
   });
@@ -643,7 +527,7 @@ describe("ConnectionPool", () => {
         mockConnectionStateManager,
         mockWsManager,
         mockErrorHandler,
-        mockInstanceCoordinator,
+        mockInstanceCoordinator
       );
 
       mockSessionManager.createConnection.mockResolvedValue({
@@ -656,9 +540,7 @@ describe("ConnectionPool", () => {
       const promises = [];
 
       for (let i = 0; i < 3; i++) {
-        promises.push(
-          connectionPool.addConnection("user123", `+123456789${i}`, "nl"),
-        );
+        promises.push(connectionPool.addConnection("user123", `+123456789${i}`, "nl"));
       }
 
       const results = await Promise.all(promises);
@@ -693,15 +575,13 @@ describe("ConnectionPool", () => {
         mockConnectionStateManager,
         mockWsManager,
         mockErrorHandler,
-        mockInstanceCoordinator,
+        mockInstanceCoordinator
       );
     });
 
     it("should calculate memory usage correctly", () => {
       // Access private method through type assertion
-      const getMemoryUsage = (connectionPool as any).getMemoryUsage.bind(
-        connectionPool,
-      );
+      const getMemoryUsage = (connectionPool as any).getMemoryUsage.bind(connectionPool);
 
       const usage = getMemoryUsage();
 
@@ -711,9 +591,7 @@ describe("ConnectionPool", () => {
     });
 
     it("should parse Cloud Run memory limits", () => {
-      const getContainerMemoryLimit = (
-        connectionPool as any
-      ).getContainerMemoryLimit.bind(connectionPool);
+      const getContainerMemoryLimit = (connectionPool as any).getContainerMemoryLimit.bind(connectionPool);
 
       // Test with different memory formats
       process.env.MEMORY_LIMIT = "2Gi";
@@ -740,7 +618,7 @@ describe("ConnectionPool", () => {
         mockConnectionStateManager,
         mockWsManager,
         mockErrorHandler,
-        mockInstanceCoordinator,
+        mockInstanceCoordinator
       );
 
       mockSessionManager.createConnection.mockResolvedValue({
@@ -750,49 +628,31 @@ describe("ConnectionPool", () => {
     });
 
     it("should handle invalid phone numbers", async () => {
-      await expect(
-        connectionPool.addConnection("user123", "invalid", "nl"),
-      ).rejects.toThrow(/Invalid phone number format/);
+      await expect(connectionPool.addConnection("user123", "invalid", "nl")).rejects.toThrow(/Invalid phone number format/);
     });
 
     it("should handle session manager errors", async () => {
-      mockSessionManager.createConnection.mockRejectedValue(
-        new Error("Session creation failed"),
-      );
+      mockSessionManager.createConnection.mockRejectedValue(new Error("Session creation failed"));
 
-      const result = await connectionPool.addConnection(
-        "user123",
-        "+1234567890",
-        "nl",
-      );
+      const result = await connectionPool.addConnection("user123", "+1234567890", "nl");
 
       expect(result).toBe(false);
     });
 
     it("should handle Firestore errors gracefully", async () => {
-      mockConnectionStateManager.initializeState.mockRejectedValue(
-        new Error("Firestore error"),
-      );
+      mockConnectionStateManager.initializeState.mockRejectedValue(new Error("Firestore error"));
 
-      const result = await connectionPool.addConnection(
-        "user123",
-        "+1234567890",
-        "nl",
-      );
+      const result = await connectionPool.addConnection("user123", "+1234567890", "nl");
 
       expect(result).toBe(false);
     });
 
     it("should handle proxy manager errors", async () => {
-      mockProxyManager.releaseProxy.mockRejectedValue(
-        new Error("Proxy release failed"),
-      );
+      mockProxyManager.releaseProxy.mockRejectedValue(new Error("Proxy release failed"));
 
       await connectionPool.addConnection("user123", "+1234567890", "nl");
 
-      await expect(
-        connectionPool.removeConnection("user123", "+1234567890"),
-      ).resolves.not.toThrow();
+      await expect(connectionPool.removeConnection("user123", "+1234567890")).resolves.not.toThrow();
     });
   });
 
@@ -806,7 +666,7 @@ describe("ConnectionPool", () => {
         mockConnectionStateManager,
         mockWsManager,
         mockErrorHandler,
-        mockInstanceCoordinator,
+        mockInstanceCoordinator
       );
 
       mockSessionManager.createConnection.mockResolvedValue({
@@ -853,22 +713,8 @@ describe("ConnectionPool", () => {
       await connectionPool.initializeRecovery();
 
       expect(mockSessionManager.createConnection).toHaveBeenCalledTimes(2);
-      expect(mockSessionManager.createConnection).toHaveBeenCalledWith(
-        "user123",
-        "+1234567890",
-        "nl",
-        undefined,
-        true,
-        undefined,
-      );
-      expect(mockSessionManager.createConnection).toHaveBeenCalledWith(
-        "user456",
-        "+9876543210",
-        "us",
-        undefined,
-        true,
-        undefined,
-      );
+      expect(mockSessionManager.createConnection).toHaveBeenCalledWith("user123", "+1234567890", "nl", undefined, true, undefined);
+      expect(mockSessionManager.createConnection).toHaveBeenCalledWith("user456", "+9876543210", "us", undefined, true, undefined);
     });
 
     it("should skip logged out sessions during recovery", async () => {
@@ -902,24 +748,13 @@ describe("ConnectionPool", () => {
 
       // Should only recover the non-logged-out session
       expect(mockSessionManager.createConnection).toHaveBeenCalledTimes(1);
-      expect(mockSessionManager.createConnection).toHaveBeenCalledWith(
-        "user456",
-        "+9876543210",
-        "us",
-        undefined,
-        true,
-        undefined,
-      );
+      expect(mockSessionManager.createConnection).toHaveBeenCalledWith("user456", "+9876543210", "us", undefined, true, undefined);
     });
 
     it("should handle recovery errors gracefully", async () => {
-      mockSessionManager.listAllSessions.mockResolvedValue([
-        { userId: "user123", phoneNumber: "+1234567890" },
-      ]);
+      mockSessionManager.listAllSessions.mockResolvedValue([{ userId: "user123", phoneNumber: "+1234567890" }]);
 
-      mockSessionManager.createConnection.mockRejectedValue(
-        new Error("Recovery failed"),
-      );
+      mockSessionManager.createConnection.mockRejectedValue(new Error("Recovery failed"));
 
       await expect(connectionPool.initializeRecovery()).resolves.not.toThrow();
     });
@@ -943,7 +778,7 @@ describe("ConnectionPool", () => {
         mockConnectionStateManager,
         mockWsManager,
         mockErrorHandler,
-        mockInstanceCoordinator,
+        mockInstanceCoordinator
       );
 
       mockSessionManager.createConnection.mockResolvedValue({
@@ -965,12 +800,7 @@ describe("ConnectionPool", () => {
         conversation: "Hello",
       };
 
-      const result = await connectionPool.sendMessage(
-        "user123",
-        "+1234567890",
-        "+9876543210",
-        messageContent,
-      );
+      const result = await connectionPool.sendMessage("user123", "+1234567890", "+9876543210", messageContent);
 
       expect(result).toBeDefined();
       expect(mockSocket.sendMessage).toHaveBeenCalled();
@@ -981,12 +811,7 @@ describe("ConnectionPool", () => {
         conversation: "Hello",
       };
 
-      const result = await connectionPool.sendMessage(
-        "user999",
-        "+9999999999",
-        "+9876543210",
-        messageContent,
-      );
+      const result = await connectionPool.sendMessage("user999", "+9999999999", "+9876543210", messageContent);
 
       expect(result).toBeNull();
     });
@@ -1038,7 +863,7 @@ describe("ConnectionPool", () => {
         mockConnectionStateManager,
         mockWsManager,
         mockErrorHandler,
-        mockInstanceCoordinator,
+        mockInstanceCoordinator
       );
 
       mockSessionManager.createConnection.mockResolvedValue({
@@ -1047,13 +872,11 @@ describe("ConnectionPool", () => {
       });
 
       // Capture the messages.upsert handler when connection is created
-      (mockSocket.ev.on as jest.Mock).mockImplementation(
-        (event: string, handler: any) => {
-          if (event === "messages.upsert") {
-            messagesUpsertHandler = handler;
-          }
-        },
-      );
+      (mockSocket.ev.on as jest.Mock).mockImplementation((event: string, handler: any) => {
+        if (event === "messages.upsert") {
+          messagesUpsertHandler = handler;
+        }
+      });
 
       // Add a connection to register the event handlers
       await connectionPool.addConnection("user123", "+1234567890", "nl");
@@ -1156,7 +979,7 @@ describe("ConnectionPool", () => {
         mockConnectionStateManager,
         mockWsManager,
         mockErrorHandler,
-        mockInstanceCoordinator,
+        mockInstanceCoordinator
       );
 
       mockSessionManager.createConnection.mockResolvedValue({
@@ -1212,7 +1035,7 @@ describe("ConnectionPool", () => {
         mockConnectionStateManager,
         mockWsManager,
         mockErrorHandler,
-        mockInstanceCoordinator,
+        mockInstanceCoordinator
       );
     });
 
@@ -1223,9 +1046,7 @@ describe("ConnectionPool", () => {
     });
 
     it("should generate consistent connection keys", () => {
-      const getConnectionKey = (connectionPool as any).getConnectionKey.bind(
-        connectionPool,
-      );
+      const getConnectionKey = (connectionPool as any).getConnectionKey.bind(connectionPool);
 
       const key1 = getConnectionKey("user123", "+1234567890");
       const key2 = getConnectionKey("user123", "+1234567890");
@@ -1242,15 +1063,11 @@ describe("ConnectionPool", () => {
     });
 
     it("should identify special WhatsApp identifiers", () => {
-      const isSpecialWhatsAppIdentifier = (
-        connectionPool as any
-      ).isSpecialWhatsAppIdentifier.bind(connectionPool);
+      const isSpecialWhatsAppIdentifier = (connectionPool as any).isSpecialWhatsAppIdentifier.bind(connectionPool);
 
       expect(isSpecialWhatsAppIdentifier("status@broadcast")).toBe(true);
       expect(isSpecialWhatsAppIdentifier("1234567890@lid")).toBe(true);
-      expect(isSpecialWhatsAppIdentifier("1234567890@s.whatsapp.net")).toBe(
-        false,
-      );
+      expect(isSpecialWhatsAppIdentifier("1234567890@s.whatsapp.net")).toBe(false);
     });
   });
 
@@ -1264,7 +1081,7 @@ describe("ConnectionPool", () => {
         mockConnectionStateManager,
         mockWsManager,
         mockErrorHandler,
-        mockInstanceCoordinator,
+        mockInstanceCoordinator
       );
 
       mockSessionManager.createConnection.mockResolvedValue({
@@ -1278,9 +1095,7 @@ describe("ConnectionPool", () => {
         // Fill pool to capacity (5 connections)
         const addPromises = [];
         for (let i = 0; i < 5; i++) {
-          addPromises.push(
-            connectionPool.addConnection("user123", `+123456789${i}`, "nl"),
-          );
+          addPromises.push(connectionPool.addConnection("user123", `+123456789${i}`, "nl"));
         }
         await Promise.all(addPromises);
 
@@ -1298,11 +1113,7 @@ describe("ConnectionPool", () => {
         await connectionPool.removeConnection("user123", "+1234567890");
 
         // Now one connection should succeed
-        const result = await connectionPool.addConnection(
-          "user456",
-          "+4444444444",
-          "nl",
-        );
+        const result = await connectionPool.addConnection("user456", "+4444444444", "nl");
         expect(result).toBe(true);
       });
 
@@ -1336,11 +1147,7 @@ describe("ConnectionPool", () => {
 
           try {
             // Add connection
-            const added = await connectionPool.addConnection(
-              userId,
-              phoneNumber,
-              "nl",
-            );
+            const added = await connectionPool.addConnection(userId, phoneNumber, "nl");
             if (added) successfulConnections++;
 
             // Immediately remove it
@@ -1371,11 +1178,7 @@ describe("ConnectionPool", () => {
         }
 
         // Final connection should work
-        const result = await connectionPool.addConnection(
-          userId,
-          phoneNumber,
-          "nl",
-        );
+        const result = await connectionPool.addConnection(userId, phoneNumber, "nl");
         expect(result).toBe(true);
 
         // Verify proxy was released and re-assigned correctly
@@ -1405,16 +1208,9 @@ describe("ConnectionPool", () => {
         // Verify all cleanup happened
         expect(connectionPool.getConnection(userId, phoneNumber)).toBeNull();
         expect(mockSocket.end).toHaveBeenCalled();
-        expect(mockProxyManager.releaseProxy).toHaveBeenCalledWith(
-          userId,
-          phoneNumber,
-        );
-        expect(mockWsManager.unregisterConnection).toHaveBeenCalledWith(
-          `${userId}:${phoneNumber}`,
-        );
-        expect(
-          mockInstanceCoordinator.releaseSessionOwnership,
-        ).toHaveBeenCalledWith(userId, phoneNumber);
+        expect(mockProxyManager.releaseProxy).toHaveBeenCalledWith(userId, phoneNumber);
+        expect(mockWsManager.unregisterConnection).toHaveBeenCalledWith(`${userId}:${phoneNumber}`);
+        expect(mockInstanceCoordinator.releaseSessionOwnership).toHaveBeenCalledWith(userId, phoneNumber);
       });
 
       it("should clear all maps and timers on shutdown", async () => {
@@ -1442,25 +1238,15 @@ describe("ConnectionPool", () => {
         await connectionPool.addConnection("user123", "+1234567890", "nl");
 
         // Set connection to open state
-        const connection = connectionPool.getConnection(
-          "user123",
-          "+1234567890",
-        );
+        const connection = connectionPool.getConnection("user123", "+1234567890");
         if (connection) {
           connection.state.connection = "open";
         }
 
         // Mock socket.sendMessage to throw an error (simulating disconnect)
-        mockSocket.sendMessage.mockRejectedValueOnce(
-          new Error("Socket closed"),
-        );
+        mockSocket.sendMessage.mockRejectedValueOnce(new Error("Socket closed"));
 
-        const result = await connectionPool.sendMessage(
-          "user123",
-          "+1234567890",
-          "+9876543210",
-          { conversation: "Hello" },
-        );
+        const result = await connectionPool.sendMessage("user123", "+1234567890", "+9876543210", { conversation: "Hello" });
 
         // Should handle error gracefully
         expect(result).toBeNull();
@@ -1470,12 +1256,7 @@ describe("ConnectionPool", () => {
         await connectionPool.addConnection("user123", "+1234567890", "nl");
 
         // Leave connection in "connecting" state
-        const result = await connectionPool.sendMessage(
-          "user123",
-          "+1234567890",
-          "+9876543210",
-          { conversation: "Hello" },
-        );
+        const result = await connectionPool.sendMessage("user123", "+1234567890", "+9876543210", { conversation: "Hello" });
 
         expect(result).toBeNull();
         expect(mockSocket.sendMessage).not.toHaveBeenCalled();
@@ -1487,32 +1268,20 @@ describe("ConnectionPool", () => {
         await connectionPool.addConnection("user123", "+1234567890", "nl");
 
         // Mock proxy release to fail
-        mockProxyManager.releaseProxy.mockRejectedValueOnce(
-          new Error("Proxy service unreachable"),
-        );
+        mockProxyManager.releaseProxy.mockRejectedValueOnce(new Error("Proxy service unreachable"));
 
         // Should not throw even if proxy release fails
-        await expect(
-          connectionPool.removeConnection("user123", "+1234567890"),
-        ).resolves.not.toThrow();
+        await expect(connectionPool.removeConnection("user123", "+1234567890")).resolves.not.toThrow();
 
         // Connection should still be removed from pool
-        expect(
-          connectionPool.getConnection("user123", "+1234567890"),
-        ).toBeNull();
+        expect(connectionPool.getConnection("user123", "+1234567890")).toBeNull();
       });
 
       it("should handle proxy assignment failure during addConnection", async () => {
         // Mock session creation to fail due to proxy issues
-        mockSessionManager.createConnection.mockRejectedValueOnce(
-          new Error("No proxies available"),
-        );
+        mockSessionManager.createConnection.mockRejectedValueOnce(new Error("No proxies available"));
 
-        const result = await connectionPool.addConnection(
-          "user123",
-          "+1234567890",
-          "nl",
-        );
+        const result = await connectionPool.addConnection("user123", "+1234567890", "nl");
 
         // Connection creation should fail gracefully
         expect(result).toBe(false);
@@ -1534,9 +1303,7 @@ describe("ConnectionPool", () => {
         expect(result2).toBeUndefined();
 
         // Connection should be removed
-        expect(
-          connectionPool.getConnection("user123", "+1234567890"),
-        ).toBeNull();
+        expect(connectionPool.getConnection("user123", "+1234567890")).toBeNull();
 
         // Logout should be called at least once (might be called twice due to race)
         expect(mockSocket.logout).toHaveBeenCalled();
@@ -1544,25 +1311,15 @@ describe("ConnectionPool", () => {
 
       it("should handle concurrent add and remove of same connection", async () => {
         // Start adding a connection
-        const addPromise = connectionPool.addConnection(
-          "user123",
-          "+1234567890",
-          "nl",
-        );
+        const addPromise = connectionPool.addConnection("user123", "+1234567890", "nl");
 
         // Immediately try to remove it (before add completes)
-        const removePromise = connectionPool.removeConnection(
-          "user123",
-          "+1234567890",
-        );
+        const removePromise = connectionPool.removeConnection("user123", "+1234567890");
 
         await Promise.all([addPromise, removePromise]);
 
         // The final state should be consistent (either exists or doesn't)
-        const connection = connectionPool.getConnection(
-          "user123",
-          "+1234567890",
-        );
+        const connection = connectionPool.getConnection("user123", "+1234567890");
         // Connection might exist or not depending on timing, but shouldn't crash
         expect(typeof connection).toBeDefined();
       });
@@ -1572,9 +1329,7 @@ describe("ConnectionPool", () => {
       it("should handle invalid MEMORY_LIMIT environment variable", () => {
         process.env.MEMORY_LIMIT = "invalid";
 
-        const getContainerMemoryLimit = (
-          connectionPool as any
-        ).getContainerMemoryLimit.bind(connectionPool);
+        const getContainerMemoryLimit = (connectionPool as any).getContainerMemoryLimit.bind(connectionPool);
 
         const limit = getContainerMemoryLimit();
 
@@ -1588,9 +1343,7 @@ describe("ConnectionPool", () => {
       it("should handle missing unit in MEMORY_LIMIT", () => {
         process.env.MEMORY_LIMIT = "1024";
 
-        const getContainerMemoryLimit = (
-          connectionPool as any
-        ).getContainerMemoryLimit.bind(connectionPool);
+        const getContainerMemoryLimit = (connectionPool as any).getContainerMemoryLimit.bind(connectionPool);
 
         const limit = getContainerMemoryLimit();
 
@@ -1603,9 +1356,7 @@ describe("ConnectionPool", () => {
       it("should calculate memory usage even with invalid container limit", () => {
         process.env.MEMORY_LIMIT = "invalid";
 
-        const getMemoryUsage = (connectionPool as any).getMemoryUsage.bind(
-          connectionPool,
-        );
+        const getMemoryUsage = (connectionPool as any).getMemoryUsage.bind(connectionPool);
 
         const usage = getMemoryUsage();
 
@@ -1620,32 +1371,20 @@ describe("ConnectionPool", () => {
 
     describe("Session Manager Failures", () => {
       it("should handle SessionManager throwing during connection creation", async () => {
-        mockSessionManager.createConnection.mockRejectedValueOnce(
-          new Error("Baileys initialization failed"),
-        );
+        mockSessionManager.createConnection.mockRejectedValueOnce(new Error("Baileys initialization failed"));
 
-        const result = await connectionPool.addConnection(
-          "user123",
-          "+1234567890",
-          "nl",
-        );
+        const result = await connectionPool.addConnection("user123", "+1234567890", "nl");
 
         expect(result).toBe(false);
 
         // Connection should not be in pool
-        expect(
-          connectionPool.getConnection("user123", "+1234567890"),
-        ).toBeNull();
+        expect(connectionPool.getConnection("user123", "+1234567890")).toBeNull();
       });
 
       it("should handle SessionManager.listAllSessions failure during recovery", async () => {
-        mockSessionManager.listAllSessions.mockRejectedValueOnce(
-          new Error("Filesystem error"),
-        );
+        mockSessionManager.listAllSessions.mockRejectedValueOnce(new Error("Filesystem error"));
 
-        await expect(connectionPool.initializeRecovery()).rejects.toThrow(
-          "Filesystem error",
-        );
+        await expect(connectionPool.initializeRecovery()).rejects.toThrow("Filesystem error");
       });
 
       it("should continue recovery even if individual sessions fail", async () => {
@@ -1712,29 +1451,19 @@ describe("ConnectionPool", () => {
 
     describe("Firestore Connection Failures", () => {
       it("should handle Firestore update failure during addConnection", async () => {
-        mockConnectionStateManager.initializeState.mockRejectedValueOnce(
-          new Error("Firestore unavailable"),
-        );
+        mockConnectionStateManager.initializeState.mockRejectedValueOnce(new Error("Firestore unavailable"));
 
-        const result = await connectionPool.addConnection(
-          "user123",
-          "+1234567890",
-          "nl",
-        );
+        const result = await connectionPool.addConnection("user123", "+1234567890", "nl");
 
         expect(result).toBe(false);
 
         // Connection should not be created
-        expect(
-          connectionPool.getConnection("user123", "+1234567890"),
-        ).toBeNull();
+        expect(connectionPool.getConnection("user123", "+1234567890")).toBeNull();
       });
 
       it("should handle PubSub publish failure gracefully", async () => {
         const mockTopic = {
-          publishMessage: jest
-            .fn()
-            .mockRejectedValue(new Error("PubSub unavailable")),
+          publishMessage: jest.fn().mockRejectedValue(new Error("PubSub unavailable")),
         };
         mockPubsub.topic = jest.fn().mockReturnValue(mockTopic);
 
@@ -1743,10 +1472,7 @@ describe("ConnectionPool", () => {
         await connectionPool.addConnection("user123", "+1234567890", "nl");
 
         // Connection should still be created even if PubSub fails
-        const connection = connectionPool.getConnection(
-          "user123",
-          "+1234567890",
-        );
+        const connection = connectionPool.getConnection("user123", "+1234567890");
         expect(connection).not.toBeNull();
       });
 
@@ -1759,9 +1485,7 @@ describe("ConnectionPool", () => {
         };
         mockFirestore.collection = jest.fn().mockReturnValue(mockCollection);
 
-        mockSessionManager.listAllSessions.mockResolvedValue([
-          { userId: "user123", phoneNumber: "+1234567890" },
-        ]);
+        mockSessionManager.listAllSessions.mockResolvedValue([{ userId: "user123", phoneNumber: "+1234567890" }]);
 
         mockConnectionStateManager.recoverConnections.mockResolvedValue([
           {
@@ -1780,9 +1504,7 @@ describe("ConnectionPool", () => {
         ]);
 
         // Recovery should complete even if Firestore reads fail for some sessions
-        await expect(
-          connectionPool.initializeRecovery(),
-        ).resolves.not.toThrow();
+        await expect(connectionPool.initializeRecovery()).resolves.not.toThrow();
       });
     });
 
@@ -1791,9 +1513,7 @@ describe("ConnectionPool", () => {
         // Start adding connections
         const addPromises = [];
         for (let i = 0; i < 3; i++) {
-          addPromises.push(
-            connectionPool.addConnection("user123", `+123456789${i}`, "nl"),
-          );
+          addPromises.push(connectionPool.addConnection("user123", `+123456789${i}`, "nl"));
         }
 
         // Immediately start shutdown
@@ -1813,11 +1533,7 @@ describe("ConnectionPool", () => {
         const shutdownPromise = connectionPool.shutdown(true);
 
         // Try to add new connection during shutdown
-        const addResult = await connectionPool.addConnection(
-          "user456",
-          "+9876543210",
-          "nl",
-        );
+        const addResult = await connectionPool.addConnection("user456", "+9876543210", "nl");
 
         await shutdownPromise;
 
@@ -1832,9 +1548,7 @@ describe("ConnectionPool", () => {
         // Add many connections, each registering event listeners
         const promises = [];
         for (let i = 0; i < 20; i++) {
-          promises.push(
-            connectionPool.addConnection("user123", `+123456789${i}`, "nl"),
-          );
+          promises.push(connectionPool.addConnection("user123", `+123456789${i}`, "nl"));
         }
 
         await Promise.allSettled(promises);
@@ -1846,10 +1560,7 @@ describe("ConnectionPool", () => {
       it("should handle timeout cleanup for QR codes", async () => {
         await connectionPool.addConnection("user123", "+1234567890", "nl");
 
-        const connection = connectionPool.getConnection(
-          "user123",
-          "+1234567890",
-        );
+        const connection = connectionPool.getConnection("user123", "+1234567890");
 
         // Simulate QR timeout being set
         if (connection) {

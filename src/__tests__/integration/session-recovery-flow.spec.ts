@@ -49,18 +49,10 @@ jest.mock("fs", () => ({
   promises: {
     mkdir: jest.fn().mockResolvedValue(undefined),
     writeFile: jest.fn().mockResolvedValue(undefined),
-    readFile: jest
-      .fn()
-      .mockResolvedValue(
-        Buffer.from(JSON.stringify({ creds: { test: "data" } })),
-      ),
-    readdir: jest
-      .fn()
-      .mockResolvedValue(["app-state-sync-key-1.json", "creds.json"]),
+    readFile: jest.fn().mockResolvedValue(Buffer.from(JSON.stringify({ creds: { test: "data" } }))),
+    readdir: jest.fn().mockResolvedValue(["app-state-sync-key-1.json", "creds.json"]),
     unlink: jest.fn().mockResolvedValue(undefined),
-    stat: jest
-      .fn()
-      .mockResolvedValue({ isDirectory: () => true, mtime: new Date() }),
+    stat: jest.fn().mockResolvedValue({ isDirectory: () => true, mtime: new Date() }),
     access: jest.fn().mockResolvedValue(undefined),
     rm: jest.fn().mockResolvedValue(undefined),
   },
@@ -94,11 +86,7 @@ describe.skip("Integration: Session Management & Recovery Complete Flow", () => 
     // Mock Storage
     mockStorageFile = {
       save: jest.fn().mockResolvedValue(undefined),
-      download: jest
-        .fn()
-        .mockResolvedValue([
-          Buffer.from(JSON.stringify({ creds: { test: "data" } })),
-        ]),
+      download: jest.fn().mockResolvedValue([Buffer.from(JSON.stringify({ creds: { test: "data" } }))]),
       delete: jest.fn().mockResolvedValue(undefined),
       exists: jest.fn().mockResolvedValue([true]),
       getMetadata: jest.fn().mockResolvedValue([{ updated: new Date() }]),
@@ -205,22 +193,12 @@ describe.skip("Integration: Session Management & Recovery Complete Flow", () => 
     (baileys.makeCacheableSignalKeyStore as jest.Mock).mockReturnValue({});
 
     // Mock Storage constructor
-    (Storage as jest.MockedClass<typeof Storage>).mockImplementation(
-      () => mockStorage,
-    );
+    (Storage as jest.MockedClass<typeof Storage>).mockImplementation(() => mockStorage);
 
     // Initialize managers with correct constructor signatures
     sessionManager = new SessionManager(mockProxyManager, mockFirestore);
-    connectionPool = new ConnectionPool(
-      mockProxyManager,
-      sessionManager,
-      mockFirestore,
-      mockPubSub,
-    );
-    sessionRecovery = new SessionRecoveryService(
-      mockFirestore,
-      "test-instance-id",
-    );
+    connectionPool = new ConnectionPool(mockProxyManager, sessionManager, mockFirestore, mockPubSub);
+    sessionRecovery = new SessionRecoveryService(mockFirestore, "test-instance-id");
   });
 
   beforeEach(() => {
@@ -235,10 +213,7 @@ describe.skip("Integration: Session Management & Recovery Complete Flow", () => 
       // Step 1: Create new session
       console.log("\n📱 Step 1: Creating new session...");
 
-      const sessionCreated = await sessionManager.createConnection(
-        userId,
-        phoneNumber,
-      );
+      const sessionCreated = await sessionManager.createConnection(userId, phoneNumber);
 
       console.log(`  ✓ Session created: ${sessionCreated}`);
       console.log(`  ✓ User ID: ${userId}`);
@@ -274,9 +249,7 @@ describe.skip("Integration: Session Management & Recovery Complete Flow", () => 
 
       // Verify backup files were saved
       expect(mockStorageFile.save).toHaveBeenCalled();
-      console.log(
-        `  ✓ Files uploaded: ${mockStorageFile.save.mock.calls.length}`,
-      );
+      console.log(`  ✓ Files uploaded: ${mockStorageFile.save.mock.calls.length}`);
 
       // Step 4: Verify session state in Firestore
       console.log("\n💾 Step 4: Verifying session state in Firestore...");
@@ -302,10 +275,7 @@ describe.skip("Integration: Session Management & Recovery Complete Flow", () => 
       console.log(`  ✓ Event listeners cleaned up`);
 
       // Verify connection was removed
-      const removedConnection = connectionPool.getConnection(
-        userId,
-        phoneNumber,
-      );
+      const removedConnection = connectionPool.getConnection(userId, phoneNumber);
       expect(removedConnection).toBeNull();
       console.log(`  ✓ Connection no longer in pool`);
 
@@ -329,10 +299,7 @@ describe.skip("Integration: Session Management & Recovery Complete Flow", () => 
       // Step 7: Verify restored session can reconnect
       console.log("\n🔗 Step 7: Reconnecting with restored credentials...");
 
-      const reconnected = await sessionManager.createConnection(
-        userId,
-        phoneNumber,
-      );
+      const reconnected = await sessionManager.createConnection(userId, phoneNumber);
 
       console.log(`  ✓ Reconnection result: ${reconnected}`);
       expect(reconnected).toBe(true);
@@ -341,9 +308,7 @@ describe.skip("Integration: Session Management & Recovery Complete Flow", () => 
       expect(baileys.useMultiFileAuthState).toHaveBeenCalled();
       console.log(`  ✓ Auth state restored from backup`);
 
-      console.log(
-        "\n✅ SCENARIO 1 COMPLETE: Full lifecycle tested successfully!",
-      );
+      console.log("\n✅ SCENARIO 1 COMPLETE: Full lifecycle tested successfully!");
       console.log("=".repeat(60));
     });
   });
@@ -409,10 +374,7 @@ describe.skip("Integration: Session Management & Recovery Complete Flow", () => 
       // Step 6: Reconnect session
       console.log("\n🔗 Step 6: Reconnecting session...");
 
-      const reconnected = await sessionManager.createConnection(
-        userId,
-        phoneNumber,
-      );
+      const reconnected = await sessionManager.createConnection(userId, phoneNumber);
 
       console.log(`  ✓ Session reconnected: ${reconnected}`);
       expect(reconnected).toBe(true);
@@ -426,10 +388,7 @@ describe.skip("Integration: Session Management & Recovery Complete Flow", () => 
       // Add to pool to verify it works
       await connectionPool.addConnection(userId, phoneNumber);
 
-      const verifiedConnection = connectionPool.getConnection(
-        userId,
-        phoneNumber,
-      );
+      const verifiedConnection = connectionPool.getConnection(userId, phoneNumber);
       expect(verifiedConnection).toBeDefined();
 
       console.log(`  ✓ Session fully operational after recovery`);
@@ -454,27 +413,19 @@ describe.skip("Integration: Session Management & Recovery Complete Flow", () => 
 
       // Step 1: Create all sessions
       for (const session of sessions) {
-        const created = await sessionManager.createConnection(
-          session.userId,
-          session.phoneNumber,
-        );
+        const created = await sessionManager.createConnection(session.userId, session.phoneNumber);
         expect(created).toBe(true);
 
         await connectionPool.addConnection(session.userId, session.phoneNumber);
 
-        console.log(
-          `  ✓ Session ${session.userId} (${session.phoneNumber}) created`,
-        );
+        console.log(`  ✓ Session ${session.userId} (${session.phoneNumber}) created`);
       }
 
       // Step 2: Verify all sessions are in pool
       console.log(`\n🔍 Verifying all sessions in connection pool...`);
 
       for (const session of sessions) {
-        const connection = connectionPool.getConnection(
-          session.userId,
-          session.phoneNumber,
-        );
+        const connection = connectionPool.getConnection(session.userId, session.phoneNumber);
         expect(connection).toBeDefined();
         console.log(`  ✓ ${session.userId} session found in pool`);
       }
@@ -491,29 +442,17 @@ describe.skip("Integration: Session Management & Recovery Complete Flow", () => 
       // Step 4: Disconnect one session
       console.log(`\n🔌 Disconnecting session 2...`);
 
-      await connectionPool.removeConnection(
-        sessions[1].userId,
-        sessions[1].phoneNumber,
-      );
+      await connectionPool.removeConnection(sessions[1].userId, sessions[1].phoneNumber);
 
-      const disconnected = connectionPool.getConnection(
-        sessions[1].userId,
-        sessions[1].phoneNumber,
-      );
+      const disconnected = connectionPool.getConnection(sessions[1].userId, sessions[1].phoneNumber);
       expect(disconnected).toBeNull();
       console.log(`  ✓ Session 2 disconnected`);
 
       // Step 5: Verify other sessions still active
       console.log(`\n✅ Verifying other sessions remain active...`);
 
-      const session1 = connectionPool.getConnection(
-        sessions[0].userId,
-        sessions[0].phoneNumber,
-      );
-      const session3 = connectionPool.getConnection(
-        sessions[2].userId,
-        sessions[2].phoneNumber,
-      );
+      const session1 = connectionPool.getConnection(sessions[0].userId, sessions[0].phoneNumber);
+      const session3 = connectionPool.getConnection(sessions[2].userId, sessions[2].phoneNumber);
 
       expect(session1).toBeDefined();
       expect(session3).toBeDefined();
@@ -532,17 +471,12 @@ describe.skip("Integration: Session Management & Recovery Complete Flow", () => 
       console.log(`  ✓ Session 2 recovered from backup`);
 
       // Step 7: Reconnect session 2
-      const reconnected = await sessionManager.createConnection(
-        sessions[1].userId,
-        sessions[1].phoneNumber,
-      );
+      const reconnected = await sessionManager.createConnection(sessions[1].userId, sessions[1].phoneNumber);
       expect(reconnected).toBe(true);
 
       console.log(`  ✓ Session 2 reconnected`);
 
-      console.log(
-        "\n✅ SCENARIO 3 COMPLETE: Multiple sessions managed independently!",
-      );
+      console.log("\n✅ SCENARIO 3 COMPLETE: Multiple sessions managed independently!");
       console.log("=".repeat(60));
     });
   });
@@ -564,9 +498,7 @@ describe.skip("Integration: Session Management & Recovery Complete Flow", () => 
       // Step 2: Simulate backup corruption
       console.log("\n💔 Step 2: Simulating backup corruption...");
 
-      mockStorageFile.download.mockResolvedValueOnce([
-        Buffer.from("corrupted-data-not-json"),
-      ]);
+      mockStorageFile.download.mockResolvedValueOnce([Buffer.from("corrupted-data-not-json")]);
 
       console.log(`  ✗ Backup file corrupted (invalid JSON)`);
 
@@ -584,9 +516,7 @@ describe.skip("Integration: Session Management & Recovery Complete Flow", () => 
         // The important thing is it doesn't crash
         expect(typeof recovered).toBe("boolean");
       } catch (error) {
-        console.log(
-          `  ✗ Recovery failed gracefully: ${(error as Error).message}`,
-        );
+        console.log(`  ✗ Recovery failed gracefully: ${(error as Error).message}`);
 
         // Graceful failure is acceptable
         expect(error).toBeDefined();
@@ -614,9 +544,7 @@ describe.skip("Integration: Session Management & Recovery Complete Flow", () => 
       // Step 2: Simulate cloud storage failure
       console.log("\n☁️  Step 2: Simulating cloud storage failure...");
 
-      mockStorageFile.save.mockRejectedValueOnce(
-        new Error("Storage quota exceeded"),
-      );
+      mockStorageFile.save.mockRejectedValueOnce(new Error("Storage quota exceeded"));
 
       console.log(`  ✗ Cloud storage unavailable`);
 
@@ -628,9 +556,7 @@ describe.skip("Integration: Session Management & Recovery Complete Flow", () => 
         // await sessionManager.backupToCloudStorage(userId, phoneNumber);
         console.log(`  ⚠️  Backup completed (may have used fallback)`);
       } catch (error) {
-        console.log(
-          `  ✗ Backup failed as expected: ${(error as Error).message}`,
-        );
+        console.log(`  ✗ Backup failed as expected: ${(error as Error).message}`);
         expect(error).toBeDefined();
       }
 
@@ -655,9 +581,7 @@ describe.skip("Integration: Session Management & Recovery Complete Flow", () => 
 
       console.log(`  ✓ Backup successful after retry`);
 
-      console.log(
-        "\n✅ SCENARIO 5 COMPLETE: Storage failure handled correctly!",
-      );
+      console.log("\n✅ SCENARIO 5 COMPLETE: Storage failure handled correctly!");
       console.log("=".repeat(60));
     });
   });
