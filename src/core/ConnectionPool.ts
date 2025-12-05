@@ -1682,29 +1682,51 @@ export class ConnectionPool extends EventEmitter {
             return; // Don't immediately delete or reconnect
           }
 
-          // If connection was previously successful, this is a real takeover - remove it
-          this.logger.warn({ userId, phoneNumber }, "Previously connected session replaced by another instance, removing");
+          // If connection was previously successful, this might still be a reconnection conflict
+          // (e.g., old socket closing while new one is opening). Wait to see if it recovers
+          // before removing from pool, similar to initial connection handling above.
+          this.logger.warn(
+            { userId, phoneNumber },
+            "Previously connected session replaced - waiting to see if connection recovers before removing from pool"
+          );
 
-          // Update state manager if available
-          if (this.connectionStateManager) {
-            await this.connectionStateManager.updateState(userId, phoneNumber, {
-              status: "disconnected",
-              lastError: "Connection replaced by another instance",
-            });
-          }
+          // Set a timeout to clean up if connection doesn't recover
+          setTimeout(async () => {
+            const key = this.getConnectionKey(userId, phoneNumber);
+            const currentConnection = this.connections.get(key);
 
-          // Remove from pool but don't try to reconnect
-          const key = this.getConnectionKey(userId, phoneNumber);
-          this.connections.delete(key);
+            // Only delete if still not connected after 10 seconds
+            if (currentConnection && currentConnection.state.connection !== "open") {
+              this.logger.warn(
+                { userId, phoneNumber },
+                "Connection did not recover after replacement (was previously connected), removing from pool"
+              );
 
-          // Emit disconnection event
-          this.emit("connection-update", {
-            userId,
-            phoneNumber,
-            status: "disconnected",
-          });
+              // Update state manager
+              if (this.connectionStateManager) {
+                await this.connectionStateManager.updateState(userId, phoneNumber, {
+                  status: "disconnected",
+                  lastError: "Connection replaced and did not recover",
+                });
+              }
 
-          return; // Don't reconnect
+              this.connections.delete(key);
+
+              // Emit disconnection event
+              this.emit("connection-update", {
+                userId,
+                phoneNumber,
+                status: "disconnected",
+              });
+            } else if (currentConnection && currentConnection.state.connection === "open") {
+              this.logger.info(
+                { userId, phoneNumber },
+                "Connection recovered successfully after replacement (was previously connected)"
+              );
+            }
+          }, 10000); // 10 second timeout
+
+          return; // Don't immediately delete or reconnect - wait for recovery
         }
 
         const shouldReconnect = disconnectReason !== DisconnectReason.loggedOut;
