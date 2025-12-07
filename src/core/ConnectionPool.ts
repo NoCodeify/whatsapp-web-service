@@ -1685,10 +1685,7 @@ export class ConnectionPool extends EventEmitter {
           // If connection was previously successful, this might still be a reconnection conflict
           // (e.g., old socket closing while new one is opening). Wait to see if it recovers
           // before removing from pool, similar to initial connection handling above.
-          this.logger.warn(
-            { userId, phoneNumber },
-            "Previously connected session replaced - waiting to see if connection recovers before removing from pool"
-          );
+          this.logger.warn({ userId, phoneNumber }, "Previously connected session replaced - waiting to see if connection recovers before removing from pool");
 
           // Set a timeout to clean up if connection doesn't recover
           setTimeout(async () => {
@@ -1697,10 +1694,7 @@ export class ConnectionPool extends EventEmitter {
 
             // Only delete if still not connected after 10 seconds
             if (currentConnection && currentConnection.state.connection !== "open") {
-              this.logger.warn(
-                { userId, phoneNumber },
-                "Connection did not recover after replacement (was previously connected), removing from pool"
-              );
+              this.logger.warn({ userId, phoneNumber }, "Connection did not recover after replacement (was previously connected), removing from pool");
 
               // Update state manager
               if (this.connectionStateManager) {
@@ -1719,10 +1713,7 @@ export class ConnectionPool extends EventEmitter {
                 status: "disconnected",
               });
             } else if (currentConnection && currentConnection.state.connection === "open") {
-              this.logger.info(
-                { userId, phoneNumber },
-                "Connection recovered successfully after replacement (was previously connected)"
-              );
+              this.logger.info({ userId, phoneNumber }, "Connection recovered successfully after replacement (was previously connected)");
             }
           }, 10000); // 10 second timeout
 
