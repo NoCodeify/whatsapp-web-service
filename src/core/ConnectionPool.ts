@@ -15,6 +15,7 @@ import { InstanceCoordinator } from "../services/InstanceCoordinator";
 import { formatPhoneNumberSafe, formatWhatsAppJid } from "../utils/phoneNumber";
 import * as admin from "firebase-admin";
 import { DocumentReference } from "@google-cloud/firestore";
+import { SessionRecoveryService } from "../services/SessionRecoveryService";
 
 export interface QueuedMessage {
   toNumber: string;
@@ -75,6 +76,9 @@ export class ConnectionPool extends EventEmitter {
   private sentMessageIds: Map<string, Date> = new Map(); // Track API-sent message IDs
   private processedContactsCache: Map<string, Set<string>> = new Map(); // Session-based contact deduplication
   private reconnectionInProgress: Map<string, boolean> = new Map(); // Track ongoing reconnections to prevent conflicts
+  private sessionRecoveryService?: SessionRecoveryService; // Reference to session recovery service for on-demand recovery
+  private pendingRecoveryMessages: Map<string, QueuedMessage[]> = new Map(); // Queue messages while session is being recovered
+  private recoveryInProgress: Map<string, Promise<boolean>> = new Map(); // Track ongoing recovery promises to avoid duplicate recovery
 
   private readonly config: ConnectionPoolConfig = {
     maxConnections: parseInt(process.env.MAX_CONNECTIONS || "50"),
@@ -122,6 +126,14 @@ export class ConnectionPool extends EventEmitter {
 
     this.startHealthCheck();
     this.startCleanup();
+  }
+
+  /**
+   * Set the session recovery service reference for on-demand recovery
+   */
+  setSessionRecoveryService(service: SessionRecoveryService): void {
+    this.sessionRecoveryService = service;
+    this.logger.info("Session recovery service reference set for on-demand recovery");
   }
 
   /**
@@ -796,10 +808,20 @@ export class ConnectionPool extends EventEmitter {
       "Attempting to send WhatsApp message"
     );
 
-    const connection = this.getConnection(userId, phoneNumber);
+    let connection = this.getConnection(userId, phoneNumber);
 
-    // If no connection exists at all, reject immediately
+    // If no connection exists at all, try on-demand recovery before rejecting
     if (!connection) {
+      // Check if we can attempt on-demand recovery
+      if (this.sessionRecoveryService) {
+        const recovered = await this.attemptOnDemandRecovery(userId, phoneNumber, messageId, toNumber, content);
+        if (recovered) {
+          // Recovery triggered, message is queued - return a placeholder that will be resolved when recovery completes
+          return recovered;
+        }
+      }
+
+      // No recovery service or recovery not possible - reject immediately
       this.logger.error(
         {
           messageId,
@@ -1015,6 +1037,228 @@ export class ConnectionPool extends EventEmitter {
         await this.handleProxyError(userId, phoneNumber);
       }
 
+      return null;
+    }
+  }
+
+  /**
+   * Attempt on-demand recovery when a message is sent to a session that exists in Firestore but not in memory
+   * Returns a Promise that resolves with message key when recovery completes and message is sent, or null if recovery fails
+   */
+  private async attemptOnDemandRecovery(
+    userId: string,
+    phoneNumber: string,
+    messageId: string,
+    toNumber: string,
+    content: WAMessageContent
+  ): Promise<WAMessageKey | null> {
+    const RECOVERY_TIMEOUT_MS = 30000; // 30 seconds to recover and send
+
+    try {
+      // Check Firestore if session should exist
+      const phoneDoc = await this.firestore.collection("users").doc(userId).collection("phone_numbers").doc(phoneNumber).get();
+
+      if (!phoneDoc.exists) {
+        this.logger.debug({ userId, phoneNumber, messageId }, "No Firestore session found, cannot attempt recovery");
+        return null;
+      }
+
+      const data = phoneDoc.data();
+      const whatsappData = data?.whatsapp_web || {};
+
+      // Only attempt recovery if session has valid data and shows as connected
+      const hasSessionData = whatsappData.session_exists || whatsappData.qr_scanned;
+      const isConnectedInFirestore =
+        whatsappData.status === "connected" || whatsappData.status === "importing_contacts" || whatsappData.status === "importing_messages";
+
+      if (!hasSessionData || !isConnectedInFirestore) {
+        this.logger.debug(
+          {
+            userId,
+            phoneNumber,
+            messageId,
+            hasSessionData,
+            firestoreStatus: whatsappData.status,
+          },
+          "Session not eligible for on-demand recovery"
+        );
+        return null;
+      }
+
+      this.logger.info(
+        {
+          userId,
+          phoneNumber,
+          messageId,
+          toNumber,
+          firestoreStatus: whatsappData.status,
+        },
+        "Attempting on-demand session recovery for queued message"
+      );
+
+      const connectionKey = this.getConnectionKey(userId, phoneNumber);
+
+      // Check if recovery is already in progress for this session
+      let recoveryPromise = this.recoveryInProgress.get(connectionKey);
+
+      if (!recoveryPromise) {
+        // Start new recovery
+        recoveryPromise = this.sessionRecoveryService!.recoverSingleSession(userId, phoneNumber);
+        this.recoveryInProgress.set(connectionKey, recoveryPromise);
+
+        // Clean up recovery tracking after completion
+        recoveryPromise.finally(() => {
+          this.recoveryInProgress.delete(connectionKey);
+        });
+      } else {
+        this.logger.debug({ userId, phoneNumber, messageId }, "Recovery already in progress, waiting for existing recovery");
+      }
+
+      // Queue the message while waiting for recovery
+      return new Promise<WAMessageKey | null>((resolve) => {
+        const timeoutId = setTimeout(() => {
+          // Remove from pending queue
+          const queue = this.pendingRecoveryMessages.get(connectionKey);
+          if (queue) {
+            const index = queue.findIndex((m) => m.timeoutId === timeoutId);
+            if (index >= 0) {
+              queue.splice(index, 1);
+            }
+            if (queue.length === 0) {
+              this.pendingRecoveryMessages.delete(connectionKey);
+            }
+          }
+
+          this.logger.error(
+            {
+              messageId,
+              userId,
+              phoneNumber,
+              toNumber,
+              error: "recovery_timeout",
+            },
+            "On-demand recovery timeout - session did not recover in time"
+          );
+
+          resolve(null);
+        }, RECOVERY_TIMEOUT_MS);
+
+        // Initialize queue for this session
+        if (!this.pendingRecoveryMessages.has(connectionKey)) {
+          this.pendingRecoveryMessages.set(connectionKey, []);
+        }
+
+        // Add message to pending recovery queue
+        this.pendingRecoveryMessages.get(connectionKey)!.push({
+          toNumber,
+          content,
+          timestamp: new Date(),
+          timeoutId,
+          resolve,
+          reject: () => resolve(null),
+        });
+
+        this.logger.info(
+          {
+            messageId,
+            userId,
+            phoneNumber,
+            toNumber,
+            queueSize: this.pendingRecoveryMessages.get(connectionKey)!.length,
+          },
+          "Message queued for on-demand recovery"
+        );
+
+        // Wait for recovery to complete and then process queue
+        recoveryPromise!.then(async (recovered) => {
+          if (recovered) {
+            // Recovery successful, flush the pending queue
+            await this.flushPendingRecoveryQueue(userId, phoneNumber);
+          } else {
+            // Recovery failed, reject all pending messages
+            this.rejectPendingRecoveryQueue(userId, phoneNumber, "Recovery failed");
+          }
+        });
+      });
+    } catch (error: any) {
+      this.logger.error({ userId, phoneNumber, messageId, error: error.message }, "Error during on-demand recovery attempt");
+      return null;
+    }
+  }
+
+  /**
+   * Flush pending recovery queue after successful recovery
+   */
+  private async flushPendingRecoveryQueue(userId: string, phoneNumber: string): Promise<void> {
+    const connectionKey = this.getConnectionKey(userId, phoneNumber);
+    const queue = this.pendingRecoveryMessages.get(connectionKey);
+
+    if (!queue || queue.length === 0) {
+      return;
+    }
+
+    this.logger.info({ userId, phoneNumber, queueSize: queue.length }, "Flushing pending recovery queue after successful recovery");
+
+    // Move messages to the connection's queue for processing
+    const connection = this.getConnection(userId, phoneNumber);
+    if (connection) {
+      // Process queued messages
+      for (const queuedMsg of queue) {
+        clearTimeout(queuedMsg.timeoutId);
+
+        try {
+          const result = await this.sendMessageDirect(connection, queuedMsg.toNumber, queuedMsg.content);
+          queuedMsg.resolve(result);
+        } catch (error) {
+          this.logger.error({ userId, phoneNumber, toNumber: queuedMsg.toNumber, error }, "Failed to send queued message after recovery");
+          queuedMsg.resolve(null);
+        }
+      }
+    } else {
+      // Connection still not available after recovery - reject all
+      this.rejectPendingRecoveryQueue(userId, phoneNumber, "Connection not available after recovery");
+    }
+
+    this.pendingRecoveryMessages.delete(connectionKey);
+  }
+
+  /**
+   * Reject all pending recovery messages for a session
+   */
+  private rejectPendingRecoveryQueue(userId: string, phoneNumber: string, reason: string): void {
+    const connectionKey = this.getConnectionKey(userId, phoneNumber);
+    const queue = this.pendingRecoveryMessages.get(connectionKey);
+
+    if (!queue || queue.length === 0) {
+      return;
+    }
+
+    this.logger.warn({ userId, phoneNumber, queueSize: queue.length, reason }, "Rejecting pending recovery queue");
+
+    for (const queuedMsg of queue) {
+      clearTimeout(queuedMsg.timeoutId);
+      queuedMsg.resolve(null);
+    }
+
+    this.pendingRecoveryMessages.delete(connectionKey);
+  }
+
+  /**
+   * Send message directly via an existing connection (helper for queue processing)
+   */
+  private async sendMessageDirect(connection: WhatsAppConnection, toNumber: string, content: WAMessageContent): Promise<WAMessageKey | null> {
+    try {
+      const jid = this.formatJid(toNumber);
+      const result = await connection.socket.sendMessage(jid, content as any);
+
+      if (result && result.key) {
+        connection.lastActivity = new Date();
+        connection.messageCount++;
+        return result.key;
+      }
+      return null;
+    } catch (error) {
+      this.logger.error({ userId: connection.userId, phoneNumber: connection.phoneNumber, toNumber, error }, "Direct message send failed");
       return null;
     }
   }

@@ -270,6 +270,59 @@ export class SessionRecoveryService {
   }
 
   /**
+   * Recover a single session by userId and phoneNumber (public API for on-demand recovery)
+   * Returns true if recovery was successful, false otherwise
+   */
+  async recoverSingleSession(userId: string, phoneNumber: string): Promise<boolean> {
+    this.logger.info({ userId, phoneNumber }, "On-demand single session recovery requested");
+
+    try {
+      // Fetch session data from Firestore
+      const phoneDoc = await this.firestore.collection("users").doc(userId).collection("phone_numbers").doc(phoneNumber).get();
+
+      if (!phoneDoc.exists) {
+        this.logger.warn({ userId, phoneNumber }, "Phone number document not found for recovery");
+        return false;
+      }
+
+      const data = phoneDoc.data();
+      const whatsappData = data?.whatsapp_web || {};
+
+      // Check if session has valid data for recovery
+      if (!whatsappData.session_exists && !whatsappData.qr_scanned) {
+        this.logger.warn({ userId, phoneNumber }, "No valid session data for recovery");
+        return false;
+      }
+
+      const session: RecoverySession = {
+        userId,
+        phoneNumber,
+        phoneCountry: whatsappData.phone_country || data?.country_code,
+        proxyCountry: whatsappData.proxy_country,
+        lastConnected: whatsappData.last_activity?.toDate() || new Date(),
+        status: "active",
+      };
+
+      await this.recoverSession(session);
+
+      // Check if connection now exists in pool
+      if (this.connectionPool) {
+        const connection = this.connectionPool.getConnection(userId, phoneNumber);
+        if (connection && connection.state.connection === "open") {
+          this.logger.info({ userId, phoneNumber }, "Single session recovery successful");
+          return true;
+        }
+      }
+
+      this.logger.warn({ userId, phoneNumber }, "Single session recovery completed but connection not open");
+      return false;
+    } catch (error: any) {
+      this.logger.error({ userId, phoneNumber, error: error.message }, "Single session recovery failed");
+      return false;
+    }
+  }
+
+  /**
    * Recover a single session
    */
   private async recoverSession(session: RecoverySession): Promise<void> {

@@ -135,6 +135,8 @@ const connectionPool = new ConnectionPool(
 if (sessionRecoveryService) {
   sessionRecoveryService.setConnectionPool(connectionPool);
   sessionRecoveryService.setInstanceCoordinator(instanceCoordinator);
+  // Set reverse reference for on-demand recovery
+  connectionPool.setSessionRecoveryService(sessionRecoveryService);
 }
 
 // Set connection pool reference for status reconciliation service
