@@ -2196,8 +2196,11 @@ export class ConnectionPool extends EventEmitter {
             await this.connectionStateManager.updateSyncProgress(userId, phoneNumber, totalContactsSynced, totalMessagesSynced, false);
           }
 
-          // Update phone number status for UI
-          await this.updatePhoneNumberStatus(userId, phoneNumber, "importing_contacts");
+          // Only update status to importing_contacts if sync hasn't completed yet
+          // This prevents late contact events from overwriting "connected" status
+          if (!syncCompleted) {
+            await this.updatePhoneNumberStatus(userId, phoneNumber, "importing_contacts");
+          }
 
           // Emit sync event for UI
           this.emit("contacts-synced", {
