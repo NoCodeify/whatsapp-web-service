@@ -304,6 +304,66 @@ export class StatusReconciliationService extends EventEmitter {
         }
       }
 
+      // NEW CHECK: Firestore shows "disconnected" but actual connection exists in ConnectionPool
+      // This catches cases where connection recovered but Firestore update failed
+      for (const [key, firestoreStatus] of firestoreConnections) {
+        if (firestoreStatus === "disconnected" && !inMemoryConnections.has(key)) {
+          const [userId, phoneNumber] = key.split(":");
+
+          // Check if actual connection exists in ConnectionPool
+          const hasActualConnection = this.connectionPool?.hasConnection(userId, phoneNumber) || false;
+
+          if (hasActualConnection) {
+            // Get actual connection state
+            const actualConnection = this.connectionPool?.getConnection(userId, phoneNumber);
+            const baileysState = actualConnection?.state?.connection;
+
+            if (baileysState === "open") {
+              this.logger.warn(
+                {
+                  userId,
+                  phoneNumber,
+                  firestoreStatus,
+                  actualBaileysState: baileysState,
+                },
+                "DESYNC DETECTED: Firestore shows 'disconnected' but actual connection is open - fixing"
+              );
+
+              // Fix by updating Firestore to "connected"
+              let fixed = false;
+              try {
+                await this.connectionStateManager.updateState(userId, phoneNumber, {
+                  status: "connected",
+                });
+
+                this.logger.info(
+                  { userId, phoneNumber },
+                  "Successfully fixed desync: Updated Firestore from 'disconnected' to 'connected'"
+                );
+
+                fixed = true;
+                this.metrics.desyncFixed++;
+              } catch (error) {
+                this.logger.error(
+                  { userId, phoneNumber, error },
+                  "Failed to fix disconnected→connected desync"
+                );
+                this.metrics.desyncFailed++;
+              }
+
+              desyncsFound.push({
+                userId,
+                phoneNumber,
+                inMemoryStatus: "connected",
+                firestoreStatus,
+                fixedAt: new Date(),
+                fixed,
+              });
+            }
+          }
+        }
+      }
+
       // Check for stuck initializing/connecting states
       const stuckInitializingTimeout = 120000; // 2 minutes
       const stuckImportTimeout = 60000; // 1 minute
