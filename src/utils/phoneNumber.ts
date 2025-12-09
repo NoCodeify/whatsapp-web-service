@@ -248,14 +248,46 @@ export function preprocessPhoneNumber(phoneNumber: string): string {
 }
 
 /**
+ * Check if a string is a WhatsApp JID format that should be passed through unchanged
+ * WhatsApp uses various JID formats for different contact/chat types:
+ * - @lid: Linked ID format (privacy-protected identifiers)
+ * - @s.whatsapp.net: Standard user JID
+ * - @g.us: Group JID
+ * - @broadcast: Broadcast list JID
+ * - @newsletter: Newsletter/Channel JID
+ *
+ * @param phoneNumber - The phone number or JID to check
+ * @returns True if the string is a WhatsApp JID format
+ */
+export function isWhatsAppJid(phoneNumber: string): boolean {
+  if (!phoneNumber) return false;
+
+  return (
+    phoneNumber.includes("@lid") ||
+    phoneNumber.includes("@s.whatsapp.net") ||
+    phoneNumber.includes("@g.us") ||
+    phoneNumber.includes("@broadcast") ||
+    phoneNumber.includes("@newsletter")
+  );
+}
+
+/**
  * Format a phone number with preprocessing for common errors
  * This is the main function to use for user input
  *
  * @param phoneNumber - The phone number to format
  * @param defaultCountry - Optional default country code
- * @returns Formatted E.164 phone number or null if invalid
+ * @returns Formatted E.164 phone number, WhatsApp JID, or null if invalid
  */
 export function formatPhoneNumberSafe(phoneNumber: string, defaultCountry?: CountryCode): string | null {
+  // Pass through WhatsApp JID formats unchanged
+  // These are valid identifiers used by WhatsApp for contacts that don't have
+  // standard phone numbers (e.g., LID format for privacy-protected contacts)
+  if (isWhatsAppJid(phoneNumber)) {
+    logger.debug({ phoneNumber }, "Detected WhatsApp JID format, passing through unchanged");
+    return phoneNumber;
+  }
+
   // BUG #1 FIX: Reject excessively long phone numbers (DoS prevention)
   // E.164 format allows max 15 digits + country code + formatting characters
   const MAX_PHONE_LENGTH = 20;
