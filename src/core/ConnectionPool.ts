@@ -723,7 +723,7 @@ export class ConnectionPool extends EventEmitter {
       // Unregister from WebSocket manager
       this.wsManager.unregisterConnection(connectionKey);
 
-      // Clean up associated caches
+      // Clean up associated caches - CRITICAL for preventing memory leaks
       const sessionKey = `${userId}-${phoneNumber}`;
       if (this.processedContactsCache.has(sessionKey)) {
         const cacheSize = this.processedContactsCache.get(sessionKey)?.size || 0;
@@ -731,7 +731,38 @@ export class ConnectionPool extends EventEmitter {
         this.logger.debug({ userId, phoneNumber, cacheSize }, "Cleared deduplication cache for disconnected session");
       }
       this.importListRefs.delete(sessionKey);
-      this.syncedContactInfo.clear(); // Clear synced contact info as it's session-specific
+
+      // Clean up syncedContactInfo entries for this user (keyed by userId-contactPhone)
+      // Iterate and remove all entries starting with this userId prefix
+      const userPrefix = `${userId}-`;
+      let syncedContactsCleared = 0;
+      for (const key of this.syncedContactInfo.keys()) {
+        if (key.startsWith(userPrefix)) {
+          this.syncedContactInfo.delete(key);
+          syncedContactsCleared++;
+        }
+      }
+      if (syncedContactsCleared > 0) {
+        this.logger.debug({ userId, phoneNumber, syncedContactsCleared }, "Cleared synced contact info cache for user");
+      }
+
+      // Clean up pendingChatMetadata entries for this user
+      const chatMetadataPrefix = `${userId}-`;
+      let chatMetadataCleared = 0;
+      for (const key of this.pendingChatMetadata.keys()) {
+        if (key.startsWith(chatMetadataPrefix)) {
+          this.pendingChatMetadata.delete(key);
+          chatMetadataCleared++;
+        }
+      }
+      if (chatMetadataCleared > 0) {
+        this.logger.debug({ userId, phoneNumber, chatMetadataCleared }, "Cleared pending chat metadata cache for user");
+      }
+
+      // Clean up connection-specific tracking Maps
+      this.reconnectionInProgress.delete(connectionKey);
+      this.pendingRecoveryMessages.delete(connectionKey);
+      this.recoveryInProgress.delete(connectionKey);
 
       // Release the proxy immediately
       await this.proxyManager.releaseProxy(userId, phoneNumber);
@@ -4753,7 +4784,99 @@ export class ConnectionPool extends EventEmitter {
     this.cleanupTimer = setInterval(() => {
       this.proxyManager.cleanupSessions();
       this.sessionManager.cleanupSessions();
+
+      // Periodic memory cleanup - remove orphaned cache entries for inactive users
+      this.cleanupOrphanedCaches();
     }, this.config.sessionCleanupInterval);
+  }
+
+  /**
+   * Clean up orphaned cache entries for users without active connections
+   * This is a safety net to prevent memory leaks from missed cleanups
+   */
+  private cleanupOrphanedCaches(): void {
+    try {
+      // Get all active user IDs from connections
+      const activeUserIds = new Set<string>();
+      for (const connection of this.connections.values()) {
+        activeUserIds.add(connection.userId);
+      }
+
+      // Clean syncedContactInfo for inactive users
+      let syncedContactsCleared = 0;
+      for (const key of this.syncedContactInfo.keys()) {
+        const userId = key.split("-")[0];
+        if (!activeUserIds.has(userId)) {
+          this.syncedContactInfo.delete(key);
+          syncedContactsCleared++;
+        }
+      }
+
+      // Clean pendingChatMetadata for inactive users
+      let chatMetadataCleared = 0;
+      for (const key of this.pendingChatMetadata.keys()) {
+        const userId = key.split("-")[0];
+        if (!activeUserIds.has(userId)) {
+          this.pendingChatMetadata.delete(key);
+          chatMetadataCleared++;
+        }
+      }
+
+      // Clean processedContactsCache for inactive sessions
+      let processedCacheCleared = 0;
+      for (const key of this.processedContactsCache.keys()) {
+        const userId = key.split("-")[0];
+        if (!activeUserIds.has(userId)) {
+          this.processedContactsCache.delete(key);
+          processedCacheCleared++;
+        }
+      }
+
+      // Clean importListRefs for inactive sessions
+      let importRefsCleared = 0;
+      for (const key of this.importListRefs.keys()) {
+        const userId = key.split("-")[0];
+        if (!activeUserIds.has(userId)) {
+          this.importListRefs.delete(key);
+          importRefsCleared++;
+        }
+      }
+
+      // Clean stale sentMessageIds (older than 10 minutes - extra safety)
+      const staleThreshold = Date.now() - 10 * 60 * 1000;
+      let staleMessagesCleared = 0;
+      for (const [messageId, timestamp] of this.sentMessageIds.entries()) {
+        if (timestamp.getTime() < staleThreshold) {
+          this.sentMessageIds.delete(messageId);
+          staleMessagesCleared++;
+        }
+      }
+
+      // Log cleanup results if anything was cleaned
+      const totalCleared = syncedContactsCleared + chatMetadataCleared + processedCacheCleared + importRefsCleared + staleMessagesCleared;
+      if (totalCleared > 0) {
+        this.logger.info(
+          {
+            syncedContactsCleared,
+            chatMetadataCleared,
+            processedCacheCleared,
+            importRefsCleared,
+            staleMessagesCleared,
+            activeConnections: this.connections.size,
+            remainingCacheSizes: {
+              syncedContactInfo: this.syncedContactInfo.size,
+              pendingChatMetadata: this.pendingChatMetadata.size,
+              processedContactsCache: this.processedContactsCache.size,
+              importListRefs: this.importListRefs.size,
+              sentMessageIds: this.sentMessageIds.size,
+            },
+          },
+          "Periodic memory cleanup completed - removed orphaned cache entries"
+        );
+      }
+    } catch (error) {
+      this.logger.error({ error }, "Error during periodic memory cleanup");
+    }
   }
 
   /**
@@ -4911,7 +5034,8 @@ export class ConnectionPool extends EventEmitter {
     const errorStats = this.errorHandler.getStats();
     const coordinatorStats = this.instanceCoordinator.getStats();
 
-    // Get cache stats for memory leak analysis
+    // Get detailed memory stats including cache sizes
+    const memoryUsage = process.memoryUsage();
 
     return {
       totalConnections: this.connections.size,
@@ -4919,6 +5043,22 @@ export class ConnectionPool extends EventEmitter {
       pendingConnections: connections.filter((c) => c.state.connection === "connecting").length,
       totalMessages: connections.reduce((sum, c) => sum + c.messageCount, 0),
       memoryUsage: this.getMemoryUsage(),
+      memoryDetails: {
+        heapUsedMB: Math.round(memoryUsage.heapUsed / 1024 / 1024),
+        heapTotalMB: Math.round(memoryUsage.heapTotal / 1024 / 1024),
+        rssMB: Math.round(memoryUsage.rss / 1024 / 1024),
+        externalMB: Math.round(memoryUsage.external / 1024 / 1024),
+      },
+      cacheSizes: {
+        syncedContactInfo: this.syncedContactInfo.size,
+        pendingChatMetadata: this.pendingChatMetadata.size,
+        processedContactsCache: this.processedContactsCache.size,
+        importListRefs: this.importListRefs.size,
+        sentMessageIds: this.sentMessageIds.size,
+        reconnectionInProgress: this.reconnectionInProgress.size,
+        pendingRecoveryMessages: this.pendingRecoveryMessages.size,
+        recoveryInProgress: this.recoveryInProgress.size,
+      },
       uptime: process.uptime(),
       proxyMetrics: this.proxyManager.getMetrics(),
       webSocketHealth: {
