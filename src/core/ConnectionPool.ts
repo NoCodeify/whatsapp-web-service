@@ -2737,8 +2737,19 @@ export class ConnectionPool extends EventEmitter {
 
       // This is a MANUAL message sent from phone!
       const toJid = message.key.remoteJid || "";
-      const toNumber = toJid.replace("@s.whatsapp.net", "").replace("@g.us", "");
       const isGroup = toJid.includes("@g.us");
+      const isLid = toJid.includes("@lid");
+
+      // Extract the recipient number from JID
+      // For @lid format, keep the full identifier (e.g., "144246610911481@lid")
+      // For regular numbers, strip the WhatsApp suffix to get just the number
+      let toNumber: string;
+      if (isLid) {
+        // Keep full LID format - formatPhoneNumberSafe() handles this
+        toNumber = toJid;
+      } else {
+        toNumber = toJid.replace("@s.whatsapp.net", "").replace("@g.us", "");
+      }
 
       // Skip group messages
       if (isGroup) {
@@ -2758,13 +2769,16 @@ export class ConnectionPool extends EventEmitter {
           messageId: message.key.id,
           body: messageText,
           manual: true,
+          isLid,
           timestamp: message.messageTimestamp,
         },
         "Manual WhatsApp message detected"
       );
 
       // Format phone numbers
-      const formattedToPhone = toNumber.startsWith("+") ? toNumber : `+${toNumber}`;
+      // For LID format, keep as-is (no + prefix for LID identifiers)
+      // For regular numbers, ensure + prefix
+      const formattedToPhone = isLid ? toNumber : (toNumber.startsWith("+") ? toNumber : `+${toNumber}`);
       const formattedFromPhone = phoneNumber.startsWith("+") ? phoneNumber : `+${phoneNumber}`;
 
       // Get or create contact
