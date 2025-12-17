@@ -51,7 +51,7 @@ export class InstanceCoordinator extends EventEmitter {
 
   private readonly config: CoordinatorConfig = {
     heartbeatInterval: parseInt(process.env.INSTANCE_HEARTBEAT_INTERVAL || "15000"), // 15 seconds
-    instanceTimeout: parseInt(process.env.INSTANCE_TIMEOUT || "60000"), // 60 seconds
+    instanceTimeout: parseInt(process.env.INSTANCE_TIMEOUT || "30000"), // 30 seconds (2 missed heartbeats) - reduced from 60s to detect crashes faster
     sessionTimeout: parseInt(process.env.SESSION_TIMEOUT || "300000"), // 5 minutes
     maxConnectionsPerInstance: parseInt(process.env.MAX_CONNECTIONS_PER_INSTANCE || "20"),
     enableSessionMigration: process.env.ENABLE_SESSION_MIGRATION !== "false",
@@ -71,6 +71,11 @@ export class InstanceCoordinator extends EventEmitter {
    */
   async start(): Promise<void> {
     try {
+      // CRITICAL: Clean up stale instances BEFORE registering this instance
+      // This ensures crashed instances are marked as failed and their sessions released
+      // before we attempt session recovery
+      await this.cleanupStaleInstancesOnStartup();
+
       // Register this instance
       await this.registerInstance();
 
@@ -90,6 +95,90 @@ export class InstanceCoordinator extends EventEmitter {
     } catch (error) {
       this.logger.error({ error }, "Failed to start instance coordinator");
       throw error;
+    }
+  }
+
+  /**
+   * Clean up stale instances on startup - runs BEFORE session recovery
+   * This is critical for detecting crashed instances and releasing their sessions
+   */
+  private async cleanupStaleInstancesOnStartup(): Promise<void> {
+    try {
+      this.logger.info("Checking for stale instances on startup...");
+
+      const instancesSnapshot = await this.firestore.collection("instance_registry").get();
+
+      const staleThreshold = new Date(Date.now() - this.config.instanceTimeout);
+      let cleanedCount = 0;
+
+      for (const doc of instancesSnapshot.docs) {
+        const instance = doc.data() as any;
+        const lastHeartbeat = instance.lastHeartbeat?.toDate?.() || new Date(0);
+        const instanceId = instance.instanceId || doc.id;
+
+        // Skip if this is somehow our own instance (shouldn't happen, we haven't registered yet)
+        if (instanceId === this.instanceId) {
+          continue;
+        }
+
+        // Check if instance is stale (no heartbeat within timeout period)
+        if (lastHeartbeat < staleThreshold) {
+          this.logger.warn(
+            {
+              instanceId,
+              lastHeartbeat,
+              staleThreshold,
+              timeSinceHeartbeat: Date.now() - lastHeartbeat.getTime(),
+              previousStatus: instance.status,
+            },
+            "Found stale instance on startup - marking as failed and releasing sessions"
+          );
+
+          // Mark instance as failed
+          await doc.ref.update({
+            status: "failed",
+            failedAt: Timestamp.now(),
+            failureReason: "stale_heartbeat_on_startup",
+          });
+
+          // Clean up sessions owned by this failed instance
+          await this.cleanupInstanceSessions(instanceId);
+          cleanedCount++;
+        }
+      }
+
+      if (cleanedCount > 0) {
+        this.logger.info({ cleanedCount }, "Cleaned up stale instances on startup");
+      } else {
+        this.logger.info("No stale instances found on startup");
+      }
+    } catch (error) {
+      this.logger.error({ error }, "Failed to cleanup stale instances on startup - continuing anyway");
+      // Don't throw - we want to continue even if cleanup fails
+    }
+  }
+
+  /**
+   * Clean up sessions owned by a failed instance
+   */
+  private async cleanupInstanceSessions(instanceId: string): Promise<void> {
+    try {
+      const sessionsSnapshot = await this.firestore.collection("session_ownership").where("instanceId", "==", instanceId).get();
+
+      if (sessionsSnapshot.empty) {
+        this.logger.debug({ instanceId }, "No sessions to clean up for failed instance");
+        return;
+      }
+
+      const batch = this.firestore.batch();
+      sessionsSnapshot.forEach((doc) => {
+        batch.delete(doc.ref);
+      });
+      await batch.commit();
+
+      this.logger.info({ instanceId, sessionCount: sessionsSnapshot.size }, "Cleaned up sessions from failed instance");
+    } catch (error) {
+      this.logger.error({ instanceId, error }, "Failed to cleanup sessions from failed instance");
     }
   }
 
@@ -327,12 +416,67 @@ export class InstanceCoordinator extends EventEmitter {
   private startSessionCleanup(): void {
     this.sessionCleanupTimer = setInterval(async () => {
       try {
+        // Periodically clean up stale instances and their sessions
+        // This catches instances that crash during runtime (not just on startup)
+        await this.cleanupStaleInstancesPeriodic();
         // await this.cleanupStaleSessions(); // Disabled - time-based cleanup causes false positives for idle but healthy connections. ConnectionPool handles connection lifecycle.
-        // await this.cleanupStaleInstances(); // Disabled - cleanup was failing and causing log spam
       } catch (error) {
         this.logger.error({ error }, "Session cleanup failed");
       }
     }, 60000); // Every minute
+  }
+
+  /**
+   * Periodic cleanup of stale instances during runtime
+   * Less verbose than startup cleanup, runs every minute
+   */
+  private async cleanupStaleInstancesPeriodic(): Promise<void> {
+    try {
+      const instancesSnapshot = await this.firestore.collection("instance_registry").get();
+
+      const staleThreshold = new Date(Date.now() - this.config.instanceTimeout);
+
+      for (const doc of instancesSnapshot.docs) {
+        const instance = doc.data() as any;
+        const lastHeartbeat = instance.lastHeartbeat?.toDate?.() || new Date(0);
+        const instanceId = instance.instanceId || doc.id;
+
+        // Skip our own instance
+        if (instanceId === this.instanceId) {
+          continue;
+        }
+
+        // Skip already failed instances
+        if (instance.status === "failed" || instance.status === "shutting_down") {
+          continue;
+        }
+
+        // Check if instance is stale
+        if (lastHeartbeat < staleThreshold) {
+          this.logger.warn(
+            {
+              instanceId,
+              lastHeartbeat,
+              timeSinceHeartbeat: Date.now() - lastHeartbeat.getTime(),
+            },
+            "Found stale instance during periodic cleanup"
+          );
+
+          // Mark instance as failed
+          await doc.ref.update({
+            status: "failed",
+            failedAt: Timestamp.now(),
+            failureReason: "stale_heartbeat_periodic_check",
+          });
+
+          // Clean up sessions owned by this failed instance
+          await this.cleanupInstanceSessions(instanceId);
+        }
+      }
+    } catch (error) {
+      // Silent failure for periodic cleanup - don't spam logs
+      this.logger.debug({ error }, "Periodic stale instance cleanup encountered an error");
+    }
   }
 
   /**
@@ -362,66 +506,7 @@ export class InstanceCoordinator extends EventEmitter {
     }
   } */
 
-  /**
-   * Clean up stale instances - DISABLED
-   */
-  /* private async cleanupStaleInstances(): Promise<void> {
-    try {
-      const instancesSnapshot = await this.firestore
-        .collection("instance_registry")
-        .get();
 
-      const staleThreshold = new Date(Date.now() - this.config.instanceTimeout);
-
-      for (const doc of instancesSnapshot.docs) {
-        const instance = doc.data() as any;
-        const lastHeartbeat = instance.lastHeartbeat.toDate();
-
-        if (
-          lastHeartbeat < staleThreshold &&
-          instance.instanceId !== this.instanceId
-        ) {
-          this.logger.warn(
-            { instanceId: instance.instanceId, lastHeartbeat },
-            "Cleaning up stale instance",
-          );
-
-          // Mark instance as failed
-          await doc.ref.update({ status: "failed" });
-
-          // Clean up sessions owned by this instance
-          await this.cleanupInstanceSessions(instance.instanceId);
-        }
-      }
-    } catch (error) {
-      this.logger.error({ error }, "Failed to cleanup stale instances");
-    }
-  } */
-
-  /**
-   * Clean up sessions owned by a failed instance - DISABLED
-   */
-  /* private async cleanupInstanceSessions(instanceId: string): Promise<void> {
-    try {
-      const sessionsSnapshot = await this.firestore
-        .collection("session_ownership")
-        .where("instanceId", "==", instanceId)
-        .get();
-
-      for (const doc of sessionsSnapshot.docs) {
-        await doc.ref.delete();
-        this.logger.info(
-          { sessionKey: doc.id, failedInstance: instanceId },
-          "Cleaned up session from failed instance",
-        );
-      }
-    } catch (error) {
-      this.logger.error(
-        { instanceId, error },
-        "Failed to cleanup sessions from failed instance",
-      );
-    }
-  } */
 
   /**
    * Load sessions owned by this instance
