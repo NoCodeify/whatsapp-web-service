@@ -1066,7 +1066,9 @@ describe("ConnectionPool", () => {
       const isSpecialWhatsAppIdentifier = (connectionPool as any).isSpecialWhatsAppIdentifier.bind(connectionPool);
 
       expect(isSpecialWhatsAppIdentifier("status@broadcast")).toBe(true);
-      expect(isSpecialWhatsAppIdentifier("1234567890@lid")).toBe(true);
+      // @lid is NOT a special identifier - it's used for legitimate person-to-person messages
+      // WhatsApp uses LID (Linked ID) for privacy-protected identifiers in some regions
+      expect(isSpecialWhatsAppIdentifier("1234567890@lid")).toBe(false);
       expect(isSpecialWhatsAppIdentifier("1234567890@s.whatsapp.net")).toBe(false);
     });
   });
