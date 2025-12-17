@@ -868,7 +868,10 @@ export class ConnectionPool extends EventEmitter {
     }
 
     // If connection exists but is not open, queue the message if it's recovering
-    if (connection.state.connection !== "open") {
+    // However, if the socket has an authenticated user, try sending directly anyway
+    // (the socket may be functional even if our tracked state is stale)
+    const socketHasUser = !!(connection.socket as any)?.user;
+    if (connection.state.connection !== "open" && !socketHasUser) {
       // Check if connection is recovering (recently connected or has session)
       const isRecovering = connection.hasConnectedSuccessfully || connection.isRecovery || connection.handshakeCompleted;
 
@@ -891,6 +894,22 @@ export class ConnectionPool extends EventEmitter {
 
       // Queue the message for sending when connection reopens
       return this.queueMessage(connection, toNumber, content, messageId);
+    }
+
+    // If socket has user but state is not "open", fix the state and log
+    if (socketHasUser && connection.state.connection !== "open") {
+      this.logger.warn(
+        {
+          messageId,
+          userId,
+          phoneNumber,
+          trackedState: connection.state.connection,
+          hasUser: true,
+        },
+        "Socket has authenticated user but state is not open - attempting to send anyway"
+      );
+      // Update our tracked state to match reality
+      connection.state.connection = "open";
     }
 
     try {
