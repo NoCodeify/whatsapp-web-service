@@ -4925,6 +4925,20 @@ export class ConnectionPool extends EventEmitter {
   }
 
   private formatJid(phoneNumber: string): string {
+    // Handle LID (Linked ID) format - already a valid JID, return as-is
+    // LID format: "144246610911481@lid"
+    if (phoneNumber.includes("@lid")) {
+      // Ensure it has the @lid suffix properly formatted
+      if (phoneNumber.endsWith("@lid")) {
+        return phoneNumber;
+      }
+      // Extract just the LID part and format correctly
+      const lidMatch = phoneNumber.match(/(\d+)@lid/);
+      if (lidMatch) {
+        return `${lidMatch[1]}@lid`;
+      }
+    }
+
     // Use the phone number formatter to ensure proper E.164 format
     const jid = formatWhatsAppJid(phoneNumber);
     if (!jid) {
