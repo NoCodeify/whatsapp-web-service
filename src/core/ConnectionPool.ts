@@ -2588,8 +2588,19 @@ export class ConnectionPool extends EventEmitter {
     try {
       // Extract sender info
       const fromJid = message.key.remoteJid || "";
-      const fromNumber = fromJid.replace("@s.whatsapp.net", "").replace("@g.us", "");
       const isGroup = fromJid.includes("@g.us");
+      const isLid = fromJid.includes("@lid");
+
+      // Extract the sender number from JID
+      // For @lid format, keep the full identifier (e.g., "144246610911481@lid")
+      // For regular numbers, strip the WhatsApp suffix to get just the number
+      let fromNumber: string;
+      if (isLid) {
+        // Keep full LID format - formatPhoneNumberSafe() handles this
+        fromNumber = fromJid;
+      } else {
+        fromNumber = fromJid.replace("@s.whatsapp.net", "").replace("@g.us", "");
+      }
 
       // Extract message text
       const messageText = this.extractMessageText(message);
@@ -2603,6 +2614,7 @@ export class ConnectionPool extends EventEmitter {
           messageId: message.key.id,
           body: messageText,
           isGroup,
+          isLid,
           timestamp: message.messageTimestamp,
         },
         "Incoming WhatsApp Web message received"
@@ -2615,13 +2627,16 @@ export class ConnectionPool extends EventEmitter {
       }
 
       // Skip special WhatsApp identifiers (status updates, broadcasts, etc.)
+      // Note: @lid messages are NOT skipped - they are legitimate person-to-person messages
       if (this.isSpecialWhatsAppIdentifier(fromJid)) {
         this.logger.debug({ userId, phoneNumber, fromJid, fromNumber }, "Skipping special WhatsApp identifier (status/broadcast/newsletter)");
         return;
       }
 
       // Format phone numbers
-      const formattedFromPhone = fromNumber.startsWith("+") ? fromNumber : `+${fromNumber}`;
+      // For LID format, keep as-is (formatPhoneNumberSafe handles @lid)
+      // For regular numbers, ensure + prefix
+      const formattedFromPhone = isLid ? fromNumber : (fromNumber.startsWith("+") ? fromNumber : `+${fromNumber}`);
       const formattedToPhone = phoneNumber.startsWith("+") ? phoneNumber : `+${phoneNumber}`;
 
       // Handle media if present (downloads from WhatsApp, uploads to Cloud Storage)
@@ -4917,10 +4932,9 @@ export class ConnectionPool extends EventEmitter {
       return true;
     }
 
-    // Temporary/ephemeral chats
-    if (jid.includes("@lid")) {
-      return true;
-    }
+    // Note: @lid (Linked ID) format is now used for legitimate person-to-person messages
+    // WhatsApp uses LID for privacy-protected identifiers in some regions
+    // We should NOT skip these - they need to be processed like regular messages
 
     // Newsletter/channel messages
     if (jid.includes("@newsletter")) {
