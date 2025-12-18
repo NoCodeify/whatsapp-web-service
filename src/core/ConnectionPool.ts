@@ -1619,9 +1619,17 @@ export class ConnectionPool extends EventEmitter {
         connection.qrCode = undefined;
         connection.hasConnectedSuccessfully = true;
 
-        // Load LID mappings for this user on connection establishment
+        // Load existing LID mappings and proactively build new ones from contacts
         // This enables resolving LID to phone numbers for incoming messages
-        this.lidMappingService.loadMappingsForUser(userId).catch((error) => {
+        this.lidMappingService.loadMappingsForUser(userId).then(async (existingCount) => {
+          this.logger.info({ userId, phoneNumber, existingMappings: existingCount }, "Loaded existing LID mappings");
+
+          // Proactively build LID mappings from existing contacts (Phone → LID lookup)
+          // This runs in background after connection is established
+          this.buildLidMappingsFromContacts(userId, phoneNumber, connection.socket).catch((error) => {
+            this.logger.warn({ userId, phoneNumber, error: (error as any).message }, "Failed to build LID mappings from contacts");
+          });
+        }).catch((error) => {
           this.logger.warn({ userId, phoneNumber, error: (error as any).message }, "Failed to load LID mappings on connection open");
         });
 
@@ -2714,6 +2722,7 @@ export class ConnectionPool extends EventEmitter {
 
       // RESOLVE LID TO PHONE NUMBER: If this is a LID, try to resolve it to the actual phone number
       // This prevents duplicate contacts and ensures messages are properly attributed
+      // Mappings are learned from duplicate messages (same messageId with both LID and phone formats)
       let resolvedFromNumber = fromNumber;
       let wasLidResolved = false;
       if (isLid) {
@@ -5469,6 +5478,112 @@ export class ConnectionPool extends EventEmitter {
     } catch (error) {
       this.logger.error({ error }, "Failed to get active sessions for recovery");
       return [];
+    }
+  }
+
+  /**
+   * Proactively build LID mappings from existing contacts using Phone → LID lookup
+   * Called on connection establishment to pre-populate mappings for existing users
+   *
+   * @param userId - User ID
+   * @param phoneNumber - User's WhatsApp Web phone number
+   * @param socket - Active WhatsApp socket for onWhatsApp lookups
+   */
+  private async buildLidMappingsFromContacts(userId: string, phoneNumber: string, socket: WASocket): Promise<void> {
+    try {
+      // Check if socket supports onWhatsApp
+      if (typeof socket.onWhatsApp !== "function") {
+        this.logger.debug({ userId, phoneNumber }, "Socket does not support onWhatsApp - skipping LID mapping build");
+        return;
+      }
+
+      // Get contacts with real phone numbers (not LID format) that don't have mappings yet
+      const contactsSnapshot = await this.firestore
+        .collection("contacts")
+        .where("user", "==", this.firestore.collection("users").doc(userId))
+        .where("channel", "in", ["whatsapp_web", "whatsapp"])
+        .limit(500) // Limit to avoid overwhelming the API
+        .get();
+
+      if (contactsSnapshot.empty) {
+        this.logger.debug({ userId, phoneNumber }, "No contacts found for LID mapping build");
+        return;
+      }
+
+      // Filter to contacts with real phone numbers that don't have mappings
+      const phonesToLookup: string[] = [];
+      for (const doc of contactsSnapshot.docs) {
+        const contactData = doc.data();
+        const contactPhone = contactData.phone_number;
+
+        // Skip if no phone, is LID format, or already has mapping
+        if (!contactPhone || contactPhone.includes("@lid")) continue;
+
+        const existingLid = this.lidMappingService.resolvePhoneToLid(userId, contactPhone);
+        if (existingLid) continue;
+
+        phonesToLookup.push(contactPhone);
+      }
+
+      if (phonesToLookup.length === 0) {
+        this.logger.debug({ userId, phoneNumber }, "All contacts already have LID mappings or no valid phones");
+        return;
+      }
+
+      this.logger.info(
+        { userId, phoneNumber, contactsToLookup: phonesToLookup.length },
+        "Starting proactive LID mapping build from contacts"
+      );
+
+      // Process in batches to avoid rate limiting
+      const BATCH_SIZE = 20;
+      let mappingsFound = 0;
+
+      for (let i = 0; i < phonesToLookup.length; i += BATCH_SIZE) {
+        const batch = phonesToLookup.slice(i, i + BATCH_SIZE);
+
+        try {
+          // Format for WhatsApp lookup (JID format without +)
+          const jids = batch.map((p) => p.replace("+", "") + "@s.whatsapp.net");
+
+          // Call onWhatsApp to check numbers
+          const results = await socket.onWhatsApp(...jids);
+
+          for (const result of results || []) {
+            if (result.exists && result.jid) {
+              // Extract the phone from original batch
+              const phoneFromJid = "+" + result.jid.replace("@s.whatsapp.net", "").replace("@lid", "");
+              const originalPhone = batch.find((p) => p.replace("+", "") === phoneFromJid.replace("+", ""));
+
+              // Check if result contains LID info
+              // In Baileys, the result may have a 'lid' property or the jid itself might be LID format
+              const lid = (result as any).lid;
+              if (lid && originalPhone) {
+                await this.lidMappingService.saveLidMapping(userId, lid, originalPhone);
+                mappingsFound++;
+                this.logger.debug({ userId, lid, phone: originalPhone }, "Built LID mapping from onWhatsApp");
+              }
+            }
+          }
+        } catch (batchError) {
+          this.logger.debug(
+            { userId, phoneNumber, batchIndex: i, error: (batchError as any).message },
+            "Failed to process batch in LID mapping build"
+          );
+        }
+
+        // Delay between batches to avoid rate limiting
+        if (i + BATCH_SIZE < phonesToLookup.length) {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
+      }
+
+      this.logger.info(
+        { userId, phoneNumber, contactsChecked: phonesToLookup.length, mappingsFound },
+        "Completed proactive LID mapping build from contacts"
+      );
+    } catch (error) {
+      this.logger.error({ userId, phoneNumber, error }, "Error building LID mappings from contacts");
     }
   }
 }
