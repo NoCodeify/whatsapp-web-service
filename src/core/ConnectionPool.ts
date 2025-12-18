@@ -4814,6 +4814,13 @@ export class ConnectionPool extends EventEmitter {
 
   /**
    * Publish events to Pub/Sub
+   *
+   * TODO: The following Pub/Sub topics need to be created in GCP and Cloud Function
+   * handlers need to be implemented to consume these events:
+   * - whatsapp-web-message-update (message delivery/read status)
+   * - whatsapp-web-presence-update (online/offline status)
+   * - whatsapp-web-message-sent (outbound message confirmation)
+   * - whatsapp-web-typing-indicator (typing status)
    */
   private async publishEvent(eventType: string, data: any) {
     // Skip Pub/Sub in local development
