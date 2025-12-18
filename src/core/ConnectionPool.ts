@@ -74,6 +74,7 @@ export class ConnectionPool extends EventEmitter {
   private pendingChatMetadata: Map<string, any> = new Map(); // Store chat metadata for contacts to be created
   private syncedContactInfo: Map<string, { name?: string; notify?: string; verifiedName?: string }> = new Map(); // Store contact info from contacts.upsert
   private sentMessageIds: Map<string, Date> = new Map(); // Track API-sent message IDs
+  private processedIncomingMessageIds: Map<string, number> = new Map(); // Track processed incoming message IDs to prevent LID duplicates
   private processedContactsCache: Map<string, Set<string>> = new Map(); // Session-based contact deduplication
   private reconnectionInProgress: Map<string, boolean> = new Map(); // Track ongoing reconnections to prevent conflicts
   private sessionRecoveryService?: SessionRecoveryService; // Reference to session recovery service for on-demand recovery
@@ -2639,6 +2640,37 @@ export class ConnectionPool extends EventEmitter {
         "Incoming WhatsApp Web message received"
       );
 
+      // DEDUPLICATION: Skip if we've already processed this messageId recently
+      // WhatsApp sometimes sends the same message twice with different identifiers
+      // (once with real phone number, once with LID format ~1 second apart)
+      // We use the messageId (which is the same for both) to deduplicate
+      const messageId = message.key.id;
+      const MESSAGE_DEDUP_TTL_MS = 5 * 60 * 1000; // 5 minutes TTL
+
+      if (messageId && this.processedIncomingMessageIds.has(messageId)) {
+        const processedAt = this.processedIncomingMessageIds.get(messageId)!;
+        const ageMs = Date.now() - processedAt;
+        if (ageMs < MESSAGE_DEDUP_TTL_MS) {
+          this.logger.info(
+            {
+              userId,
+              phoneNumber,
+              fromNumber,
+              messageId,
+              isLid,
+              ageMs,
+            },
+            "Skipping duplicate incoming message (same messageId already processed)"
+          );
+          return;
+        }
+      }
+
+      // Mark this messageId as processed
+      if (messageId) {
+        this.processedIncomingMessageIds.set(messageId, Date.now());
+      }
+
       // Skip group messages
       if (isGroup) {
         this.logger.debug({ userId, phoneNumber, fromJid }, "Skipping group message");
@@ -2655,7 +2687,7 @@ export class ConnectionPool extends EventEmitter {
       // Format phone numbers
       // For LID format, keep as-is (formatPhoneNumberSafe handles @lid)
       // For regular numbers, ensure + prefix
-      const formattedFromPhone = isLid ? fromNumber : (fromNumber.startsWith("+") ? fromNumber : `+${fromNumber}`);
+      const formattedFromPhone = isLid ? fromNumber : fromNumber.startsWith("+") ? fromNumber : `+${fromNumber}`;
       const formattedToPhone = phoneNumber.startsWith("+") ? phoneNumber : `+${phoneNumber}`;
 
       // Handle media if present (downloads from WhatsApp, uploads to Cloud Storage)
@@ -2778,7 +2810,7 @@ export class ConnectionPool extends EventEmitter {
       // Format phone numbers
       // For LID format, keep as-is (no + prefix for LID identifiers)
       // For regular numbers, ensure + prefix
-      const formattedToPhone = isLid ? toNumber : (toNumber.startsWith("+") ? toNumber : `+${toNumber}`);
+      const formattedToPhone = isLid ? toNumber : toNumber.startsWith("+") ? toNumber : `+${toNumber}`;
       const formattedFromPhone = phoneNumber.startsWith("+") ? phoneNumber : `+${phoneNumber}`;
 
       // Get or create contact
@@ -4900,8 +4932,19 @@ export class ConnectionPool extends EventEmitter {
         }
       }
 
+      // Clean stale processedIncomingMessageIds (older than 10 minutes)
+      // These are used to deduplicate incoming messages with different identifiers (phone vs LID)
+      let staleIncomingMessagesCleared = 0;
+      for (const [messageId, timestamp] of this.processedIncomingMessageIds.entries()) {
+        if (timestamp < staleThreshold) {
+          this.processedIncomingMessageIds.delete(messageId);
+          staleIncomingMessagesCleared++;
+        }
+      }
+
       // Log cleanup results if anything was cleaned
-      const totalCleared = syncedContactsCleared + chatMetadataCleared + processedCacheCleared + importRefsCleared + staleMessagesCleared;
+      const totalCleared =
+        syncedContactsCleared + chatMetadataCleared + processedCacheCleared + importRefsCleared + staleMessagesCleared + staleIncomingMessagesCleared;
       if (totalCleared > 0) {
         this.logger.info(
           {
@@ -4910,6 +4953,7 @@ export class ConnectionPool extends EventEmitter {
             processedCacheCleared,
             importRefsCleared,
             staleMessagesCleared,
+            staleIncomingMessagesCleared,
             activeConnections: this.connections.size,
             remainingCacheSizes: {
               syncedContactInfo: this.syncedContactInfo.size,
@@ -4917,6 +4961,7 @@ export class ConnectionPool extends EventEmitter {
               processedContactsCache: this.processedContactsCache.size,
               importListRefs: this.importListRefs.size,
               sentMessageIds: this.sentMessageIds.size,
+              processedIncomingMessageIds: this.processedIncomingMessageIds.size,
             },
           },
           "Periodic memory cleanup completed - removed orphaned cache entries"
@@ -5116,6 +5161,7 @@ export class ConnectionPool extends EventEmitter {
         processedContactsCache: this.processedContactsCache.size,
         importListRefs: this.importListRefs.size,
         sentMessageIds: this.sentMessageIds.size,
+        processedIncomingMessageIds: this.processedIncomingMessageIds.size,
         reconnectionInProgress: this.reconnectionInProgress.size,
         pendingRecoveryMessages: this.pendingRecoveryMessages.size,
         recoveryInProgress: this.recoveryInProgress.size,
@@ -5165,6 +5211,7 @@ export class ConnectionPool extends EventEmitter {
     this.pendingChatMetadata.clear();
     this.importListRefs.clear();
     this.sentMessageIds.clear();
+    this.processedIncomingMessageIds.clear();
 
     // Close all connections
     if (preserveSessions) {
