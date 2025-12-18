@@ -16,6 +16,7 @@ import { formatPhoneNumberSafe, formatWhatsAppJid } from "../utils/phoneNumber";
 import * as admin from "firebase-admin";
 import { DocumentReference } from "@google-cloud/firestore";
 import { SessionRecoveryService } from "../services/SessionRecoveryService";
+import { LidMappingService } from "../services/LidMappingService";
 
 export interface QueuedMessage {
   toNumber: string;
@@ -78,8 +79,10 @@ export class ConnectionPool extends EventEmitter {
   private processedContactsCache: Map<string, Set<string>> = new Map(); // Session-based contact deduplication
   private reconnectionInProgress: Map<string, boolean> = new Map(); // Track ongoing reconnections to prevent conflicts
   private sessionRecoveryService?: SessionRecoveryService; // Reference to session recovery service for on-demand recovery
+  private lidMappingService: LidMappingService; // LID to phone number mapping service
   private pendingRecoveryMessages: Map<string, QueuedMessage[]> = new Map(); // Queue messages while session is being recovered
   private recoveryInProgress: Map<string, Promise<boolean>> = new Map(); // Track ongoing recovery promises to avoid duplicate recovery
+  private processedMessageSenders: Map<string, string> = new Map(); // Track messageId -> sender for LID mapping capture
 
   private readonly config: ConnectionPoolConfig = {
     maxConnections: parseInt(process.env.MAX_CONNECTIONS || "50"),
@@ -110,6 +113,9 @@ export class ConnectionPool extends EventEmitter {
     this.wsManager = wsManager || new CloudRunWebSocketManager();
     this.errorHandler = errorHandler || new ErrorHandler();
     this.instanceCoordinator = instanceCoordinator || new InstanceCoordinator(firestore);
+
+    // Initialize LID mapping service for handling WhatsApp LID vs phone number inconsistencies
+    this.lidMappingService = new LidMappingService(firestore);
 
     // Set up WebSocket manager event listeners
     this.setupWebSocketManagerListeners();
@@ -1613,6 +1619,12 @@ export class ConnectionPool extends EventEmitter {
         connection.qrCode = undefined;
         connection.hasConnectedSuccessfully = true;
 
+        // Load LID mappings for this user on connection establishment
+        // This enables resolving LID to phone numbers for incoming messages
+        this.lidMappingService.loadMappingsForUser(userId).catch((error) => {
+          this.logger.warn({ userId, phoneNumber, error: (error as any).message }, "Failed to load LID mappings on connection open");
+        });
+
         // Clear QR timeout since connection is now established
         if (connection.qrTimeout) {
           clearTimeout(connection.qrTimeout);
@@ -2651,6 +2663,21 @@ export class ConnectionPool extends EventEmitter {
         const processedAt = this.processedIncomingMessageIds.get(messageId)!;
         const ageMs = Date.now() - processedAt;
         if (ageMs < MESSAGE_DEDUP_TTL_MS) {
+          // CAPTURE LID MAPPING: When we see the same message with different sender formats,
+          // we can learn the LID↔Phone mapping
+          const previousSender = this.processedMessageSenders.get(messageId);
+          if (previousSender && previousSender !== fromNumber) {
+            // Different sender format for same message - capture mapping!
+            this.lidMappingService.captureMappingFromPair(userId, previousSender, fromNumber).then((captured) => {
+              if (captured) {
+                this.logger.info(
+                  { userId, phoneNumber, previousSender, currentSender: fromNumber, messageId },
+                  "Captured LID↔Phone mapping from duplicate message"
+                );
+              }
+            });
+          }
+
           this.logger.info(
             {
               userId,
@@ -2666,9 +2693,10 @@ export class ConnectionPool extends EventEmitter {
         }
       }
 
-      // Mark this messageId as processed
+      // Mark this messageId as processed and store the sender for LID mapping capture
       if (messageId) {
         this.processedIncomingMessageIds.set(messageId, Date.now());
+        this.processedMessageSenders.set(messageId, fromNumber);
       }
 
       // Skip group messages
@@ -2684,10 +2712,38 @@ export class ConnectionPool extends EventEmitter {
         return;
       }
 
+      // RESOLVE LID TO PHONE NUMBER: If this is a LID, try to resolve it to the actual phone number
+      // This prevents duplicate contacts and ensures messages are properly attributed
+      let resolvedFromNumber = fromNumber;
+      let wasLidResolved = false;
+      if (isLid) {
+        const resolvedPhone = this.lidMappingService.resolveLidToPhone(userId, fromNumber);
+        if (resolvedPhone) {
+          resolvedFromNumber = resolvedPhone;
+          wasLidResolved = true;
+          this.logger.info(
+            { userId, phoneNumber, originalLid: fromNumber, resolvedPhone },
+            "Resolved LID to phone number for incoming message"
+          );
+        } else {
+          this.logger.debug(
+            { userId, phoneNumber, lid: fromNumber },
+            "No LID mapping found - message will be processed with LID identifier"
+          );
+        }
+      }
+
       // Format phone numbers
-      // For LID format, keep as-is (formatPhoneNumberSafe handles @lid)
+      // If LID was resolved to phone, use the resolved number
+      // For unresolved LID format, keep as-is (Cloud Functions will handle as fallback)
       // For regular numbers, ensure + prefix
-      const formattedFromPhone = isLid ? fromNumber : fromNumber.startsWith("+") ? fromNumber : `+${fromNumber}`;
+      const formattedFromPhone = wasLidResolved
+        ? resolvedFromNumber
+        : isLid
+          ? fromNumber
+          : fromNumber.startsWith("+")
+            ? fromNumber
+            : `+${fromNumber}`;
       const formattedToPhone = phoneNumber.startsWith("+") ? phoneNumber : `+${phoneNumber}`;
 
       // Handle media if present (downloads from WhatsApp, uploads to Cloud Storage)
