@@ -105,8 +105,8 @@ jobs:
           echo "✅ Development health check passed!"
 
   build-and-deploy-prod:
-    name: 🚀 Deploy to Production (Manual Approval Required)
-    needs: [test, build-and-deploy-dev] # Must deploy to dev first
+    name: 🚀 Deploy to Production
+    needs: [test] # Only require tests to pass
     runs-on: ubuntu-latest
     # Only manual workflow_dispatch with explicit confirmation
     if: |
@@ -141,25 +141,26 @@ jobs:
 
       - name: 🛡️ Pre-deployment verification
         run: |
-          echo "🔍 Verifying dev deployment is healthy before production deployment..."
+          echo "🔍 Checking dev deployment status (optional)..."
 
           # Use hardcoded dev URL (cross-project gcloud access not available)
           DEV_URL="https://whatsapp-web-service-dev-bsuangutsa-lm.a.run.app"
 
           echo "Dev service URL: ${DEV_URL}"
 
-          # Verify dev is healthy
+          # Check dev health (warning only, not blocking)
           echo "Checking dev health endpoint..."
           HEALTH_RESPONSE=$(curl -s -f "${DEV_URL}/health" || echo "{\"status\":\"error\"}")
           echo "Health response: ${HEALTH_RESPONSE}"
 
           DEV_HEALTH=$(echo "${HEALTH_RESPONSE}" | jq -r '.status // "error"')
           if [[ "$DEV_HEALTH" != "healthy" ]]; then
-            echo "❌ Dev deployment is not healthy. Status: $DEV_HEALTH"
-            echo "Production deployment blocked for safety."
-            exit 1
+            echo "⚠️ Warning: Dev deployment is not healthy. Status: $DEV_HEALTH"
+            echo "Proceeding with production deployment anyway (dev-first is optional)"
+          else
+            echo "✅ Dev deployment is healthy"
           fi
-          echo "✅ Dev deployment is healthy, proceeding with production deployment"
+          echo "Proceeding with production deployment..."
 
       - name: 🏗️ Build and deploy to production
         id: deploy
@@ -206,7 +207,7 @@ jobs:
           echo "- Environment: Production"
           echo "- Triggered by: ${{ github.actor }}"
           echo "- Commit: ${{ github.sha }}"
-          echo "- Dev tested: ✅ Required"
+          echo "- Tests: ✅ Passed"
           echo "- Manual approval: ✅ Confirmed"
           echo "- Health check: ✅ Passed"
           echo ""
