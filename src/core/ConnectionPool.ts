@@ -2167,7 +2167,7 @@ export class ConnectionPool extends EventEmitter {
             try {
               if (!msg.key.fromMe) {
                 // Incoming message from contact
-                await this.handleIncomingMessage(userId, phoneNumber, msg);
+                await this.handleIncomingMessage(userId, phoneNumber, msg, socket);
               } else {
                 // Outgoing message - could be manual or API-sent
                 await this.handleOutgoingMessage(userId, phoneNumber, msg);
@@ -2677,7 +2677,7 @@ export class ConnectionPool extends EventEmitter {
   /**
    * Handle incoming messages
    */
-  private async handleIncomingMessage(userId: string, phoneNumber: string, message: any) {
+  private async handleIncomingMessage(userId: string, phoneNumber: string, message: any, socket?: WASocket) {
     try {
       // Extract sender info
       const fromJid = message.key.remoteJid || "";
@@ -2820,6 +2820,34 @@ export class ConnectionPool extends EventEmitter {
             { userId, phoneNumber, lid: fromNumber },
             "No LID mapping found - message will be processed with LID identifier"
           );
+        }
+      } else if (socket && typeof socket.onWhatsApp === "function") {
+        // Message came with phone format - check if we have a LID mapping
+        // If not, proactively lookup the LID for future messages
+        const formattedPhone = fromNumber.startsWith("+") ? fromNumber : `+${fromNumber}`;
+        const existingLid = this.lidMappingService.resolvePhoneToLid(userId, formattedPhone);
+
+        if (!existingLid) {
+          // No mapping exists - lookup LID in background (non-blocking)
+          const jid = fromNumber.replace(/\D/g, "") + "@s.whatsapp.net";
+          socket.onWhatsApp(jid).then((results) => {
+            if (results && results.length > 0) {
+              const result = results[0];
+              const lid = (result as any).lid;
+              if (lid && lid.includes("@lid")) {
+                this.lidMappingService.saveLidMapping(userId, lid, formattedPhone);
+                this.logger.info(
+                  { userId, phoneNumber, lid, phone: formattedPhone },
+                  "Captured LID mapping via onWhatsApp lookup for phone-format message"
+                );
+              }
+            }
+          }).catch((err) => {
+            this.logger.debug(
+              { userId, phoneNumber, phone: formattedPhone, error: (err as any).message },
+              "Failed to lookup LID for phone-format message"
+            );
+          });
         }
       }
 
