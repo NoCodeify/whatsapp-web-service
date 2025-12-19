@@ -2555,6 +2555,38 @@ export class ConnectionPool extends EventEmitter {
       );
 
       for (const update of updates || []) {
+        // Log the update for debugging LID mapping
+        this.logger.debug(
+          {
+            userId,
+            phoneNumber,
+            updateId: update.id,
+            updateLid: (update as any).lid,
+            updateKeys: Object.keys(update),
+          },
+          "Processing contact update"
+        );
+
+        // Capture LID mapping if both id (phone JID) and lid are present
+        const contactJid = update.id;
+        const lid = (update as any).lid;
+
+        if (contactJid && lid && lid.includes("@lid")) {
+          // Extract phone number from JID (e.g., "31624570245@s.whatsapp.net" -> "+31624570245")
+          const phoneFromJid = contactJid.replace("@s.whatsapp.net", "");
+          if (phoneFromJid && !phoneFromJid.includes("@lid")) {
+            const formattedPhone = phoneFromJid.startsWith("+") ? phoneFromJid : `+${phoneFromJid}`;
+
+            // Save LID mapping (persists to Firestore)
+            await this.lidMappingService.saveLidMapping(userId, lid, formattedPhone);
+
+            this.logger.info(
+              { userId, phoneNumber, lid, phone: formattedPhone },
+              "Captured LID mapping from contacts.update event"
+            );
+          }
+        }
+
         if (update.id) {
           const contactNumber = update.id.replace("@s.whatsapp.net", "");
           const contactRef = this.firestore.collection("users").doc(userId).collection("contacts").doc(contactNumber);
