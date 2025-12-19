@@ -94,14 +94,11 @@ export class LidMappingService {
       // Normalize phone number (ensure + prefix)
       const normalizedPhone = phoneNumber.startsWith("+") ? phoneNumber : `+${phoneNumber}`;
 
-      // Check if we already have this mapping
+      // Check if we already have this mapping in memory
       const existingPhone = this.resolveLidToPhone(userId, lid);
-      if (existingPhone === normalizedPhone) {
-        this.logger.debug({ userId, lid, phoneNumber: normalizedPhone }, "LID mapping already exists");
-        return;
-      }
+      const alreadyInMemory = existingPhone === normalizedPhone;
 
-      // Update in-memory caches
+      // Update in-memory caches (even if already there, ensure consistency)
       if (!this.lidToPhoneCache.has(userId)) {
         this.lidToPhoneCache.set(userId, new Map());
       }
@@ -115,7 +112,8 @@ export class LidMappingService {
       // Extract numeric part of LID for document ID (remove @lid suffix)
       const docId = lid.replace("@lid", "");
 
-      // Persist to Firestore (non-blocking)
+      // ALWAYS persist to Firestore (handles case where user deleted mapping manually)
+      // Using merge: true ensures idempotency
       this.getMappingsCollection(userId)
         .doc(docId)
         .set(
@@ -131,7 +129,11 @@ export class LidMappingService {
           this.logger.error({ userId, lid, phoneNumber: normalizedPhone, error }, "Failed to persist LID mapping to Firestore");
         });
 
-      this.logger.info({ userId, lid, phoneNumber: normalizedPhone }, "Saved new LID mapping");
+      if (!alreadyInMemory) {
+        this.logger.info({ userId, lid, phoneNumber: normalizedPhone }, "Saved new LID mapping");
+      } else {
+        this.logger.debug({ userId, lid, phoneNumber: normalizedPhone }, "Refreshed existing LID mapping in Firestore");
+      }
     } catch (error) {
       this.logger.error({ userId, lid, phoneNumber, error }, "Error saving LID mapping");
     }
