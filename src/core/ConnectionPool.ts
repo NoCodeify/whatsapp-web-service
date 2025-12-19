@@ -2821,16 +2821,29 @@ export class ConnectionPool extends EventEmitter {
             "No LID mapping found - message will be processed with LID identifier"
           );
         }
-      } else if (socket && typeof socket.onWhatsApp === "function") {
+      } else {
         // Message came with phone format - check if we have a LID mapping
         // If not, proactively lookup the LID for future messages
         const formattedPhone = fromNumber.startsWith("+") ? fromNumber : `+${fromNumber}`;
         const existingLid = this.lidMappingService.resolvePhoneToLid(userId, formattedPhone);
 
-        if (!existingLid) {
+        this.logger.debug(
+          { userId, phoneNumber, fromNumber, formattedPhone, existingLid, hasSocket: !!socket, hasOnWhatsApp: !!(socket && typeof socket.onWhatsApp === "function") },
+          "Phone-format message: checking for LID lookup opportunity"
+        );
+
+        if (!existingLid && socket && typeof socket.onWhatsApp === "function") {
           // No mapping exists - lookup LID in background (non-blocking)
           const jid = fromNumber.replace(/\D/g, "") + "@s.whatsapp.net";
+          this.logger.info(
+            { userId, phoneNumber, jid },
+            "Calling onWhatsApp to lookup LID for phone-format message"
+          );
           socket.onWhatsApp(jid).then((results) => {
+            this.logger.info(
+              { userId, phoneNumber, jid, resultCount: results?.length, results: JSON.stringify(results) },
+              "onWhatsApp lookup result"
+            );
             if (results && results.length > 0) {
               const result = results[0];
               const lid = (result as any).lid;
