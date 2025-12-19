@@ -2727,6 +2727,15 @@ export class ConnectionPool extends EventEmitter {
         return;
       }
 
+      // Skip self-messages (messages from the connected phone number itself)
+      // This can happen with WhatsApp's "Note to Self" feature or protocol echoes
+      const connectedNumberClean = phoneNumber.replace(/\D/g, "");
+      const fromNumberClean = fromNumber.replace(/\D/g, "").replace("@lid", "").replace("@s.whatsapp.net", "");
+      if (fromNumberClean === connectedNumberClean) {
+        this.logger.debug({ userId, phoneNumber, fromJid, fromNumber }, "Skipping self-message (from connected number)");
+        return;
+      }
+
       // Skip special WhatsApp identifiers (status updates, broadcasts, etc.)
       // Note: @lid messages are NOT skipped - they are legitimate person-to-person messages
       if (this.isSpecialWhatsAppIdentifier(fromJid)) {
@@ -2865,6 +2874,15 @@ export class ConnectionPool extends EventEmitter {
       // Skip group messages
       if (isGroup) {
         this.logger.debug({ userId, phoneNumber, toJid }, "Skipping group message");
+        return;
+      }
+
+      // Skip self-messages (messages to the connected phone number itself)
+      // This can happen with read receipts, reactions, or WhatsApp's "Note to Self" feature
+      const connectedNumberClean = phoneNumber.replace(/\D/g, "");
+      const toNumberClean = toNumber.replace(/\D/g, "").replace("@lid", "").replace("@s.whatsapp.net", "");
+      if (toNumberClean === connectedNumberClean) {
+        this.logger.debug({ userId, phoneNumber, toJid, toNumber }, "Skipping self-message (to connected number)");
         return;
       }
 
@@ -3683,6 +3701,14 @@ export class ConnectionPool extends EventEmitter {
         const contactNumber = chatJid.replace("@s.whatsapp.net", "");
 
         if (!contactNumber) continue;
+
+        // Skip self-chat (connected number's own chat / "Note to Self")
+        const connectedNumberClean = phoneNumber.replace(/\D/g, "");
+        const contactNumberClean = contactNumber.replace(/\D/g, "");
+        if (contactNumberClean === connectedNumberClean) {
+          this.logger.debug({ userId, phoneNumber, chatJid }, "Skipping self-chat during sync");
+          continue;
+        }
 
         // Use consistent phone number normalization
         const formattedPhone = formatPhoneNumberSafe(contactNumber);
