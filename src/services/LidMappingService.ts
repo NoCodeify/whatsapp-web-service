@@ -184,11 +184,14 @@ export class LidMappingService {
    * @returns true if a new mapping was captured
    */
   async captureMappingFromPair(userId: string, id1: string, id2: string): Promise<boolean> {
+    this.logger.info({ userId, id1, id2 }, "captureMappingFromPair called");
+
     const isLid1 = id1.includes("@lid");
     const isLid2 = id2.includes("@lid");
 
     // Need exactly one LID and one phone number
     if (isLid1 === isLid2) {
+      this.logger.info({ userId, id1, id2, isLid1, isLid2 }, "captureMappingFromPair: both same type - skipping");
       return false;
     }
 
@@ -206,9 +209,12 @@ export class LidMappingService {
     // Normalize phone (ensure + prefix)
     const normalizedPhone = phone.startsWith("+") ? phone : `+${phone}`;
 
+    this.logger.info({ userId, lid, normalizedPhone }, "captureMappingFromPair: extracted lid and phone");
+
     // Check if mapping already exists
     const existing = this.resolveLidToPhone(userId, lid);
     if (existing === normalizedPhone) {
+      this.logger.info({ userId, lid, normalizedPhone, existing }, "captureMappingFromPair: mapping already exists");
       return false;
     }
 

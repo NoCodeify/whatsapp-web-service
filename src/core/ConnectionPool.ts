@@ -2674,6 +2674,10 @@ export class ConnectionPool extends EventEmitter {
           // CAPTURE LID MAPPING: When we see the same message with different sender formats,
           // we can learn the LID↔Phone mapping
           const previousSender = this.processedMessageSenders.get(messageId);
+          this.logger.info(
+            { userId, phoneNumber, messageId, previousSender, currentSender: fromNumber, hasPrevious: !!previousSender, isDifferent: previousSender !== fromNumber },
+            "LID mapping: checking duplicate for capture opportunity"
+          );
           if (previousSender && previousSender !== fromNumber) {
             // Different sender format for same message - capture mapping!
             this.lidMappingService.captureMappingFromPair(userId, previousSender, fromNumber).then((captured) => {
@@ -2682,7 +2686,17 @@ export class ConnectionPool extends EventEmitter {
                   { userId, phoneNumber, previousSender, currentSender: fromNumber, messageId },
                   "Captured LID↔Phone mapping from duplicate message"
                 );
+              } else {
+                this.logger.debug(
+                  { userId, phoneNumber, previousSender, currentSender: fromNumber, messageId },
+                  "LID mapping capture returned false - mapping may already exist or invalid pair"
+                );
               }
+            }).catch((error) => {
+              this.logger.error(
+                { userId, phoneNumber, previousSender, currentSender: fromNumber, messageId, error: (error as any).message },
+                "Failed to capture LID mapping from duplicate"
+              );
             });
           }
 
