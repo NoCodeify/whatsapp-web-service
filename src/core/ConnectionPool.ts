@@ -2785,6 +2785,11 @@ export class ConnectionPool extends EventEmitter {
         if (resolvedPhone) {
           resolvedFromNumber = resolvedPhone;
           wasLidResolved = true;
+
+          // Ensure mapping is persisted to Firestore (handles case where it was deleted manually
+          // or for desktop messages that don't send duplicates)
+          this.lidMappingService.saveLidMapping(userId, fromNumber, resolvedPhone);
+
           this.logger.info(
             { userId, phoneNumber, originalLid: fromNumber, resolvedPhone },
             "Resolved LID to phone number for incoming message"
