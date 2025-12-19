@@ -2573,16 +2573,37 @@ export class ConnectionPool extends EventEmitter {
           "Processing contact update with LID check"
         );
 
-        // Capture LID mapping if both lid and jid are present
-        if (lid && jid && lid.includes("@lid") && jid.includes("@s.whatsapp.net")) {
-          const phoneFromJid = jid.replace("@s.whatsapp.net", "");
-          const formattedPhone = phoneFromJid.startsWith("+") ? phoneFromJid : `+${phoneFromJid}`;
+        // Capture LID mapping from various field combinations:
+        // Case 1: id=phone, lid=present
+        // Case 2: id=lid, jid=present
+        // Case 3: lid and jid both present
+        let capturedLid: string | undefined;
+        let capturedPhone: string | undefined;
+
+        if (lid && lid.includes("@lid")) {
+          capturedLid = lid;
+          // Get phone from jid or id
+          if (jid && jid.includes("@s.whatsapp.net")) {
+            capturedPhone = jid.replace("@s.whatsapp.net", "");
+          } else if (contactId && contactId.includes("@s.whatsapp.net")) {
+            capturedPhone = contactId.replace("@s.whatsapp.net", "");
+          }
+        } else if (contactId && contactId.includes("@lid")) {
+          capturedLid = contactId;
+          // Get phone from jid
+          if (jid && jid.includes("@s.whatsapp.net")) {
+            capturedPhone = jid.replace("@s.whatsapp.net", "");
+          }
+        }
+
+        if (capturedLid && capturedPhone) {
+          const formattedPhone = capturedPhone.startsWith("+") ? capturedPhone : `+${capturedPhone}`;
 
           // Save LID mapping (persists to Firestore)
-          await this.lidMappingService.saveLidMapping(userId, lid, formattedPhone);
+          await this.lidMappingService.saveLidMapping(userId, capturedLid, formattedPhone);
 
           this.logger.info(
-            { userId, phoneNumber, lid, phone: formattedPhone },
+            { userId, phoneNumber, lid: capturedLid, phone: formattedPhone },
             "Captured LID mapping from contacts.update event"
           );
         }
