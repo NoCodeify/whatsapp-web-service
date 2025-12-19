@@ -2555,36 +2555,36 @@ export class ConnectionPool extends EventEmitter {
       );
 
       for (const update of updates || []) {
+        // Baileys Contact has: id (either format), lid (optional), jid (optional)
+        const contactId = update.id;
+        const lid = (update as any).lid as string | undefined;
+        const jid = (update as any).jid as string | undefined;
+
         // Log the update for debugging LID mapping
-        this.logger.debug(
+        this.logger.info(
           {
             userId,
             phoneNumber,
-            updateId: update.id,
-            updateLid: (update as any).lid,
+            contactId,
+            lid,
+            jid,
             updateKeys: Object.keys(update),
           },
-          "Processing contact update"
+          "Processing contact update with LID check"
         );
 
-        // Capture LID mapping if both id (phone JID) and lid are present
-        const contactJid = update.id;
-        const lid = (update as any).lid;
+        // Capture LID mapping if both lid and jid are present
+        if (lid && jid && lid.includes("@lid") && jid.includes("@s.whatsapp.net")) {
+          const phoneFromJid = jid.replace("@s.whatsapp.net", "");
+          const formattedPhone = phoneFromJid.startsWith("+") ? phoneFromJid : `+${phoneFromJid}`;
 
-        if (contactJid && lid && lid.includes("@lid")) {
-          // Extract phone number from JID (e.g., "31624570245@s.whatsapp.net" -> "+31624570245")
-          const phoneFromJid = contactJid.replace("@s.whatsapp.net", "");
-          if (phoneFromJid && !phoneFromJid.includes("@lid")) {
-            const formattedPhone = phoneFromJid.startsWith("+") ? phoneFromJid : `+${phoneFromJid}`;
+          // Save LID mapping (persists to Firestore)
+          await this.lidMappingService.saveLidMapping(userId, lid, formattedPhone);
 
-            // Save LID mapping (persists to Firestore)
-            await this.lidMappingService.saveLidMapping(userId, lid, formattedPhone);
-
-            this.logger.info(
-              { userId, phoneNumber, lid, phone: formattedPhone },
-              "Captured LID mapping from contacts.update event"
-            );
-          }
+          this.logger.info(
+            { userId, phoneNumber, lid, phone: formattedPhone },
+            "Captured LID mapping from contacts.update event"
+          );
         }
 
         if (update.id) {
@@ -3579,6 +3579,20 @@ export class ConnectionPool extends EventEmitter {
       }> = [];
 
       for (const contact of contacts) {
+        // Capture LID mapping if both lid and jid are present (Baileys Contact interface)
+        const lid = (contact as any).lid as string | undefined;
+        const jid = (contact as any).jid as string | undefined;
+
+        if (lid && jid && lid.includes("@lid") && jid.includes("@s.whatsapp.net")) {
+          const phoneFromJid = jid.replace("@s.whatsapp.net", "");
+          const formattedPhone = phoneFromJid.startsWith("+") ? phoneFromJid : `+${phoneFromJid}`;
+
+          // Save LID mapping (persists to Firestore) - non-blocking
+          this.lidMappingService.saveLidMapping(userId, lid, formattedPhone).catch((err) => {
+            this.logger.warn({ userId, lid, phone: formattedPhone, error: (err as any).message }, "Failed to save LID mapping from contacts.upsert");
+          });
+        }
+
         const contactNumber = contact.id?.replace("@s.whatsapp.net", "") || "";
 
         // Skip invalid contacts
