@@ -2827,7 +2827,7 @@ export class ConnectionPool extends EventEmitter {
         const formattedPhone = fromNumber.startsWith("+") ? fromNumber : `+${fromNumber}`;
         const existingLid = this.lidMappingService.resolvePhoneToLid(userId, formattedPhone);
 
-        this.logger.debug(
+        this.logger.info(
           { userId, phoneNumber, fromNumber, formattedPhone, existingLid, hasSocket: !!socket, hasOnWhatsApp: !!(socket && typeof socket.onWhatsApp === "function") },
           "Phone-format message: checking for LID lookup opportunity"
         );
