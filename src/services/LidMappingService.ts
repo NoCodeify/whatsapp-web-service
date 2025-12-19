@@ -213,14 +213,7 @@ export class LidMappingService {
 
     this.logger.info({ userId, lid, normalizedPhone }, "captureMappingFromPair: extracted lid and phone");
 
-    // Check if mapping already exists
-    const existing = this.resolveLidToPhone(userId, lid);
-    if (existing === normalizedPhone) {
-      this.logger.info({ userId, lid, normalizedPhone, existing }, "captureMappingFromPair: mapping already exists");
-      return false;
-    }
-
-    // Save the new mapping
+    // Always save the mapping (saveLidMapping handles idempotency and always persists to Firestore)
     await this.saveLidMapping(userId, lid, normalizedPhone);
 
     this.logger.info({ userId, lid, phone: normalizedPhone, source: "duplicate_pair" }, "Captured LID mapping from identifier pair");
