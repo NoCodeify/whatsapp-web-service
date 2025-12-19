@@ -2832,7 +2832,11 @@ export class ConnectionPool extends EventEmitter {
           "Phone-format message: checking for LID lookup opportunity"
         );
 
-        if (!existingLid && socket && typeof socket.onWhatsApp === "function") {
+        if (existingLid) {
+          // Mapping exists in memory - ensure it's persisted to Firestore
+          // (handles case where user deleted mapping from Firestore but it's still in memory)
+          this.lidMappingService.saveLidMapping(userId, existingLid, formattedPhone);
+        } else if (socket && typeof socket.onWhatsApp === "function") {
           // No mapping exists - lookup LID in background (non-blocking)
           const jid = fromNumber.replace(/\D/g, "") + "@s.whatsapp.net";
           this.logger.info(
