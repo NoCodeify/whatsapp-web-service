@@ -1621,17 +1621,20 @@ export class ConnectionPool extends EventEmitter {
 
         // Load existing LID mappings and proactively build new ones from contacts
         // This enables resolving LID to phone numbers for incoming messages
-        this.lidMappingService.loadMappingsForUser(userId).then(async (existingCount) => {
-          this.logger.info({ userId, phoneNumber, existingMappings: existingCount }, "Loaded existing LID mappings");
+        this.lidMappingService
+          .loadMappingsForUser(userId)
+          .then(async (existingCount) => {
+            this.logger.info({ userId, phoneNumber, existingMappings: existingCount }, "Loaded existing LID mappings");
 
-          // Proactively build LID mappings from existing contacts (Phone → LID lookup)
-          // This runs in background after connection is established
-          this.buildLidMappingsFromContacts(userId, phoneNumber, connection.socket).catch((error) => {
-            this.logger.warn({ userId, phoneNumber, error: (error as any).message }, "Failed to build LID mappings from contacts");
+            // Proactively build LID mappings from existing contacts (Phone → LID lookup)
+            // This runs in background after connection is established
+            this.buildLidMappingsFromContacts(userId, phoneNumber, connection.socket).catch((error) => {
+              this.logger.warn({ userId, phoneNumber, error: (error as any).message }, "Failed to build LID mappings from contacts");
+            });
+          })
+          .catch((error) => {
+            this.logger.warn({ userId, phoneNumber, error: (error as any).message }, "Failed to load LID mappings on connection open");
           });
-        }).catch((error) => {
-          this.logger.warn({ userId, phoneNumber, error: (error as any).message }, "Failed to load LID mappings on connection open");
-        });
 
         // Clear QR timeout since connection is now established
         if (connection.qrTimeout) {
@@ -1969,7 +1972,7 @@ export class ConnectionPool extends EventEmitter {
               const key = this.getConnectionKey(userId, phoneNumber);
               const currentConnection = this.connections.get(key);
 
-              // Only delete if still not connected after 10 seconds
+              // Only delete if still not connected after 30 seconds (extended for OOM recovery scenarios)
               if (currentConnection && currentConnection.state.connection !== "open") {
                 this.logger.warn({ userId, phoneNumber }, "Connection did not recover after replacement, removing from pool");
 
@@ -1992,7 +1995,7 @@ export class ConnectionPool extends EventEmitter {
               } else if (currentConnection && currentConnection.state.connection === "open") {
                 this.logger.info({ userId, phoneNumber }, "Connection recovered successfully after replacement");
               }
-            }, 10000); // 10 second timeout
+            }, 30000); // 30 second timeout for OOM recovery scenarios
 
             return; // Don't immediately delete or reconnect
           }
@@ -2007,7 +2010,7 @@ export class ConnectionPool extends EventEmitter {
             const key = this.getConnectionKey(userId, phoneNumber);
             const currentConnection = this.connections.get(key);
 
-            // Only delete if still not connected after 10 seconds
+            // Only delete if still not connected after 30 seconds (extended for OOM recovery scenarios)
             if (currentConnection && currentConnection.state.connection !== "open") {
               this.logger.warn({ userId, phoneNumber }, "Connection did not recover after replacement (was previously connected), removing from pool");
 
@@ -2030,7 +2033,7 @@ export class ConnectionPool extends EventEmitter {
             } else if (currentConnection && currentConnection.state.connection === "open") {
               this.logger.info({ userId, phoneNumber }, "Connection recovered successfully after replacement (was previously connected)");
             }
-          }, 10000); // 10 second timeout
+          }, 30000); // 30 second timeout for OOM recovery scenarios
 
           return; // Don't immediately delete or reconnect - wait for recovery
         }
@@ -2602,10 +2605,7 @@ export class ConnectionPool extends EventEmitter {
           // Save LID mapping (persists to Firestore)
           await this.lidMappingService.saveLidMapping(userId, capturedLid, formattedPhone);
 
-          this.logger.info(
-            { userId, phoneNumber, lid: capturedLid, phone: formattedPhone },
-            "Captured LID mapping from contacts.update event"
-          );
+          this.logger.info({ userId, phoneNumber, lid: capturedLid, phone: formattedPhone }, "Captured LID mapping from contacts.update event");
         }
 
         if (update.id) {
@@ -2728,29 +2728,40 @@ export class ConnectionPool extends EventEmitter {
           // we can learn the LID↔Phone mapping
           const previousSender = this.processedMessageSenders.get(messageId);
           this.logger.info(
-            { userId, phoneNumber, messageId, previousSender, currentSender: fromNumber, hasPrevious: !!previousSender, isDifferent: previousSender !== fromNumber },
+            {
+              userId,
+              phoneNumber,
+              messageId,
+              previousSender,
+              currentSender: fromNumber,
+              hasPrevious: !!previousSender,
+              isDifferent: previousSender !== fromNumber,
+            },
             "LID mapping: checking duplicate for capture opportunity"
           );
           if (previousSender && previousSender !== fromNumber) {
             // Different sender format for same message - capture mapping!
-            this.lidMappingService.captureMappingFromPair(userId, previousSender, fromNumber).then((captured) => {
-              if (captured) {
-                this.logger.info(
-                  { userId, phoneNumber, previousSender, currentSender: fromNumber, messageId },
-                  "Captured LID↔Phone mapping from duplicate message"
+            this.lidMappingService
+              .captureMappingFromPair(userId, previousSender, fromNumber)
+              .then((captured) => {
+                if (captured) {
+                  this.logger.info(
+                    { userId, phoneNumber, previousSender, currentSender: fromNumber, messageId },
+                    "Captured LID↔Phone mapping from duplicate message"
+                  );
+                } else {
+                  this.logger.debug(
+                    { userId, phoneNumber, previousSender, currentSender: fromNumber, messageId },
+                    "LID mapping capture returned false - mapping may already exist or invalid pair"
+                  );
+                }
+              })
+              .catch((error) => {
+                this.logger.error(
+                  { userId, phoneNumber, previousSender, currentSender: fromNumber, messageId, error: (error as any).message },
+                  "Failed to capture LID mapping from duplicate"
                 );
-              } else {
-                this.logger.debug(
-                  { userId, phoneNumber, previousSender, currentSender: fromNumber, messageId },
-                  "LID mapping capture returned false - mapping may already exist or invalid pair"
-                );
-              }
-            }).catch((error) => {
-              this.logger.error(
-                { userId, phoneNumber, previousSender, currentSender: fromNumber, messageId, error: (error as any).message },
-                "Failed to capture LID mapping from duplicate"
-              );
-            });
+              });
           }
 
           this.logger.info(
@@ -2811,15 +2822,9 @@ export class ConnectionPool extends EventEmitter {
           // or for desktop messages that don't send duplicates)
           this.lidMappingService.saveLidMapping(userId, fromNumber, resolvedPhone);
 
-          this.logger.info(
-            { userId, phoneNumber, originalLid: fromNumber, resolvedPhone },
-            "Resolved LID to phone number for incoming message"
-          );
+          this.logger.info({ userId, phoneNumber, originalLid: fromNumber, resolvedPhone }, "Resolved LID to phone number for incoming message");
         } else {
-          this.logger.debug(
-            { userId, phoneNumber, lid: fromNumber },
-            "No LID mapping found - message will be processed with LID identifier"
-          );
+          this.logger.debug({ userId, phoneNumber, lid: fromNumber }, "No LID mapping found - message will be processed with LID identifier");
         }
       } else {
         // Message came with phone format - check if we have a LID mapping
@@ -2828,7 +2833,15 @@ export class ConnectionPool extends EventEmitter {
         const existingLid = this.lidMappingService.resolvePhoneToLid(userId, formattedPhone);
 
         this.logger.info(
-          { userId, phoneNumber, fromNumber, formattedPhone, existingLid, hasSocket: !!socket, hasOnWhatsApp: !!(socket && typeof socket.onWhatsApp === "function") },
+          {
+            userId,
+            phoneNumber,
+            fromNumber,
+            formattedPhone,
+            existingLid,
+            hasSocket: !!socket,
+            hasOnWhatsApp: !!(socket && typeof socket.onWhatsApp === "function"),
+          },
           "Phone-format message: checking for LID lookup opportunity"
         );
 
@@ -2839,32 +2852,23 @@ export class ConnectionPool extends EventEmitter {
         } else if (socket && typeof socket.onWhatsApp === "function") {
           // No mapping exists - lookup LID in background (non-blocking)
           const jid = fromNumber.replace(/\D/g, "") + "@s.whatsapp.net";
-          this.logger.info(
-            { userId, phoneNumber, jid },
-            "Calling onWhatsApp to lookup LID for phone-format message"
-          );
-          socket.onWhatsApp(jid).then((results) => {
-            this.logger.info(
-              { userId, phoneNumber, jid, resultCount: results?.length, results: JSON.stringify(results) },
-              "onWhatsApp lookup result"
-            );
-            if (results && results.length > 0) {
-              const result = results[0];
-              const lid = (result as any).lid;
-              if (lid && lid.includes("@lid")) {
-                this.lidMappingService.saveLidMapping(userId, lid, formattedPhone);
-                this.logger.info(
-                  { userId, phoneNumber, lid, phone: formattedPhone },
-                  "Captured LID mapping via onWhatsApp lookup for phone-format message"
-                );
+          this.logger.info({ userId, phoneNumber, jid }, "Calling onWhatsApp to lookup LID for phone-format message");
+          socket
+            .onWhatsApp(jid)
+            .then((results) => {
+              this.logger.info({ userId, phoneNumber, jid, resultCount: results?.length, results: JSON.stringify(results) }, "onWhatsApp lookup result");
+              if (results && results.length > 0) {
+                const result = results[0];
+                const lid = (result as any).lid;
+                if (lid && lid.includes("@lid")) {
+                  this.lidMappingService.saveLidMapping(userId, lid, formattedPhone);
+                  this.logger.info({ userId, phoneNumber, lid, phone: formattedPhone }, "Captured LID mapping via onWhatsApp lookup for phone-format message");
+                }
               }
-            }
-          }).catch((err) => {
-            this.logger.debug(
-              { userId, phoneNumber, phone: formattedPhone, error: (err as any).message },
-              "Failed to lookup LID for phone-format message"
-            );
-          });
+            })
+            .catch((err) => {
+              this.logger.debug({ userId, phoneNumber, phone: formattedPhone, error: (err as any).message }, "Failed to lookup LID for phone-format message");
+            });
         }
       }
 
@@ -2872,13 +2876,7 @@ export class ConnectionPool extends EventEmitter {
       // If LID was resolved to phone, use the resolved number
       // For unresolved LID format, keep as-is (Cloud Functions will handle as fallback)
       // For regular numbers, ensure + prefix
-      const formattedFromPhone = wasLidResolved
-        ? resolvedFromNumber
-        : isLid
-          ? fromNumber
-          : fromNumber.startsWith("+")
-            ? fromNumber
-            : `+${fromNumber}`;
+      const formattedFromPhone = wasLidResolved ? resolvedFromNumber : isLid ? fromNumber : fromNumber.startsWith("+") ? fromNumber : `+${fromNumber}`;
       const formattedToPhone = phoneNumber.startsWith("+") ? phoneNumber : `+${phoneNumber}`;
 
       // Handle media if present (downloads from WhatsApp, uploads to Cloud Storage)
@@ -5687,10 +5685,7 @@ export class ConnectionPool extends EventEmitter {
         return;
       }
 
-      this.logger.info(
-        { userId, phoneNumber, contactsToLookup: phonesToLookup.length },
-        "Starting proactive LID mapping build from contacts"
-      );
+      this.logger.info({ userId, phoneNumber, contactsToLookup: phonesToLookup.length }, "Starting proactive LID mapping build from contacts");
 
       // Process in batches to avoid rate limiting
       const BATCH_SIZE = 20;
@@ -5723,10 +5718,7 @@ export class ConnectionPool extends EventEmitter {
             }
           }
         } catch (batchError) {
-          this.logger.debug(
-            { userId, phoneNumber, batchIndex: i, error: (batchError as any).message },
-            "Failed to process batch in LID mapping build"
-          );
+          this.logger.debug({ userId, phoneNumber, batchIndex: i, error: (batchError as any).message }, "Failed to process batch in LID mapping build");
         }
 
         // Delay between batches to avoid rate limiting
@@ -5735,10 +5727,7 @@ export class ConnectionPool extends EventEmitter {
         }
       }
 
-      this.logger.info(
-        { userId, phoneNumber, contactsChecked: phonesToLookup.length, mappingsFound },
-        "Completed proactive LID mapping build from contacts"
-      );
+      this.logger.info({ userId, phoneNumber, contactsChecked: phonesToLookup.length, mappingsFound }, "Completed proactive LID mapping build from contacts");
     } catch (error) {
       this.logger.error({ userId, phoneNumber, error }, "Error building LID mappings from contacts");
     }

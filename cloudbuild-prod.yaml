@@ -35,7 +35,7 @@ steps:
       - "--max-instances"
       - "1"
       - "--memory"
-      - "2Gi"
+      - "4Gi"
       - "--cpu"
       - "1"
       - "--timeout"
