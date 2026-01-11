@@ -17,7 +17,7 @@ const qrcode = require("qrcode-terminal");
 const API_URL = "http://localhost:8090";
 const API_KEY = "wws_local_dev_key_123";
 const USER_ID = "test-user";
-const PHONE_NUMBER = "+6282254135903"; // Change this to your test number
+const PHONE_NUMBER = "+301xxxxxxxx"; // Change this to your test number
 
 let socket = null;
 
