@@ -12,11 +12,12 @@
 
 const axios = require("axios");
 const io = require("socket.io-client");
+const qrcode = require("qrcode-terminal");
 
 const API_URL = "http://localhost:8090";
 const API_KEY = "wws_local_dev_key_123";
 const USER_ID = "test-user";
-const PHONE_NUMBER = "+1234567890"; // Change this to your test number
+const PHONE_NUMBER = "+301xxxxxxxx"; // Change this to your test number
 
 let socket = null;
 
@@ -92,13 +93,12 @@ async function testWebSocketConnection() {
     socket.on("qr:code", (data) => {
       console.log("\n📱 QR Code Received!");
       console.log("   Phone:", data.phoneNumber);
-      console.log("   QR Length:", data.qr ? data.qr.length : 0);
 
       if (data.qr) {
         console.log("\n   ⚠️  Open WhatsApp on your phone");
         console.log("   ⚠️  Go to Settings → Linked Devices");
-        console.log('   ⚠️  Tap "Link a Device" and scan the QR code');
-        console.log("\n   QR Code (first 50 chars):", data.qr.substring(0, 50) + "...");
+        console.log('   ⚠️  Tap "Link a Device" and scan the QR code\n');
+        qrcode.generate(data.qr, { small: true });
       }
     });
 
