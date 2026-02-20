@@ -50,6 +50,7 @@ export interface WhatsAppConnection {
   messageQueue?: QueuedMessage[]; // Queue messages during recovery for zero message loss
   baileysVersion: BaileysVersion; // Which Baileys version this connection uses
   importExistingChats?: boolean; // Whether to import existing chat history on connection (default: false)
+  lastDisconnectedAt?: number; // Unix seconds — reference timestamp for smart reconciliation on recovery
 }
 
 export interface ConnectionPoolConfig {
@@ -668,6 +669,29 @@ export class ConnectionPool extends EventEmitter {
 
       // Add to pool
       this.connections.set(connectionKey, connection);
+
+      // On recovery connections, fetch disconnected_at from Firestore for smart reconciliation.
+      // This timestamp is used as the cutoff: messages after disconnected_at are "missed" and
+      // should be imported even when importExistingChats = false.
+      if (isRecovery) {
+        try {
+          const phoneDoc = await this.firestore.collection("users").doc(userId).collection("phone_numbers").doc(phoneNumber).get();
+          const phoneData = phoneDoc.data();
+          // Prefer disconnected_at; fallback to last_updated as an approximate cutoff
+          const disconnectedTs = phoneData?.whatsapp_web?.disconnected_at ?? phoneData?.whatsapp_web?.last_updated ?? null;
+          if (disconnectedTs && typeof disconnectedTs.seconds === "number") {
+            connection.lastDisconnectedAt = disconnectedTs.seconds;
+            this.logger.info(
+              { userId, phoneNumber, lastDisconnectedAt: connection.lastDisconnectedAt },
+              "Loaded lastDisconnectedAt for smart reconciliation on recovery"
+            );
+          } else {
+            this.logger.warn({ userId, phoneNumber }, "No disconnected_at timestamp available — smart reconciliation will skip history on recovery");
+          }
+        } catch (e) {
+          this.logger.warn({ userId, phoneNumber, error: e }, "Failed to fetch disconnected_at for smart reconciliation");
+        }
+      }
 
       // Update session activity in instance coordinator
       if (!isRecovery) {
@@ -2164,40 +2188,75 @@ export class ConnectionPool extends EventEmitter {
 
         // Process history messages if any
         if (historyMessages.length > 0) {
-          this.logger.info(
-            {
-              userId,
-              phoneNumber,
-              type: upsert.type,
-              count: historyMessages.length,
-              requestId: upsert.requestId,
-              firstMessage: historyMessages[0]
-                ? {
-                    id: historyMessages[0].key?.id,
-                    remoteJid: historyMessages[0].key?.remoteJid,
-                    timestamp: historyMessages[0].messageTimestamp,
-                  }
-                : null,
-            },
-            "Processing history messages from upsert"
-          );
-
-          const count = await this.processSyncedMessages(userId, phoneNumber, historyMessages);
-          totalMessagesSynced += count;
-
-          // Update sync progress in database
-          if (this.connectionStateManager) {
-            await this.connectionStateManager.updateSyncProgress(userId, phoneNumber, totalContactsSynced, totalMessagesSynced, false);
+          // Smart reconciliation: if import is disabled, only process messages from the downtime window.
+          // This handles the messages.upsert "append" type which carries backlog messages on reconnect.
+          const upsertConn = this.connections.get(this.getConnectionKey(userId, phoneNumber));
+          let messagesToProcess = historyMessages;
+          if (!upsertConn?.importExistingChats) {
+            if (upsertConn?.lastDisconnectedAt != null) {
+              const cutoffSeconds = upsertConn.lastDisconnectedAt;
+              messagesToProcess = historyMessages.filter((msg: any) => Number(msg.messageTimestamp || 0) > cutoffSeconds);
+              if (messagesToProcess.length < historyMessages.length) {
+                this.logger.info(
+                  {
+                    userId,
+                    phoneNumber,
+                    total: historyMessages.length,
+                    filtered: messagesToProcess.length,
+                    cutoffSeconds,
+                    cutoffDate: new Date(cutoffSeconds * 1000).toISOString(),
+                  },
+                  "Smart reconciliation (upsert): filtered append messages to downtime window"
+                );
+              }
+            } else {
+              // Import disabled and no reference timestamp — skip all history messages to be safe
+              messagesToProcess = [];
+              this.logger.info(
+                { userId, phoneNumber, count: historyMessages.length },
+                "Chat import disabled — skipping history messages from upsert (no timestamp reference)"
+              );
+            }
           }
 
-          // Emit progress event
-          this.emit("sync:progress", {
-            userId,
-            phoneNumber,
-            type: "messages_from_upsert",
-            count: historyMessages.length,
-            timestamp: new Date().toISOString(),
-          });
+          if (messagesToProcess.length === 0) {
+            // Nothing to process after filtering
+          } else {
+            this.logger.info(
+              {
+                userId,
+                phoneNumber,
+                type: upsert.type,
+                count: messagesToProcess.length,
+                requestId: upsert.requestId,
+                firstMessage: messagesToProcess[0]
+                  ? {
+                      id: messagesToProcess[0].key?.id,
+                      remoteJid: messagesToProcess[0].key?.remoteJid,
+                      timestamp: messagesToProcess[0].messageTimestamp,
+                    }
+                  : null,
+              },
+              "Processing history messages from upsert"
+            );
+
+            const count = await this.processSyncedMessages(userId, phoneNumber, messagesToProcess);
+            totalMessagesSynced += count;
+
+            // Update sync progress in database
+            if (this.connectionStateManager) {
+              await this.connectionStateManager.updateSyncProgress(userId, phoneNumber, totalContactsSynced, totalMessagesSynced, false);
+            }
+
+            // Emit progress event
+            this.emit("sync:progress", {
+              userId,
+              phoneNumber,
+              type: "messages_from_upsert",
+              count: messagesToProcess.length,
+              timestamp: new Date().toISOString(),
+            });
+          } // end else (messagesToProcess.length > 0)
         }
 
         // Process real-time messages if any
@@ -2280,13 +2339,67 @@ export class ConnectionPool extends EventEmitter {
 
     // History sync handler - process contacts and messages
     socket.ev.on("messaging-history.set", async (history) => {
-      // Check if chat import is enabled for this connection; skip if not
+      // Check if chat import is enabled for this connection; apply smart reconciliation if disabled
       const connectionKey = this.getConnectionKey(userId, phoneNumber);
       const currentConn = this.connections.get(connectionKey);
       if (!currentConn?.importExistingChats) {
+        // SMART RECONCILIATION: on recovery connections we must NOT drop all history —
+        // we need to import messages that arrived DURING the downtime window.
+        // Strategy: keep messages/chats whose timestamp is AFTER the last disconnect.
+        // This ensures:
+        //   - Existing contacts' missed messages are imported ✅
+        //   - New contacts who messaged during downtime are imported ✅
+        //   - Old 2-year-old history is skipped ✅
+        if (currentConn?.isRecovery && currentConn?.lastDisconnectedAt != null) {
+          const cutoffSeconds = currentConn.lastDisconnectedAt;
+
+          // Filter messages: only those that arrived after the last disconnect
+          const missedMessages = (history.messages || []).filter((msg: any) => Number(msg.messageTimestamp || 0) > cutoffSeconds);
+
+          // Filter chats: only contacts whose most recent message is after disconnected_at
+          // conversationTimestamp represents the timestamp of the most recent message in the chat
+          const recentChats = (history.chats || []).filter((chat: any) => {
+            const chatLastTimestamp = Number(chat.conversationTimestamp || 0);
+            return chatLastTimestamp > cutoffSeconds;
+          });
+
+          this.logger.info(
+            {
+              userId,
+              phoneNumber,
+              cutoffSeconds,
+              cutoffDate: new Date(cutoffSeconds * 1000).toISOString(),
+              missedMessages: missedMessages.length,
+              recentChats: recentChats.length,
+              skippedMessages: (history.messages?.length || 0) - missedMessages.length,
+              skippedChats: (history.chats?.length || 0) - recentChats.length,
+            },
+            "Smart reconciliation: import=off recovery — filtering history to downtime window only"
+          );
+
+          // Process only the filtered contacts/messages from the downtime window
+          if (recentChats.length > 0) {
+            await this.processSyncedChats(userId, phoneNumber, recentChats, socket);
+          }
+          if (missedMessages.length > 0) {
+            await this.processSyncedMessages(userId, phoneNumber, missedMessages);
+          }
+          // Reconciliation complete — do not proceed to full import
+          return;
+        }
+
+        // Not a recovery connection OR no disconnected_at reference available:
+        // This is a first-time QR scan with import disabled — skip entirely
         this.logger.info(
-          { userId, phoneNumber, syncType: history.syncType, chats: history.chats?.length || 0 },
-          "Chat import disabled — skipping messaging-history.set processing"
+          {
+            userId,
+            phoneNumber,
+            syncType: history.syncType,
+            chats: history.chats?.length || 0,
+            isRecovery: currentConn?.isRecovery,
+            hasDisconnectedAt: currentConn?.lastDisconnectedAt != null,
+          },
+          "Chat import disabled (non-recovery) — skipping messaging-history.set processing"
         );
         return;
       }
@@ -5052,11 +5165,22 @@ export class ConnectionPool extends EventEmitter {
         return;
       }
 
-      await phoneNumberRef.update({
+      const updateData: Record<string, any> = {
         "whatsapp_web.status": status,
         "whatsapp_web.last_updated": admin.firestore.Timestamp.now(),
         updated_at: admin.firestore.Timestamp.now(),
-      });
+      };
+
+      // Store connection lifecycle timestamps for smart reconciliation
+      // last_connected_at is used as a reference point for filtering missed messages on reconnect
+      // disconnected_at is used as the cutoff: messages after this time are "missed" and should be imported
+      if (status === "connected") {
+        updateData["whatsapp_web.last_connected_at"] = admin.firestore.Timestamp.now();
+      } else if (status === "disconnected") {
+        updateData["whatsapp_web.disconnected_at"] = admin.firestore.Timestamp.now();
+      }
+
+      await phoneNumberRef.update(updateData);
 
       // Also update in-memory state to prevent stale state during shutdown
       if (this.connectionStateManager) {
