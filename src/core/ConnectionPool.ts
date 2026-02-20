@@ -49,6 +49,7 @@ export interface WhatsAppConnection {
   handshakeCompleted?: boolean; // Track if initial QR pairing handshake has completed (before first disconnect code 515)
   messageQueue?: QueuedMessage[]; // Queue messages during recovery for zero message loss
   baileysVersion: BaileysVersion; // Which Baileys version this connection uses
+  importExistingChats?: boolean; // Whether to import existing chat history on connection (default: false)
 }
 
 export interface ConnectionPoolConfig {
@@ -72,6 +73,7 @@ export class ConnectionPool extends EventEmitter {
   private instanceCoordinator: InstanceCoordinator;
   private healthCheckTimer?: NodeJS.Timeout;
   private cleanupTimer?: NodeJS.Timeout;
+  private connectionVerificationTimer?: NodeJS.Timeout; // Periodic deep-health verification of open sockets
   private isShuttingDown: boolean = false;
   private importListRefs: Map<string, DocumentReference> = new Map(); // Store import list refs per user
   private pendingChatMetadata: Map<string, any> = new Map(); // Store chat metadata for contacts to be created
@@ -135,6 +137,7 @@ export class ConnectionPool extends EventEmitter {
 
     this.startHealthCheck();
     this.startCleanup();
+    this.startConnectionVerification();
   }
 
   /**
@@ -503,7 +506,8 @@ export class ConnectionPool extends EventEmitter {
     countryCode?: string,
     isRecovery: boolean = false,
     browserName?: string,
-    forceNew?: boolean
+    forceNew?: boolean,
+    importExistingChats: boolean = false
   ): Promise<boolean> {
     // 🟢 BUG #4 FIX: Check if pool is shutting down before adding connection
     if (this.isShuttingDown) {
@@ -618,7 +622,8 @@ export class ConnectionPool extends EventEmitter {
         browserName,
         isRecovery, // Skip proxy creation if this is a recovery
         forceNew, // Force fresh connection, delete existing sessions
-        baileysVersion
+        baileysVersion,
+        importExistingChats // Whether to import existing chat history
       );
 
       // Determine if handshake should be skipped:
@@ -655,6 +660,7 @@ export class ConnectionPool extends EventEmitter {
         syncCompleted: false, // All connections need to sync missed messages
         handshakeCompleted: skipHandshake, // Skip handshake for recovery or existing sessions
         baileysVersion: resolvedBaileysVersion, // Which Baileys version this connection uses
+        importExistingChats: importExistingChats, // Whether to import existing chat history
       };
 
       // Set up event handlers
@@ -2274,6 +2280,17 @@ export class ConnectionPool extends EventEmitter {
 
     // History sync handler - process contacts and messages
     socket.ev.on("messaging-history.set", async (history) => {
+      // Check if chat import is enabled for this connection; skip if not
+      const connectionKey = this.getConnectionKey(userId, phoneNumber);
+      const currentConn = this.connections.get(connectionKey);
+      if (!currentConn?.importExistingChats) {
+        this.logger.info(
+          { userId, phoneNumber, syncType: history.syncType, chats: history.chats?.length || 0 },
+          "Chat import disabled — skipping messaging-history.set processing"
+        );
+        return;
+      }
+
       // Enhanced logging to debug message sync
       this.logger.info(
         {
@@ -5154,6 +5171,64 @@ export class ConnectionPool extends EventEmitter {
   }
 
   /**
+   * Start periodic deep-health verification of connections believed to be "open".
+   *
+   * Every 10 minutes, iterates over all connections whose state is "open" and
+   * sends a lightweight presence update ping. If the ping throws (socket actually
+   * closed or errored), the connection's Firestore status is updated to "disconnected"
+   * and a reconnection attempt is triggered.
+   *
+   * This catches cases where the Baileys connection.update event is never fired
+   * (e.g., silent TCP disconnections), preventing stale "connected" statuses.
+   */
+  private startConnectionVerification() {
+    const VERIFICATION_INTERVAL_MS = 10 * 60 * 1000; // Every 10 minutes
+
+    this.connectionVerificationTimer = setInterval(async () => {
+      if (this.isShuttingDown) return;
+
+      const openConnections = Array.from(this.connections.values()).filter((conn) => conn.state.connection === "open");
+
+      if (openConnections.length === 0) return;
+
+      this.logger.info({ count: openConnections.length }, "Starting periodic connection verification");
+
+      for (const connection of openConnections) {
+        const { userId, phoneNumber, socket } = connection;
+
+        try {
+          // sendPresenceUpdate is a lightweight operation that verifies the socket is alive
+          await socket.sendPresenceUpdate("available");
+
+          // Update lastActivity to reflect the successful ping
+          connection.lastActivity = new Date();
+        } catch (pingError: any) {
+          this.logger.warn(
+            { userId, phoneNumber, error: pingError.message },
+            "Connection verification ping failed — socket appears dead, triggering reconnect"
+          );
+
+          // Update Firestore status so external observers see the disconnection
+          try {
+            if (this.connectionStateManager) {
+              await this.connectionStateManager.markDisconnected(userId, phoneNumber, "Verification ping failed");
+            } else {
+              await this.updatePhoneNumberStatus(userId, phoneNumber, "disconnected");
+            }
+          } catch (statusError: any) {
+            this.logger.warn({ userId, phoneNumber, error: statusError.message }, "Failed to update Firestore status after verification failure");
+          }
+
+          // Trigger reconnection via the existing reconnect mechanism
+          this.reconnect(userId, phoneNumber).catch((reconnectError: any) => {
+            this.logger.warn({ userId, phoneNumber, error: reconnectError.message }, "Reconnection after verification failure also failed");
+          });
+        }
+      }
+    }, VERIFICATION_INTERVAL_MS);
+  }
+
+  /**
    * Clean up orphaned cache entries for users without active connections
    * This is a safety net to prevent memory leaks from missed cleanups
    */
@@ -5487,6 +5562,9 @@ export class ConnectionPool extends EventEmitter {
     }
     if (this.cleanupTimer) {
       clearInterval(this.cleanupTimer);
+    }
+    if (this.connectionVerificationTimer) {
+      clearInterval(this.connectionVerificationTimer);
     }
 
     // Clear memory maps

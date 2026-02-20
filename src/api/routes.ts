@@ -67,7 +67,7 @@ export function createApiRoutes(
    */
   router.post("/sessions/initialize", async (req: AuthenticatedRequest, res: Response): Promise<any> => {
     try {
-      const { phoneNumber, proxyCountry, countryCode, browserName, forceNew } = req.body;
+      const { phoneNumber, proxyCountry, countryCode, browserName, forceNew, importExistingChats = false } = req.body;
       const userId = req.user!.userId;
 
       if (!phoneNumber) {
@@ -97,7 +97,7 @@ export function createApiRoutes(
       }
 
       // Add connection to pool with optional country, country code, and browser name
-      const added = await connectionPool.addConnection(userId, formattedPhone, proxyCountry, countryCode, false, browserName, forceNew);
+      const added = await connectionPool.addConnection(userId, formattedPhone, proxyCountry, countryCode, false, browserName, forceNew, importExistingChats);
 
       if (!added) {
         return res.status(503).json({
@@ -266,6 +266,55 @@ export function createApiRoutes(
     } catch (error) {
       logger.error({ error, userId: req.params.userId }, "Failed to get session status");
       return res.status(500).json({ error: "Failed to get session status" });
+    }
+  });
+
+  /**
+   * GET /sessions/:userId/health
+   * Lightweight health check for a WhatsApp Web session
+   * Returns whether the session is alive and the socket is in "open" state
+   */
+  router.get("/sessions/:userId/health", async (req: AuthenticatedRequest, res: Response): Promise<any> => {
+    try {
+      const { userId } = req.params;
+      const phoneNumber = req.query.phoneNumber as string;
+
+      if (!phoneNumber) {
+        return res.status(400).json({ error: "Phone number required" });
+      }
+
+      // Format the phone number for consistent lookup
+      const formattedPhone = formatPhoneNumberSafe(phoneNumber);
+      if (!formattedPhone) {
+        return res.status(400).json({ error: "Invalid phone number format" });
+      }
+
+      // Verify user access
+      if (req.user!.userId !== userId) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      const connection = connectionPool.getConnection(userId, formattedPhone);
+
+      if (!connection) {
+        return res.status(404).json({
+          healthy: false,
+          state: "not_found",
+          phoneNumber: formattedPhone,
+        });
+      }
+
+      const isOpen = connection.state.connection === "open";
+
+      res.json({
+        healthy: isOpen,
+        state: connection.state.connection,
+        phoneNumber: formattedPhone,
+        lastActivity: connection.lastActivity,
+      });
+    } catch (error) {
+      logger.error({ error, userId: req.params.userId }, "Failed to check session health");
+      return res.status(500).json({ error: "Failed to check session health" });
     }
   });
 
