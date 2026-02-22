@@ -9,6 +9,7 @@ import { ReconnectionService } from "../services/ReconnectionService";
 import pino from "pino";
 import { WAMessageContent } from "@whiskeysockets/baileys";
 import { formatPhoneNumberSafe } from "../utils/phoneNumber";
+import { Firestore } from "@google-cloud/firestore";
 
 const logger = pino({ name: "API" });
 const limitChecker = new LimitChecker();
@@ -52,7 +53,8 @@ export function createApiRoutes(
   sessionManager: SessionManager,
   proxyManager: ProxyManager,
   connectionStateManager?: ConnectionStateManager,
-  reconnectionService?: ReconnectionService
+  reconnectionService?: ReconnectionService,
+  firestore?: Firestore
 ): Router {
   const router = Router();
 
@@ -1068,6 +1070,46 @@ export function createApiRoutes(
         error: "Failed to rotate proxy",
         message: error instanceof Error ? error.message : "Unknown error",
       });
+    }
+  });
+
+  /**
+   * POST /upgrade-baileys-version
+   * Upgrade user's WhatsApp connection from v6 to v7
+   */
+  router.post("/upgrade-baileys-version", async (req: AuthenticatedRequest, res: Response): Promise<any> => {
+    const userId = req.user?.userId;
+    const { phoneNumber } = req.body;
+
+    if (!userId || !phoneNumber) {
+      return res.status(400).json({ error: "userId and phoneNumber are required" });
+    }
+
+    try {
+      // 1. Disconnect current session
+      await connectionPool.removeConnection(userId, phoneNumber);
+
+      // 1b. Delete the old v6 session files so they don't remain orphaned
+      await sessionManager.deleteSession(userId, phoneNumber, false);
+
+      // 2. Update user's version preference in Firestore
+      if (!firestore) {
+        return res.status(500).json({ error: "Firestore not available" });
+      }
+      await firestore.collection("users").doc(userId).update({
+        whatsapp_baileys_version: "v7",
+      });
+
+      logger.info({ userId, phoneNumber }, "Upgraded user to Baileys v7 - reconnection required");
+
+      res.json({
+        success: true,
+        message: "Upgraded to v7. Please reconnect your WhatsApp by scanning a new QR code.",
+        version: "v7",
+      });
+    } catch (error: any) {
+      logger.error({ userId, phoneNumber, error: error.message }, "Failed to upgrade Baileys version");
+      res.status(500).json({ error: "Failed to upgrade", details: error.message });
     }
   });
 

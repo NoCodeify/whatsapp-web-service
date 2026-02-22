@@ -604,10 +604,12 @@ describe("SessionManager", () => {
       expect(sessions).toContainEqual({
         userId: "user1",
         phoneNumber: "+1111111111",
+        baileysVersion: "v6",
       });
       expect(sessions).toContainEqual({
         userId: "user2",
         phoneNumber: "+2222222222",
+        baileysVersion: "v6",
       });
     });
 

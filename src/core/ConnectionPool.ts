@@ -17,6 +17,7 @@ import * as admin from "firebase-admin";
 import { DocumentReference } from "@google-cloud/firestore";
 import { SessionRecoveryService } from "../services/SessionRecoveryService";
 import { LidMappingService } from "../services/LidMappingService";
+import { BaileysVersion, isV7 } from "./BaileysFactory";
 
 export interface QueuedMessage {
   toNumber: string;
@@ -47,6 +48,7 @@ export interface WhatsAppConnection {
   syncCompleted?: boolean; // Track if initial history sync has completed
   handshakeCompleted?: boolean; // Track if initial QR pairing handshake has completed (before first disconnect code 515)
   messageQueue?: QueuedMessage[]; // Queue messages during recovery for zero message loss
+  baileysVersion: BaileysVersion; // Which Baileys version this connection uses
 }
 
 export interface ConnectionPoolConfig {
@@ -597,15 +599,26 @@ export class ConnectionPool extends EventEmitter {
       // Phone number record should already be created by Cloud Function
       // before calling the WhatsApp Web Service
 
+      // Get user's Baileys version preference
+      const userDoc = await this.firestore.collection("users").doc(userId).get();
+      const userData = userDoc.data();
+      const rawVersion = userData?.whatsapp_baileys_version;
+      const baileysVersion: BaileysVersion = rawVersion === "v6" ? "v6" : "v7";
+
       // Create connection with proxy and custom browser name
       // Skip proxy creation during recovery since SessionRecoveryService already has one
-      const { socket, sessionExists } = await this.sessionManager.createConnection(
+      const {
+        socket,
+        sessionExists,
+        baileysVersion: resolvedBaileysVersion,
+      } = await this.sessionManager.createConnection(
         userId,
         phoneNumber,
         proxyCountry,
         browserName,
         isRecovery, // Skip proxy creation if this is a recovery
-        forceNew // Force fresh connection, delete existing sessions
+        forceNew, // Force fresh connection, delete existing sessions
+        baileysVersion
       );
 
       // Determine if handshake should be skipped:
@@ -641,6 +654,7 @@ export class ConnectionPool extends EventEmitter {
         isRecovery: isRecovery, // Track if this is a recovery connection
         syncCompleted: false, // All connections need to sync missed messages
         handshakeCompleted: skipHandshake, // Skip handshake for recovery or existing sessions
+        baileysVersion: resolvedBaileysVersion, // Which Baileys version this connection uses
       };
 
       // Set up event handlers
@@ -1635,6 +1649,22 @@ export class ConnectionPool extends EventEmitter {
           .catch((error) => {
             this.logger.warn({ userId, phoneNumber, error: (error as any).message }, "Failed to load LID mappings on connection open");
           });
+
+        // For v7 connections, listen for native LID mapping events
+        if (isV7(connection.baileysVersion) && connection.socket) {
+          connection.socket.ev.on("lid-mapping.update" as any, (mappings: any[]) => {
+            this.logger.info({ userId, phoneNumber, count: mappings?.length }, "Received native Baileys v7 LID mapping update");
+            // Store each mapping via LidMappingService for consistency
+            for (const mapping of mappings || []) {
+              if (mapping.lid && mapping.pn) {
+                const formattedPhone = mapping.pn.startsWith("+") ? mapping.pn : `+${mapping.pn}`;
+                this.lidMappingService.saveLidMapping(userId, mapping.lid + "@lid", formattedPhone).catch((err: any) => {
+                  this.logger.warn({ error: err.message, lid: mapping.lid }, "Failed to save v7 native LID mapping");
+                });
+              }
+            }
+          });
+        }
 
         // Clear QR timeout since connection is now established
         if (connection.qrTimeout) {
@@ -2824,7 +2854,33 @@ export class ConnectionPool extends EventEmitter {
 
           this.logger.info({ userId, phoneNumber, originalLid: fromNumber, resolvedPhone }, "Resolved LID to phone number for incoming message");
         } else {
-          this.logger.debug({ userId, phoneNumber, lid: fromNumber }, "No LID mapping found - message will be processed with LID identifier");
+          // For v7 connections, try native Baileys LID resolution if our service didn't have a mapping
+          const connectionKey = this.getConnectionKey(userId, phoneNumber);
+          const connection = this.connections.get(connectionKey);
+          if (isV7(connection?.baileysVersion || "v6") && socket?.signalRepository) {
+            try {
+              const lidStore = (socket.signalRepository as any).lidMapping;
+              if (lidStore && typeof lidStore.getPNForLID === "function") {
+                const lidNumber = fromNumber.replace("@lid", "");
+                const nativePN = await lidStore.getPNForLID(lidNumber);
+                if (nativePN) {
+                  resolvedFromNumber = nativePN.startsWith("+") ? nativePN : `+${nativePN}`;
+                  wasLidResolved = true;
+                  // Save to our LidMappingService for cross-version compatibility
+                  this.lidMappingService.saveLidMapping(userId, fromNumber, resolvedFromNumber);
+                  this.logger.info(
+                    { userId, phoneNumber, lid: fromNumber, resolvedPhone: resolvedFromNumber },
+                    "Resolved LID via Baileys v7 native signalRepository"
+                  );
+                }
+              }
+            } catch (err: any) {
+              this.logger.debug({ userId, phoneNumber, error: err.message }, "v7 native LID resolution failed");
+            }
+          }
+          if (!wasLidResolved) {
+            this.logger.debug({ userId, phoneNumber, lid: fromNumber }, "No LID mapping found - message will be processed with LID identifier");
+          }
         }
       } else {
         // Message came with phone format - check if we have a LID mapping

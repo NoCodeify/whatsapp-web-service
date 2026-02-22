@@ -1,12 +1,6 @@
-import {
-  makeWASocket,
-  useMultiFileAuthState,
-  fetchLatestBaileysVersion,
-  WASocket,
-  makeCacheableSignalKeyStore,
-  proto,
-  AuthenticationState,
-} from "@whiskeysockets/baileys";
+import type { WASocket, AuthenticationState } from "@whiskeysockets/baileys";
+import { proto } from "@whiskeysockets/baileys";
+import { getBaileys, BaileysVersion, isV7 } from "./BaileysFactory";
 import pino from "pino";
 import { ProxyManager } from "./ProxyManager";
 import { Firestore } from "@google-cloud/firestore";
@@ -26,6 +20,7 @@ export interface SessionData {
   authState: AuthenticationState;
   createdAt: Date;
   lastUsed: Date;
+  baileysVersion?: BaileysVersion;
 }
 
 export class SessionManager {
@@ -91,8 +86,13 @@ export class SessionManager {
     proxyCountry?: string,
     browserName?: string,
     skipProxy?: boolean, // Skip proxy creation during recovery
-    forceNew?: boolean // Force fresh connection, delete existing sessions
-  ): Promise<{ socket: WASocket; sessionExists: boolean }> {
+    forceNew?: boolean, // Force fresh connection, delete existing sessions
+    baileysVersion: BaileysVersion = "v6"
+  ): Promise<{
+    socket: WASocket;
+    sessionExists: boolean;
+    baileysVersion: BaileysVersion;
+  }> {
     // Validate userId to prevent directory traversal
     this.validateUserId(userId);
 
@@ -121,19 +121,22 @@ export class SessionManager {
       }
 
       // Get or create auth state
-      const { state, saveCreds, sessionExists } = await this.getAuthState(userId, phoneNumber, forceNew);
+      const { state, saveCreds, sessionExists } = await this.getAuthState(userId, phoneNumber, forceNew, baileysVersion);
 
       // Get proxy agent if configured with country (skip during recovery)
       const proxyAgent = skipProxy ? null : await this.proxyManager.createProxyAgent(userId, phoneNumber, proxyCountry);
 
+      // Get the appropriate Baileys module for the requested version
+      const baileys = await getBaileys(baileysVersion);
+
       // Get latest Baileys version
-      const { version } = await fetchLatestBaileysVersion();
+      const { version } = await baileys.fetchLatestBaileysVersion();
 
       // Create socket configuration
       const socketConfig: any = {
         auth: {
           creds: state.creds,
-          keys: makeCacheableSignalKeyStore(state.keys, this.logger),
+          keys: baileys.makeCacheableSignalKeyStore(state.keys, this.logger),
         },
         version,
         logger: this.logger.child({ userId, phoneNumber }),
@@ -185,8 +188,8 @@ export class SessionManager {
         );
       }
 
-      // Create socket
-      const socket = makeWASocket(socketConfig);
+      // Create socket using the version-appropriate Baileys module
+      const socket = baileys.makeWASocket(socketConfig);
 
       // Handle credential updates
       socket.ev.on("creds.update", async () => {
@@ -201,16 +204,28 @@ export class SessionManager {
         authState: state,
         createdAt: new Date(),
         lastUsed: new Date(),
+        baileysVersion,
       };
       this.sessions.set(sessionKey, sessionData);
 
-      this.logger.info({ userId, phoneNumber, sessionExists }, "WhatsApp connection created");
+      this.logger.info({ userId, phoneNumber, sessionExists, baileysVersion }, "WhatsApp connection created");
 
-      return { socket, sessionExists };
+      return { socket, sessionExists, baileysVersion };
     } catch (error) {
       this.logger.error({ userId, phoneNumber, error }, "Failed to create connection");
       throw error;
     }
+  }
+
+  /**
+   * Get the versioned sessions directory for the given Baileys version.
+   * v7 sessions are stored in a separate directory to avoid incompatibility.
+   */
+  private getVersionedSessionsDir(baileysVersion: BaileysVersion = "v6"): string {
+    if (isV7(baileysVersion)) {
+      return this.sessionsDir.replace(/sessions\/?$/, "sessions-v7");
+    }
+    return this.sessionsDir;
   }
 
   /**
@@ -220,13 +235,14 @@ export class SessionManager {
   private async getAuthState(
     userId: string,
     phoneNumber: string,
-    forceNew?: boolean
+    forceNew?: boolean,
+    baileysVersion: BaileysVersion = "v6"
   ): Promise<{
     state: AuthenticationState;
     saveCreds: () => Promise<void>;
     sessionExists: boolean;
   }> {
-    const sessionPath = this.getSessionPath(userId, phoneNumber);
+    const sessionPath = this.getSessionPath(userId, phoneNumber, baileysVersion);
 
     // Check if local session exists
     const localSessionExists = await this.localSessionExists(sessionPath);
@@ -262,8 +278,9 @@ export class SessionManager {
       }
     }
 
-    // Use multi-file auth state
-    const authState = await useMultiFileAuthState(sessionPath);
+    // Use version-appropriate multi-file auth state
+    const baileys = await getBaileys(baileysVersion);
+    const authState = await baileys.useMultiFileAuthState(sessionPath);
 
     // In hybrid mode, setup automatic backup
     if (this.storageType === "hybrid") {
@@ -306,7 +323,8 @@ export class SessionManager {
     // Setup new backup timer
     const timer = setInterval(async () => {
       try {
-        await this.backupToCloudStorage(userId, phoneNumber);
+        const sessionVersion = this.sessions.get(sessionKey)?.baileysVersion;
+        await this.backupToCloudStorage(userId, phoneNumber, sessionVersion);
         this.logger.debug({ userId, phoneNumber }, "Automatic session backup completed");
       } catch (error) {
         this.logger.warn({ userId, phoneNumber, error }, "Automatic backup failed");
@@ -326,10 +344,14 @@ export class SessionManager {
   }
 
   /**
-   * Save authentication state to Cloud Storage
+   * Save authentication state to Cloud Storage.
+   * Uses the baileysVersion from the in-memory session to determine the correct storage path.
    */
   private async saveAuthState(userId: string, phoneNumber: string, authState: AuthenticationState) {
     const sessionKey = this.getSessionKey(userId, phoneNumber);
+
+    // Resolve the Baileys version from the in-memory session data
+    const sessionVersion: BaileysVersion = this.sessions.get(sessionKey)?.baileysVersion || "v6";
 
     try {
       // Update local cache
@@ -344,11 +366,11 @@ export class SessionManager {
         try {
           // Use CloudRunSessionOptimizer for cloud mode (better performance with queuing)
           if (this.storageType === "cloud" && this.cloudOptimizer) {
-            const sessionPath = this.getSessionPath(userId, phoneNumber);
+            const sessionPath = this.getSessionPath(userId, phoneNumber, sessionVersion);
             await this.cloudOptimizer.uploadSession(userId, phoneNumber, sessionPath);
           } else {
             // Fallback to original method for hybrid mode
-            await this.backupToCloudStorage(userId, phoneNumber);
+            await this.backupToCloudStorage(userId, phoneNumber, sessionVersion);
           }
 
           // Update Firestore with backup status in unified phone_numbers collection
@@ -428,15 +450,16 @@ export class SessionManager {
   }
 
   /**
-   * Backup session to Cloud Storage with atomic two-phase commit
+   * Backup session to Cloud Storage with atomic two-phase commit.
+   * Uses the baileysVersion to determine the correct local session path.
    */
-  private async backupToCloudStorage(userId: string, phoneNumber: string) {
+  private async backupToCloudStorage(userId: string, phoneNumber: string, baileysVersion?: BaileysVersion) {
     if (!this.storage) {
       this.logger.debug({ userId, phoneNumber }, "Cloud Storage not configured, skipping backup");
       return;
     }
 
-    const sessionPath = this.getSessionPath(userId, phoneNumber);
+    const sessionPath = this.getSessionPath(userId, phoneNumber, baileysVersion);
     const bucket = this.storage.bucket(this.bucketName);
 
     try {
@@ -601,7 +624,8 @@ export class SessionManager {
     }
 
     const sessionKey = this.getSessionKey(userId, phoneNumber);
-    const sessionPath = this.getSessionPath(userId, phoneNumber);
+    const sessionPathV6 = this.getSessionPath(userId, phoneNumber, "v6");
+    const sessionPathV7 = this.getSessionPath(userId, phoneNumber, "v7");
 
     try {
       // Clear backup timer if exists
@@ -615,14 +639,16 @@ export class SessionManager {
       // Remove from memory
       this.sessions.delete(sessionKey);
 
-      // Delete local files
-      try {
-        const files = await readdir(sessionPath);
-        for (const file of files) {
-          await unlink(path.join(sessionPath, file));
+      // Delete local files from BOTH v6 and v7 directories
+      for (const sessionPath of [sessionPathV6, sessionPathV7]) {
+        try {
+          const files = await readdir(sessionPath);
+          for (const file of files) {
+            await unlink(path.join(sessionPath, file));
+          }
+        } catch (error) {
+          this.logger.debug({ userId, phoneNumber, sessionPath, error }, "No local session files to delete in directory");
         }
-      } catch (error) {
-        this.logger.debug({ userId, phoneNumber, error }, "No local session files to delete");
       }
 
       // Delete from Cloud Storage if configured
@@ -689,7 +715,7 @@ export class SessionManager {
   }
 
   /**
-   * Check if session exists
+   * Check if session exists in either the v6 or v7 directory.
    */
   async sessionExists(userId: string, phoneNumber: string): Promise<boolean> {
     // Format phone number for consistency
@@ -698,89 +724,107 @@ export class SessionManager {
       phoneNumber = formattedPhone;
     }
 
-    const sessionPath = this.getSessionPath(userId, phoneNumber);
+    // Check both v6 and v7 local directories
+    const sessionPathV6 = this.getSessionPath(userId, phoneNumber, "v6");
+    const sessionPathV7 = this.getSessionPath(userId, phoneNumber, "v7");
 
-    try {
-      const files = await readdir(sessionPath);
-      return files.length > 0;
-    } catch {
-      // Try Cloud Storage if configured
-      if (this.storage) {
-        try {
-          const bucket = this.storage.bucket(this.bucketName);
-          const prefix = `sessions/${userId}/${phoneNumber}/`;
-          const [files] = await bucket.getFiles({ prefix, maxResults: 1 });
-
-          return files.length > 0;
-        } catch (error) {
-          this.logger.debug({ userId, phoneNumber, error }, "Error checking Cloud Storage for session");
+    for (const sessionPath of [sessionPathV6, sessionPathV7]) {
+      try {
+        const files = await readdir(sessionPath);
+        if (files.length > 0) {
+          return true;
         }
+      } catch {
+        // Directory doesn't exist, continue checking
       }
-      return false;
     }
+
+    // Try Cloud Storage if configured
+    if (this.storage) {
+      try {
+        const bucket = this.storage.bucket(this.bucketName);
+        const prefix = `sessions/${userId}/${phoneNumber}/`;
+        const [files] = await bucket.getFiles({ prefix, maxResults: 1 });
+
+        return files.length > 0;
+      } catch (error) {
+        this.logger.debug({ userId, phoneNumber, error }, "Error checking Cloud Storage for session");
+      }
+    }
+
+    return false;
   }
 
   /**
-   * List all sessions from the filesystem
+   * List all sessions from the filesystem.
+   * Scans both the v6 (sessions/) and v7 (sessions-v7/) directories.
    */
-  async listAllSessions(): Promise<Array<{ userId: string; phoneNumber: string }>> {
-    const sessions: Array<{ userId: string; phoneNumber: string }> = [];
+  async listAllSessions(): Promise<Array<{ userId: string; phoneNumber: string; baileysVersion: BaileysVersion }>> {
+    const sessions: Array<{ userId: string; phoneNumber: string; baileysVersion: BaileysVersion }> = [];
 
-    try {
-      // Read all directories in sessions folder
-      const dirs = await readdir(this.sessionsDir);
+    // Scan both v6 and v7 session directories
+    const dirsToScan: Array<{ dir: string; version: BaileysVersion }> = [
+      { dir: this.sessionsDir, version: "v6" },
+      { dir: this.getVersionedSessionsDir("v7"), version: "v7" },
+    ];
 
-      for (const dir of dirs) {
-        // Skip non-directory entries
-        const dirPath = path.join(this.sessionsDir, dir);
-        const stats = await fs.promises.stat(dirPath);
+    for (const { dir: sessionsDir, version } of dirsToScan) {
+      try {
+        const dirs = await readdir(sessionsDir);
 
-        if (!stats.isDirectory()) continue;
+        for (const dir of dirs) {
+          // Skip non-directory entries
+          const dirPath = path.join(sessionsDir, dir);
+          const stats = await fs.promises.stat(dirPath);
 
-        // Parse directory name (format: userId-phoneNumber)
-        const parts = dir.split("-");
-        if (parts.length >= 2) {
-          // Handle case where phoneNumber might contain dashes
-          const userId = parts[0];
-          const phoneNumber = parts.slice(1).join("-");
+          if (!stats.isDirectory()) continue;
 
-          // Check if this session has a creds.json file (indicates valid session)
-          try {
-            const credsPath = path.join(dirPath, "creds.json");
-            await fs.promises.access(credsPath, fs.constants.F_OK);
+          // Parse directory name (format: userId-phoneNumber)
+          const parts = dir.split("-");
+          if (parts.length >= 2) {
+            // Handle case where phoneNumber might contain dashes
+            const userId = parts[0];
+            const phoneNumber = parts.slice(1).join("-");
 
-            // Session has credentials, add to list
-            sessions.push({ userId, phoneNumber });
+            // Check if this session has a creds.json file (indicates valid session)
+            try {
+              const credsPath = path.join(dirPath, "creds.json");
+              await fs.promises.access(credsPath, fs.constants.F_OK);
 
-            this.logger.debug(
-              {
-                userId,
-                phoneNumber,
-                dir,
-              },
-              "Found valid session directory"
-            );
-          } catch {
-            // No creds.json, skip this directory
-            this.logger.debug({ dir }, "Session directory missing creds.json, skipping");
+              // Session has credentials, add to list
+              sessions.push({ userId, phoneNumber, baileysVersion: version });
+
+              this.logger.debug(
+                {
+                  userId,
+                  phoneNumber,
+                  dir,
+                  baileysVersion: version,
+                },
+                "Found valid session directory"
+              );
+            } catch {
+              // No creds.json, skip this directory
+              this.logger.debug({ dir }, "Session directory missing creds.json, skipping");
+            }
+          } else {
+            this.logger.debug({ dir }, "Invalid session directory name format");
           }
-        } else {
-          this.logger.debug({ dir }, "Invalid session directory name format");
         }
+      } catch (error) {
+        // Directory may not exist (e.g., sessions-v7 not created yet), skip silently
+        this.logger.debug({ sessionsDir, error }, "Could not read sessions directory, skipping");
       }
-
-      this.logger.info(
-        {
-          count: sessions.length,
-        },
-        "Listed all sessions from filesystem"
-      );
-
-      return sessions;
-    } catch (error) {
-      this.logger.error({ error }, "Failed to list sessions");
-      return [];
     }
+
+    this.logger.info(
+      {
+        count: sessions.length,
+      },
+      "Listed all sessions from filesystem"
+    );
+
+    return sessions;
   }
 
   /**
@@ -920,9 +964,10 @@ export class SessionManager {
   }
 
   /**
-   * Get sanitized session path with directory traversal protection
+   * Get sanitized session path with directory traversal protection.
+   * When a baileysVersion is provided, the path uses the version-specific sessions directory.
    */
-  private getSessionPath(userId: string, phoneNumber: string): string {
+  private getSessionPath(userId: string, phoneNumber: string, baileysVersion?: BaileysVersion): string {
     // Sanitize inputs - remove directory traversal sequences
     const sanitizedUserId = userId.replace(/\.\./g, "").replace(/[\/\\]/g, "");
     const sanitizedPhone = phoneNumber.replace(/\.\./g, "").replace(/[\/\\]/g, "");
@@ -932,13 +977,14 @@ export class SessionManager {
       throw new Error("Invalid phone number: contains directory traversal sequences");
     }
 
-    const sessionPath = path.join(this.sessionsDir, `${sanitizedUserId}-${sanitizedPhone}`);
+    const baseDir = baileysVersion ? this.getVersionedSessionsDir(baileysVersion) : this.sessionsDir;
+    const sessionPath = path.join(baseDir, `${sanitizedUserId}-${sanitizedPhone}`);
 
-    // CRITICAL: Verify resolved path is within sessionsDir
+    // CRITICAL: Verify resolved path is within the base directory
     const resolvedPath = path.resolve(sessionPath);
-    const resolvedSessionsDir = path.resolve(this.sessionsDir);
+    const resolvedBaseDir = path.resolve(baseDir);
 
-    if (!resolvedPath.startsWith(resolvedSessionsDir)) {
+    if (!resolvedPath.startsWith(resolvedBaseDir)) {
       throw new Error("Invalid session path: potential directory traversal attack");
     }
 
@@ -975,10 +1021,10 @@ export class SessionManager {
     if (this.storageType === "hybrid" && this.storage) {
       const backupPromises: Promise<void>[] = [];
 
-      for (const [sessionKey] of this.sessions.entries()) {
+      for (const [sessionKey, sessionData] of this.sessions.entries()) {
         const [userId, phoneNumber] = sessionKey.split(":");
         backupPromises.push(
-          this.backupToCloudStorage(userId, phoneNumber).catch((error) => {
+          this.backupToCloudStorage(userId, phoneNumber, sessionData.baileysVersion).catch((error) => {
             this.logger.error({ userId, phoneNumber, error }, "Failed final backup during shutdown");
           })
         );
