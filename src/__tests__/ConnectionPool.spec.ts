@@ -251,7 +251,7 @@ describe("ConnectionPool", () => {
 
       expect(result).toBe(true);
       expect(mockConnectionStateManager.initializeState).toHaveBeenCalledWith("user123", "+1234567890", "http://test-instance:8080");
-      expect(mockSessionManager.createConnection).toHaveBeenCalledWith("user123", "+1234567890", "nl", undefined, false, undefined, "v7");
+      expect(mockSessionManager.createConnection).toHaveBeenCalledWith("user123", "+1234567890", "nl", undefined, false, undefined, "v7", false);
       expect(mockInstanceCoordinator.updateSessionActivity).toHaveBeenCalledWith("user123", "+1234567890");
     });
 
@@ -259,7 +259,7 @@ describe("ConnectionPool", () => {
       const result = await connectionPool.addConnection("user123", "+1234567890", "nl");
 
       expect(result).toBe(true);
-      expect(mockSessionManager.createConnection).toHaveBeenCalledWith("user123", expect.stringMatching(/^\+/), "nl", undefined, false, undefined, "v7");
+      expect(mockSessionManager.createConnection).toHaveBeenCalledWith("user123", expect.stringMatching(/^\+/), "nl", undefined, false, undefined, "v7", false);
     });
 
     it("should reject connections when at capacity", async () => {
@@ -315,7 +315,8 @@ describe("ConnectionPool", () => {
         undefined,
         true, // Skip proxy creation in recovery
         undefined,
-        "v7"
+        "v7",
+        false
       );
       // Should not update session activity in recovery mode
       expect(mockInstanceCoordinator.updateSessionActivity).not.toHaveBeenCalled();
@@ -721,8 +722,8 @@ describe("ConnectionPool", () => {
       await connectionPool.initializeRecovery();
 
       expect(mockSessionManager.createConnection).toHaveBeenCalledTimes(2);
-      expect(mockSessionManager.createConnection).toHaveBeenCalledWith("user123", "+1234567890", "nl", undefined, true, undefined, "v7");
-      expect(mockSessionManager.createConnection).toHaveBeenCalledWith("user456", "+9876543210", "us", undefined, true, undefined, "v7");
+      expect(mockSessionManager.createConnection).toHaveBeenCalledWith("user123", "+1234567890", "nl", undefined, true, undefined, "v7", false);
+      expect(mockSessionManager.createConnection).toHaveBeenCalledWith("user456", "+9876543210", "us", undefined, true, undefined, "v7", false);
     });
 
     it("should skip logged out sessions during recovery", async () => {
@@ -756,7 +757,7 @@ describe("ConnectionPool", () => {
 
       // Should only recover the non-logged-out session
       expect(mockSessionManager.createConnection).toHaveBeenCalledTimes(1);
-      expect(mockSessionManager.createConnection).toHaveBeenCalledWith("user456", "+9876543210", "us", undefined, true, undefined, "v7");
+      expect(mockSessionManager.createConnection).toHaveBeenCalledWith("user456", "+9876543210", "us", undefined, true, undefined, "v7", false);
     });
 
     it("should handle recovery errors gracefully", async () => {
