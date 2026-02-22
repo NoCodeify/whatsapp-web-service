@@ -532,7 +532,7 @@ app.get("/readiness", (_req: Request, res: Response) => {
 });
 
 // API Routes
-app.use("/api", createApiRoutes(connectionPool, sessionManager, proxyManager, connectionStateManager, reconnectionService));
+app.use("/api", createApiRoutes(connectionPool, sessionManager, proxyManager, connectionStateManager, reconnectionService, firestore));
 
 // WebSocket handlers
 createWebSocketHandlers(io, connectionPool, sessionManager);

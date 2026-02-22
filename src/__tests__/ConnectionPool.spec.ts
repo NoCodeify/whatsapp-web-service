@@ -242,6 +242,7 @@ describe("ConnectionPool", () => {
       mockSessionManager.createConnection.mockResolvedValue({
         socket: mockSocket,
         sessionExists: false,
+        baileysVersion: "v7",
       });
     });
 
@@ -250,7 +251,7 @@ describe("ConnectionPool", () => {
 
       expect(result).toBe(true);
       expect(mockConnectionStateManager.initializeState).toHaveBeenCalledWith("user123", "+1234567890", "http://test-instance:8080");
-      expect(mockSessionManager.createConnection).toHaveBeenCalledWith("user123", "+1234567890", "nl", undefined, false, undefined);
+      expect(mockSessionManager.createConnection).toHaveBeenCalledWith("user123", "+1234567890", "nl", undefined, false, undefined, "v7");
       expect(mockInstanceCoordinator.updateSessionActivity).toHaveBeenCalledWith("user123", "+1234567890");
     });
 
@@ -258,7 +259,7 @@ describe("ConnectionPool", () => {
       const result = await connectionPool.addConnection("user123", "+1234567890", "nl");
 
       expect(result).toBe(true);
-      expect(mockSessionManager.createConnection).toHaveBeenCalledWith("user123", expect.stringMatching(/^\+/), "nl", undefined, false, undefined);
+      expect(mockSessionManager.createConnection).toHaveBeenCalledWith("user123", expect.stringMatching(/^\+/), "nl", undefined, false, undefined, "v7");
     });
 
     it("should reject connections when at capacity", async () => {
@@ -313,7 +314,8 @@ describe("ConnectionPool", () => {
         "nl",
         undefined,
         true, // Skip proxy creation in recovery
-        undefined
+        undefined,
+        "v7"
       );
       // Should not update session activity in recovery mode
       expect(mockInstanceCoordinator.updateSessionActivity).not.toHaveBeenCalled();
@@ -359,6 +361,7 @@ describe("ConnectionPool", () => {
       mockSessionManager.createConnection.mockResolvedValue({
         socket: mockSocket,
         sessionExists: false,
+        baileysVersion: "v7",
       });
     });
 
@@ -429,6 +432,7 @@ describe("ConnectionPool", () => {
       mockSessionManager.createConnection.mockResolvedValue({
         socket: mockSocket,
         sessionExists: false,
+        baileysVersion: "v7",
       });
     });
 
@@ -482,6 +486,7 @@ describe("ConnectionPool", () => {
       mockSessionManager.createConnection.mockResolvedValue({
         socket: mockSocket,
         sessionExists: false,
+        baileysVersion: "v7",
       });
     });
 
@@ -533,6 +538,7 @@ describe("ConnectionPool", () => {
       mockSessionManager.createConnection.mockResolvedValue({
         socket: mockSocket,
         sessionExists: false,
+        baileysVersion: "v7",
       });
     });
 
@@ -624,6 +630,7 @@ describe("ConnectionPool", () => {
       mockSessionManager.createConnection.mockResolvedValue({
         socket: mockSocket,
         sessionExists: false,
+        baileysVersion: "v7",
       });
     });
 
@@ -672,13 +679,14 @@ describe("ConnectionPool", () => {
       mockSessionManager.createConnection.mockResolvedValue({
         socket: mockSocket,
         sessionExists: false,
+        baileysVersion: "v7",
       });
     });
 
     it("should recover connections from session files", async () => {
       mockSessionManager.listAllSessions.mockResolvedValue([
-        { userId: "user123", phoneNumber: "+1234567890" },
-        { userId: "user456", phoneNumber: "+9876543210" },
+        { userId: "user123", phoneNumber: "+1234567890", baileysVersion: "v7" },
+        { userId: "user456", phoneNumber: "+9876543210", baileysVersion: "v7" },
       ]);
 
       mockConnectionStateManager.recoverConnections.mockResolvedValue([
@@ -713,14 +721,14 @@ describe("ConnectionPool", () => {
       await connectionPool.initializeRecovery();
 
       expect(mockSessionManager.createConnection).toHaveBeenCalledTimes(2);
-      expect(mockSessionManager.createConnection).toHaveBeenCalledWith("user123", "+1234567890", "nl", undefined, true, undefined);
-      expect(mockSessionManager.createConnection).toHaveBeenCalledWith("user456", "+9876543210", "us", undefined, true, undefined);
+      expect(mockSessionManager.createConnection).toHaveBeenCalledWith("user123", "+1234567890", "nl", undefined, true, undefined, "v7");
+      expect(mockSessionManager.createConnection).toHaveBeenCalledWith("user456", "+9876543210", "us", undefined, true, undefined, "v7");
     });
 
     it("should skip logged out sessions during recovery", async () => {
       mockSessionManager.listAllSessions.mockResolvedValue([
-        { userId: "user123", phoneNumber: "+1234567890" },
-        { userId: "user456", phoneNumber: "+9876543210" },
+        { userId: "user123", phoneNumber: "+1234567890", baileysVersion: "v7" as const },
+        { userId: "user456", phoneNumber: "+9876543210", baileysVersion: "v7" as const },
       ]);
 
       mockConnectionStateManager.recoverConnections.mockResolvedValue([
@@ -748,11 +756,11 @@ describe("ConnectionPool", () => {
 
       // Should only recover the non-logged-out session
       expect(mockSessionManager.createConnection).toHaveBeenCalledTimes(1);
-      expect(mockSessionManager.createConnection).toHaveBeenCalledWith("user456", "+9876543210", "us", undefined, true, undefined);
+      expect(mockSessionManager.createConnection).toHaveBeenCalledWith("user456", "+9876543210", "us", undefined, true, undefined, "v7");
     });
 
     it("should handle recovery errors gracefully", async () => {
-      mockSessionManager.listAllSessions.mockResolvedValue([{ userId: "user123", phoneNumber: "+1234567890" }]);
+      mockSessionManager.listAllSessions.mockResolvedValue([{ userId: "user123", phoneNumber: "+1234567890", baileysVersion: "v7" as const }]);
 
       mockSessionManager.createConnection.mockRejectedValue(new Error("Recovery failed"));
 
@@ -784,6 +792,7 @@ describe("ConnectionPool", () => {
       mockSessionManager.createConnection.mockResolvedValue({
         socket: mockSocket,
         sessionExists: false,
+        baileysVersion: "v7",
       });
     });
 
@@ -869,6 +878,7 @@ describe("ConnectionPool", () => {
       mockSessionManager.createConnection.mockResolvedValue({
         socket: mockSocket,
         sessionExists: false,
+        baileysVersion: "v7",
       });
 
       // Capture the messages.upsert handler when connection is created
@@ -985,6 +995,7 @@ describe("ConnectionPool", () => {
       mockSessionManager.createConnection.mockResolvedValue({
         socket: mockSocket,
         sessionExists: false,
+        baileysVersion: "v7",
       });
     });
 
@@ -1089,6 +1100,7 @@ describe("ConnectionPool", () => {
       mockSessionManager.createConnection.mockResolvedValue({
         socket: mockSocket,
         sessionExists: false,
+        baileysVersion: "v7",
       });
     });
 
@@ -1391,9 +1403,9 @@ describe("ConnectionPool", () => {
 
       it("should continue recovery even if individual sessions fail", async () => {
         mockSessionManager.listAllSessions.mockResolvedValue([
-          { userId: "user1", phoneNumber: "+1111111111" },
-          { userId: "user2", phoneNumber: "+2222222222" },
-          { userId: "user3", phoneNumber: "+3333333333" },
+          { userId: "user1", phoneNumber: "+1111111111", baileysVersion: "v7" as const },
+          { userId: "user2", phoneNumber: "+2222222222", baileysVersion: "v7" as const },
+          { userId: "user3", phoneNumber: "+3333333333", baileysVersion: "v7" as const },
         ]);
 
         mockConnectionStateManager.recoverConnections.mockResolvedValue([
@@ -1440,9 +1452,9 @@ describe("ConnectionPool", () => {
 
         // Make second session fail
         mockSessionManager.createConnection
-          .mockResolvedValueOnce({ socket: mockSocket, sessionExists: false })
+          .mockResolvedValueOnce({ socket: mockSocket, sessionExists: false, baileysVersion: "v7" as const })
           .mockRejectedValueOnce(new Error("Session 2 failed"))
-          .mockResolvedValueOnce({ socket: mockSocket, sessionExists: false });
+          .mockResolvedValueOnce({ socket: mockSocket, sessionExists: false, baileysVersion: "v7" as const });
 
         await connectionPool.initializeRecovery();
 
@@ -1487,7 +1499,7 @@ describe("ConnectionPool", () => {
         };
         mockFirestore.collection = jest.fn().mockReturnValue(mockCollection);
 
-        mockSessionManager.listAllSessions.mockResolvedValue([{ userId: "user123", phoneNumber: "+1234567890" }]);
+        mockSessionManager.listAllSessions.mockResolvedValue([{ userId: "user123", phoneNumber: "+1234567890", baileysVersion: "v7" as const }]);
 
         mockConnectionStateManager.recoverConnections.mockResolvedValue([
           {

@@ -251,4 +251,24 @@ export class LidMappingService {
   static isPhoneJid(identifier: string): boolean {
     return identifier?.includes("@s.whatsapp.net") || false;
   }
+
+  /**
+   * Import multiple LID mappings at once (used when v7's native mapping store provides bulk data)
+   *
+   * @param userId - The user ID
+   * @param mappings - Array of LID to phone number mappings
+   * @returns The number of successfully imported mappings
+   */
+  async importMappings(userId: string, mappings: Array<{ lid: string; phoneNumber: string }>): Promise<number> {
+    let imported = 0;
+    for (const { lid, phoneNumber } of mappings) {
+      try {
+        await this.saveLidMapping(userId, lid, phoneNumber);
+        imported++;
+      } catch (error) {
+        this.logger.warn({ userId, lid, phoneNumber, error }, "Failed to import LID mapping");
+      }
+    }
+    return imported;
+  }
 }
