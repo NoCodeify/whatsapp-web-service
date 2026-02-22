@@ -49,6 +49,8 @@ export interface WhatsAppConnection {
   handshakeCompleted?: boolean; // Track if initial QR pairing handshake has completed (before first disconnect code 515)
   messageQueue?: QueuedMessage[]; // Queue messages during recovery for zero message loss
   baileysVersion: BaileysVersion; // Which Baileys version this connection uses
+  importExistingChats?: boolean; // Whether to import existing chat history on connection (default: false)
+  lastDisconnectedAt?: number; // Unix seconds — reference timestamp for smart reconciliation on recovery
 }
 
 export interface ConnectionPoolConfig {
@@ -72,6 +74,7 @@ export class ConnectionPool extends EventEmitter {
   private instanceCoordinator: InstanceCoordinator;
   private healthCheckTimer?: NodeJS.Timeout;
   private cleanupTimer?: NodeJS.Timeout;
+  private connectionVerificationTimer?: NodeJS.Timeout; // Periodic deep-health verification of open sockets
   private isShuttingDown: boolean = false;
   private importListRefs: Map<string, DocumentReference> = new Map(); // Store import list refs per user
   private pendingChatMetadata: Map<string, any> = new Map(); // Store chat metadata for contacts to be created
@@ -135,6 +138,7 @@ export class ConnectionPool extends EventEmitter {
 
     this.startHealthCheck();
     this.startCleanup();
+    this.startConnectionVerification();
   }
 
   /**
@@ -503,7 +507,8 @@ export class ConnectionPool extends EventEmitter {
     countryCode?: string,
     isRecovery: boolean = false,
     browserName?: string,
-    forceNew?: boolean
+    forceNew?: boolean,
+    importExistingChats: boolean = false
   ): Promise<boolean> {
     // 🟢 BUG #4 FIX: Check if pool is shutting down before adding connection
     if (this.isShuttingDown) {
@@ -618,7 +623,8 @@ export class ConnectionPool extends EventEmitter {
         browserName,
         isRecovery, // Skip proxy creation if this is a recovery
         forceNew, // Force fresh connection, delete existing sessions
-        baileysVersion
+        baileysVersion,
+        importExistingChats // Whether to import existing chat history
       );
 
       // Determine if handshake should be skipped:
@@ -655,6 +661,7 @@ export class ConnectionPool extends EventEmitter {
         syncCompleted: false, // All connections need to sync missed messages
         handshakeCompleted: skipHandshake, // Skip handshake for recovery or existing sessions
         baileysVersion: resolvedBaileysVersion, // Which Baileys version this connection uses
+        importExistingChats: importExistingChats, // Whether to import existing chat history
       };
 
       // Set up event handlers
@@ -662,6 +669,29 @@ export class ConnectionPool extends EventEmitter {
 
       // Add to pool
       this.connections.set(connectionKey, connection);
+
+      // On recovery connections, fetch disconnected_at from Firestore for smart reconciliation.
+      // This timestamp is used as the cutoff: messages after disconnected_at are "missed" and
+      // should be imported even when importExistingChats = false.
+      if (isRecovery) {
+        try {
+          const phoneDoc = await this.firestore.collection("users").doc(userId).collection("phone_numbers").doc(phoneNumber).get();
+          const phoneData = phoneDoc.data();
+          // Prefer disconnected_at; fallback to last_updated as an approximate cutoff
+          const disconnectedTs = phoneData?.whatsapp_web?.disconnected_at ?? phoneData?.whatsapp_web?.last_updated ?? null;
+          if (disconnectedTs && typeof disconnectedTs.seconds === "number") {
+            connection.lastDisconnectedAt = disconnectedTs.seconds;
+            this.logger.info(
+              { userId, phoneNumber, lastDisconnectedAt: connection.lastDisconnectedAt },
+              "Loaded lastDisconnectedAt for smart reconciliation on recovery"
+            );
+          } else {
+            this.logger.warn({ userId, phoneNumber }, "No disconnected_at timestamp available — smart reconciliation will skip history on recovery");
+          }
+        } catch (e) {
+          this.logger.warn({ userId, phoneNumber, error: e }, "Failed to fetch disconnected_at for smart reconciliation");
+        }
+      }
 
       // Update session activity in instance coordinator
       if (!isRecovery) {
@@ -2158,40 +2188,75 @@ export class ConnectionPool extends EventEmitter {
 
         // Process history messages if any
         if (historyMessages.length > 0) {
-          this.logger.info(
-            {
-              userId,
-              phoneNumber,
-              type: upsert.type,
-              count: historyMessages.length,
-              requestId: upsert.requestId,
-              firstMessage: historyMessages[0]
-                ? {
-                    id: historyMessages[0].key?.id,
-                    remoteJid: historyMessages[0].key?.remoteJid,
-                    timestamp: historyMessages[0].messageTimestamp,
-                  }
-                : null,
-            },
-            "Processing history messages from upsert"
-          );
-
-          const count = await this.processSyncedMessages(userId, phoneNumber, historyMessages);
-          totalMessagesSynced += count;
-
-          // Update sync progress in database
-          if (this.connectionStateManager) {
-            await this.connectionStateManager.updateSyncProgress(userId, phoneNumber, totalContactsSynced, totalMessagesSynced, false);
+          // Smart reconciliation: if import is disabled, only process messages from the downtime window.
+          // This handles the messages.upsert "append" type which carries backlog messages on reconnect.
+          const upsertConn = this.connections.get(this.getConnectionKey(userId, phoneNumber));
+          let messagesToProcess = historyMessages;
+          if (!upsertConn?.importExistingChats) {
+            if (upsertConn?.lastDisconnectedAt != null) {
+              const cutoffSeconds = upsertConn.lastDisconnectedAt;
+              messagesToProcess = historyMessages.filter((msg: any) => Number(msg.messageTimestamp || 0) > cutoffSeconds);
+              if (messagesToProcess.length < historyMessages.length) {
+                this.logger.info(
+                  {
+                    userId,
+                    phoneNumber,
+                    total: historyMessages.length,
+                    filtered: messagesToProcess.length,
+                    cutoffSeconds,
+                    cutoffDate: new Date(cutoffSeconds * 1000).toISOString(),
+                  },
+                  "Smart reconciliation (upsert): filtered append messages to downtime window"
+                );
+              }
+            } else {
+              // Import disabled and no reference timestamp — skip all history messages to be safe
+              messagesToProcess = [];
+              this.logger.info(
+                { userId, phoneNumber, count: historyMessages.length },
+                "Chat import disabled — skipping history messages from upsert (no timestamp reference)"
+              );
+            }
           }
 
-          // Emit progress event
-          this.emit("sync:progress", {
-            userId,
-            phoneNumber,
-            type: "messages_from_upsert",
-            count: historyMessages.length,
-            timestamp: new Date().toISOString(),
-          });
+          if (messagesToProcess.length === 0) {
+            // Nothing to process after filtering
+          } else {
+            this.logger.info(
+              {
+                userId,
+                phoneNumber,
+                type: upsert.type,
+                count: messagesToProcess.length,
+                requestId: upsert.requestId,
+                firstMessage: messagesToProcess[0]
+                  ? {
+                      id: messagesToProcess[0].key?.id,
+                      remoteJid: messagesToProcess[0].key?.remoteJid,
+                      timestamp: messagesToProcess[0].messageTimestamp,
+                    }
+                  : null,
+              },
+              "Processing history messages from upsert"
+            );
+
+            const count = await this.processSyncedMessages(userId, phoneNumber, messagesToProcess);
+            totalMessagesSynced += count;
+
+            // Update sync progress in database
+            if (this.connectionStateManager) {
+              await this.connectionStateManager.updateSyncProgress(userId, phoneNumber, totalContactsSynced, totalMessagesSynced, false);
+            }
+
+            // Emit progress event
+            this.emit("sync:progress", {
+              userId,
+              phoneNumber,
+              type: "messages_from_upsert",
+              count: messagesToProcess.length,
+              timestamp: new Date().toISOString(),
+            });
+          } // end else (messagesToProcess.length > 0)
         }
 
         // Process real-time messages if any
@@ -2274,6 +2339,71 @@ export class ConnectionPool extends EventEmitter {
 
     // History sync handler - process contacts and messages
     socket.ev.on("messaging-history.set", async (history) => {
+      // Check if chat import is enabled for this connection; apply smart reconciliation if disabled
+      const connectionKey = this.getConnectionKey(userId, phoneNumber);
+      const currentConn = this.connections.get(connectionKey);
+      if (!currentConn?.importExistingChats) {
+        // SMART RECONCILIATION: on recovery connections we must NOT drop all history —
+        // we need to import messages that arrived DURING the downtime window.
+        // Strategy: keep messages/chats whose timestamp is AFTER the last disconnect.
+        // This ensures:
+        //   - Existing contacts' missed messages are imported ✅
+        //   - New contacts who messaged during downtime are imported ✅
+        //   - Old 2-year-old history is skipped ✅
+        if (currentConn?.isRecovery && currentConn?.lastDisconnectedAt != null) {
+          const cutoffSeconds = currentConn.lastDisconnectedAt;
+
+          // Filter messages: only those that arrived after the last disconnect
+          const missedMessages = (history.messages || []).filter((msg: any) => Number(msg.messageTimestamp || 0) > cutoffSeconds);
+
+          // Filter chats: only contacts whose most recent message is after disconnected_at
+          // conversationTimestamp represents the timestamp of the most recent message in the chat
+          const recentChats = (history.chats || []).filter((chat: any) => {
+            const chatLastTimestamp = Number(chat.conversationTimestamp || 0);
+            return chatLastTimestamp > cutoffSeconds;
+          });
+
+          this.logger.info(
+            {
+              userId,
+              phoneNumber,
+              cutoffSeconds,
+              cutoffDate: new Date(cutoffSeconds * 1000).toISOString(),
+              missedMessages: missedMessages.length,
+              recentChats: recentChats.length,
+              skippedMessages: (history.messages?.length || 0) - missedMessages.length,
+              skippedChats: (history.chats?.length || 0) - recentChats.length,
+            },
+            "Smart reconciliation: import=off recovery — filtering history to downtime window only"
+          );
+
+          // Process only the filtered contacts/messages from the downtime window
+          if (recentChats.length > 0) {
+            await this.processSyncedChats(userId, phoneNumber, recentChats, socket);
+          }
+          if (missedMessages.length > 0) {
+            await this.processSyncedMessages(userId, phoneNumber, missedMessages);
+          }
+          // Reconciliation complete — do not proceed to full import
+          return;
+        }
+
+        // Not a recovery connection OR no disconnected_at reference available:
+        // This is a first-time QR scan with import disabled — skip entirely
+        this.logger.info(
+          {
+            userId,
+            phoneNumber,
+            syncType: history.syncType,
+            chats: history.chats?.length || 0,
+            isRecovery: currentConn?.isRecovery,
+            hasDisconnectedAt: currentConn?.lastDisconnectedAt != null,
+          },
+          "Chat import disabled (non-recovery) — skipping messaging-history.set processing"
+        );
+        return;
+      }
+
       // Enhanced logging to debug message sync
       this.logger.info(
         {
@@ -5035,11 +5165,22 @@ export class ConnectionPool extends EventEmitter {
         return;
       }
 
-      await phoneNumberRef.update({
+      const updateData: Record<string, any> = {
         "whatsapp_web.status": status,
         "whatsapp_web.last_updated": admin.firestore.Timestamp.now(),
         updated_at: admin.firestore.Timestamp.now(),
-      });
+      };
+
+      // Store connection lifecycle timestamps for smart reconciliation
+      // last_connected_at is used as a reference point for filtering missed messages on reconnect
+      // disconnected_at is used as the cutoff: messages after this time are "missed" and should be imported
+      if (status === "connected") {
+        updateData["whatsapp_web.last_connected_at"] = admin.firestore.Timestamp.now();
+      } else if (status === "disconnected") {
+        updateData["whatsapp_web.disconnected_at"] = admin.firestore.Timestamp.now();
+      }
+
+      await phoneNumberRef.update(updateData);
 
       // Also update in-memory state to prevent stale state during shutdown
       if (this.connectionStateManager) {
@@ -5151,6 +5292,64 @@ export class ConnectionPool extends EventEmitter {
       // Periodic memory cleanup - remove orphaned cache entries for inactive users
       this.cleanupOrphanedCaches();
     }, this.config.sessionCleanupInterval);
+  }
+
+  /**
+   * Start periodic deep-health verification of connections believed to be "open".
+   *
+   * Every 10 minutes, iterates over all connections whose state is "open" and
+   * sends a lightweight presence update ping. If the ping throws (socket actually
+   * closed or errored), the connection's Firestore status is updated to "disconnected"
+   * and a reconnection attempt is triggered.
+   *
+   * This catches cases where the Baileys connection.update event is never fired
+   * (e.g., silent TCP disconnections), preventing stale "connected" statuses.
+   */
+  private startConnectionVerification() {
+    const VERIFICATION_INTERVAL_MS = 10 * 60 * 1000; // Every 10 minutes
+
+    this.connectionVerificationTimer = setInterval(async () => {
+      if (this.isShuttingDown) return;
+
+      const openConnections = Array.from(this.connections.values()).filter((conn) => conn.state.connection === "open");
+
+      if (openConnections.length === 0) return;
+
+      this.logger.info({ count: openConnections.length }, "Starting periodic connection verification");
+
+      for (const connection of openConnections) {
+        const { userId, phoneNumber, socket } = connection;
+
+        try {
+          // sendPresenceUpdate is a lightweight operation that verifies the socket is alive
+          await socket.sendPresenceUpdate("available");
+
+          // Update lastActivity to reflect the successful ping
+          connection.lastActivity = new Date();
+        } catch (pingError: any) {
+          this.logger.warn(
+            { userId, phoneNumber, error: pingError.message },
+            "Connection verification ping failed — socket appears dead, triggering reconnect"
+          );
+
+          // Update Firestore status so external observers see the disconnection
+          try {
+            if (this.connectionStateManager) {
+              await this.connectionStateManager.markDisconnected(userId, phoneNumber, "Verification ping failed");
+            } else {
+              await this.updatePhoneNumberStatus(userId, phoneNumber, "disconnected");
+            }
+          } catch (statusError: any) {
+            this.logger.warn({ userId, phoneNumber, error: statusError.message }, "Failed to update Firestore status after verification failure");
+          }
+
+          // Trigger reconnection via the existing reconnect mechanism
+          this.reconnect(userId, phoneNumber).catch((reconnectError: any) => {
+            this.logger.warn({ userId, phoneNumber, error: reconnectError.message }, "Reconnection after verification failure also failed");
+          });
+        }
+      }
+    }, VERIFICATION_INTERVAL_MS);
   }
 
   /**
@@ -5487,6 +5686,9 @@ export class ConnectionPool extends EventEmitter {
     }
     if (this.cleanupTimer) {
       clearInterval(this.cleanupTimer);
+    }
+    if (this.connectionVerificationTimer) {
+      clearInterval(this.connectionVerificationTimer);
     }
 
     // Clear memory maps

@@ -87,7 +87,8 @@ export class SessionManager {
     browserName?: string,
     skipProxy?: boolean, // Skip proxy creation during recovery
     forceNew?: boolean, // Force fresh connection, delete existing sessions
-    baileysVersion: BaileysVersion = "v6"
+    baileysVersion: BaileysVersion = "v6",
+    importExistingChats: boolean = false // Whether to import existing chat history (default: false)
   ): Promise<{
     socket: WASocket;
     sessionExists: boolean;
@@ -154,16 +155,12 @@ export class SessionManager {
         generateHighQualityLinkPreview: true,
         getMessage: this.getMessage.bind(this),
 
-        // Sync settings - enable full history sync
-        syncFullHistory: true, // Sync complete message history
-        fireInitQueries: true, // Enable initial queries for contacts
-        downloadHistory: true, // Download message history
-        shouldSyncHistoryMessage: (_msg: any) => {
-          // Always sync all history messages
-          // We'll filter them later in processSyncedMessages if needed
-          // This ensures history notifications are processed correctly
-          return true;
-        },
+        // Sync settings — controlled by importExistingChats flag (default: false)
+        // When false, Baileys will not download or sync chat history on initial connection
+        syncFullHistory: importExistingChats,
+        fireInitQueries: importExistingChats,
+        downloadHistory: importExistingChats,
+        shouldSyncHistoryMessage: (_msg: any) => importExistingChats,
 
         // Retry configuration
         retryRequestDelayMs: 2500,

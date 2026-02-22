@@ -299,9 +299,9 @@ describe("SessionManager", () => {
           qrTimeout: 90000,
           markOnlineOnConnect: false,
           generateHighQualityLinkPreview: true,
-          syncFullHistory: true,
-          fireInitQueries: true,
-          downloadHistory: true,
+          syncFullHistory: false,
+          fireInitQueries: false,
+          downloadHistory: false,
         })
       );
     });
