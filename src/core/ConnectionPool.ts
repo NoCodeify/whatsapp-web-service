@@ -2268,7 +2268,7 @@ export class ConnectionPool extends EventEmitter {
                 await this.handleIncomingMessage(userId, phoneNumber, msg, socket);
               } else {
                 // Outgoing message - could be manual or API-sent
-                await this.handleOutgoingMessage(userId, phoneNumber, msg);
+                await this.handleOutgoingMessage(userId, phoneNumber, msg, socket);
               }
             } catch (messageError) {
               // Handle individual message processing errors gracefully
@@ -3069,11 +3069,25 @@ export class ConnectionPool extends EventEmitter {
       const mediaInfo = await this.handleMediaMessage(message, userId, phoneNumber);
 
       // Build normalized message payload for Cloud Function
+      // When fromPhoneNumber is a LID (unresolved), include the original LID as contactPhoneNumber
+      // if we resolved it, so Cloud Functions can maintain the LID↔phone mapping.
+      // When fromPhoneNumber is already the resolved phone, include the original LID for reference.
+      let contactPhoneNumber: string | undefined;
+      if (isLid && wasLidResolved) {
+        // LID was resolved: fromPhoneNumber is the real phone, send original LID info isn't needed
+        // but send the resolved phone as contactPhoneNumber for consistency
+        contactPhoneNumber = resolvedFromNumber;
+      } else if (isLid && !wasLidResolved) {
+        // LID was NOT resolved: fromPhoneNumber is the LID, no contactPhoneNumber available
+        contactPhoneNumber = undefined;
+      }
+
       const messagePayload = {
         userId: userId,
         messageSid: message.key.id,
         toPhoneNumber: formattedToPhone,
         fromPhoneNumber: formattedFromPhone,
+        ...(contactPhoneNumber && { contactPhoneNumber }),
         status: "received",
         mediaUrl: mediaInfo.media_url || undefined,
         mediaContentType: mediaInfo.media_content_type || undefined,
@@ -3124,7 +3138,7 @@ export class ConnectionPool extends EventEmitter {
   /**
    * Handle outgoing messages (both API-sent and manual from phone)
    */
-  private async handleOutgoingMessage(userId: string, phoneNumber: string, message: any) {
+  private async handleOutgoingMessage(userId: string, phoneNumber: string, message: any, socket?: WASocket) {
     try {
       // Check if this was sent via our API
       const isApiSent = this.sentMessageIds.has(message.key.id);
@@ -3176,47 +3190,121 @@ export class ConnectionPool extends EventEmitter {
       // Extract message text
       const messageText = this.extractMessageText(message);
 
+      // RESOLVE LID TO PHONE NUMBER for outgoing messages
+      // Without this, manual messages to LID contacts create duplicate contacts
+      let resolvedToNumber = toNumber;
+      let lidValue: string | null = null;
+      if (isLid) {
+        // Try our LID mapping service first
+        const resolvedPhone = this.lidMappingService.resolveLidToPhone(userId, toNumber);
+        if (resolvedPhone) {
+          resolvedToNumber = resolvedPhone;
+          lidValue = toNumber;
+          this.logger.info({ userId, phoneNumber, originalLid: toNumber, resolvedPhone }, "Resolved LID to phone number for outgoing manual message");
+        } else {
+          // Try Baileys v7 native LID resolution
+          const connectionKey = this.getConnectionKey(userId, phoneNumber);
+          const connection = this.connections.get(connectionKey);
+          if (isV7(connection?.baileysVersion || "v6") && socket?.signalRepository) {
+            try {
+              const lidStore = (socket.signalRepository as any).lidMapping;
+              if (lidStore && typeof lidStore.getPNForLID === "function") {
+                const lidNumber = toNumber.replace("@lid", "");
+                const nativePN = await lidStore.getPNForLID(lidNumber);
+                if (nativePN) {
+                  resolvedToNumber = nativePN.startsWith("+") ? nativePN : `+${nativePN}`;
+                  lidValue = toNumber;
+                  // Save to our LidMappingService for future lookups
+                  this.lidMappingService.saveLidMapping(userId, toNumber, resolvedToNumber);
+                  this.logger.info(
+                    { userId, phoneNumber, lid: toNumber, resolvedPhone: resolvedToNumber },
+                    "Resolved LID via Baileys v7 native signalRepository for outgoing message"
+                  );
+                }
+              }
+            } catch (err: any) {
+              this.logger.debug({ userId, phoneNumber, error: err.message }, "v7 native LID resolution failed for outgoing message");
+            }
+          }
+
+          if (!lidValue) {
+            // Still unresolved - store LID as lidValue for the contact record
+            lidValue = toNumber;
+            this.logger.warn(
+              { userId, phoneNumber, lid: toNumber },
+              "Could not resolve LID for outgoing message - contact will be created with LID. " +
+                "Mapping will be captured when a duplicate message or incoming message resolves it."
+            );
+          }
+        }
+      }
+
       // Log manual message detection
       this.logger.info(
         {
           userId,
           phoneNumber,
           toNumber,
+          resolvedToNumber,
           messageId: message.key.id,
           body: messageText,
           manual: true,
           isLid,
+          lidResolved: isLid && resolvedToNumber !== toNumber,
           timestamp: message.messageTimestamp,
         },
         "Manual WhatsApp message detected"
       );
 
       // Format phone numbers
-      // For LID format, keep as-is (no + prefix for LID identifiers)
-      // For regular numbers, ensure + prefix
-      const formattedToPhone = isLid ? toNumber : toNumber.startsWith("+") ? toNumber : `+${toNumber}`;
+      // Use resolved number (real phone) when available, otherwise fall back to original
+      const formattedToPhone =
+        isLid && resolvedToNumber !== toNumber
+          ? resolvedToNumber // Resolved from LID - already has + prefix
+          : isLid
+            ? toNumber // Unresolved LID - keep as-is
+            : toNumber.startsWith("+")
+              ? toNumber
+              : `+${toNumber}`;
       const formattedFromPhone = phoneNumber.startsWith("+") ? phoneNumber : `+${phoneNumber}`;
 
       // Get or create contact
       const userRef = this.firestore.collection("users").doc(userId);
       const currentTimestamp = admin.firestore.Timestamp.now();
 
-      const existingContacts = await this.firestore
+      // Search by resolved phone number first
+      let existingContacts = await this.firestore
         .collection("contacts")
         .where("user", "==", userRef)
         .where("phone_number", "==", formattedToPhone)
         .limit(1)
         .get();
 
+      // If not found and this is a LID, also search by lid field
+      // This handles the case where the contact was previously created with a real phone number
+      if (existingContacts.empty && isLid) {
+        const lidSearchValue = lidValue || toNumber;
+        const lidSearchResult = await this.firestore.collection("contacts").where("user", "==", userRef).where("lid", "==", lidSearchValue).limit(1).get();
+
+        if (!lidSearchResult.empty) {
+          existingContacts = lidSearchResult;
+          this.logger.info(
+            { userId, phoneNumber, lid: lidSearchValue, contactId: lidSearchResult.docs[0].id },
+            "Found existing contact via lid field for outgoing manual message"
+          );
+        }
+      }
+
       let contactRef;
       if (existingContacts.empty) {
         // Create new contact for manual conversation
-        const newContactData = {
+        const newContactData: Record<string, any> = {
           created_at: currentTimestamp,
           email: "unknown@unknown.com",
           first_name: "Unknown",
           last_name: "Unknown",
           phone_number: formattedToPhone,
+          lid: lidValue || null, // Store LID for future lookups
           user: userRef,
           last_modified_at: currentTimestamp,
           last_activity_at: currentTimestamp,
@@ -3249,12 +3337,13 @@ export class ConnectionPool extends EventEmitter {
         const newContactRef = await this.firestore.collection("contacts").add(newContactData);
         contactRef = newContactRef;
 
-        this.logger.info({ userId, phoneNumber, toNumber: formattedToPhone }, "Created new contact from manual message");
+        this.logger.info({ userId, phoneNumber, toNumber: formattedToPhone, lid: lidValue }, "Created new contact from manual message");
       } else {
         contactRef = existingContacts.docs[0].ref;
+        const existingData = existingContacts.docs[0].data();
 
-        // PAUSE AI for existing contact
-        await contactRef.update({
+        // PAUSE AI for existing contact and update LID if needed
+        const updateData: Record<string, any> = {
           is_bot_active: false,
           bot_currently_responding: false,
           bot_waiting_for_contact_to_finish_responding: true,
@@ -3263,7 +3352,24 @@ export class ConnectionPool extends EventEmitter {
           last_modified_at: currentTimestamp,
           has_had_activity: true,
           channel: "whatsapp_web",
-        });
+        };
+
+        // Store LID on existing contact if not already set
+        if (lidValue && !existingData?.lid) {
+          updateData.lid = lidValue;
+          this.logger.info({ userId, contactId: contactRef.id, lid: lidValue }, "Stored LID on existing contact from outgoing manual message");
+        }
+
+        // Heal: if contact has LID as phone_number and we now have the resolved number, update it
+        if (isLid && resolvedToNumber !== toNumber && existingData?.phone_number?.includes("@lid")) {
+          updateData.phone_number = formattedToPhone;
+          this.logger.info(
+            { userId, contactId: contactRef.id, oldPhone: existingData.phone_number, newPhone: formattedToPhone },
+            "Healed LID contact - updated phone_number to resolved number from outgoing message"
+          );
+        }
+
+        await contactRef.update(updateData);
       }
 
       // Store the manual message
