@@ -2841,6 +2841,7 @@ export class ConnectionPool extends EventEmitter {
     try {
       // Extract sender info
       const fromJid = message.key.remoteJid || "";
+      const remoteJidAlt = (message.key as any).remoteJidAlt as string | undefined;
       const isGroup = fromJid.includes("@g.us");
       const isLid = fromJid.includes("@lid");
 
@@ -2864,6 +2865,7 @@ export class ConnectionPool extends EventEmitter {
           userId,
           phoneNumber,
           fromNumber,
+          remoteJidAlt: remoteJidAlt || undefined,
           messageId: message.key.id,
           body: messageText,
           isGroup,
@@ -3008,8 +3010,48 @@ export class ConnectionPool extends EventEmitter {
               this.logger.debug({ userId, phoneNumber, error: err.message }, "v7 native LID resolution failed");
             }
           }
+          // Fallback: Check if message.key.remoteJidAlt contains the phone JID (v7 feature)
+          if (!wasLidResolved && remoteJidAlt && remoteJidAlt.includes("@s.whatsapp.net")) {
+            const altPhone = remoteJidAlt.replace("@s.whatsapp.net", "");
+            resolvedFromNumber = altPhone.startsWith("+") ? altPhone : `+${altPhone}`;
+            wasLidResolved = true;
+            this.lidMappingService.saveLidMapping(userId, fromNumber, resolvedFromNumber);
+            this.logger.info(
+              { userId, phoneNumber, lid: fromNumber, resolvedPhone: resolvedFromNumber },
+              "Resolved LID via message.key.remoteJidAlt"
+            );
+          }
+
+          // Fallback: Try socket.onWhatsApp() with the LID to resolve to phone number
+          if (!wasLidResolved && socket && typeof socket.onWhatsApp === "function") {
+            try {
+              const results = await socket.onWhatsApp(fromJid);
+              this.logger.info(
+                { userId, phoneNumber, lid: fromNumber, resultCount: results?.length, results: JSON.stringify(results) },
+                "onWhatsApp LID lookup result"
+              );
+              if (results && results.length > 0) {
+                const result = results[0];
+                // Check if the result gives us a phone JID different from the LID
+                const resultJid = result.jid;
+                if (resultJid && resultJid.includes("@s.whatsapp.net")) {
+                  const resolvedPhone = resultJid.replace("@s.whatsapp.net", "");
+                  resolvedFromNumber = resolvedPhone.startsWith("+") ? resolvedPhone : `+${resolvedPhone}`;
+                  wasLidResolved = true;
+                  this.lidMappingService.saveLidMapping(userId, fromNumber, resolvedFromNumber);
+                  this.logger.info(
+                    { userId, phoneNumber, lid: fromNumber, resolvedPhone: resolvedFromNumber },
+                    "Resolved LID via onWhatsApp() lookup"
+                  );
+                }
+              }
+            } catch (err: any) {
+              this.logger.debug({ userId, phoneNumber, lid: fromNumber, error: err.message }, "onWhatsApp LID lookup failed");
+            }
+          }
+
           if (!wasLidResolved) {
-            this.logger.debug({ userId, phoneNumber, lid: fromNumber }, "No LID mapping found - message will be processed with LID identifier");
+            this.logger.warn({ userId, phoneNumber, lid: fromNumber }, "No LID mapping found - message will be processed with LID identifier. All resolution paths exhausted.");
           }
         }
       } else {
@@ -3224,6 +3266,44 @@ export class ConnectionPool extends EventEmitter {
               }
             } catch (err: any) {
               this.logger.debug({ userId, phoneNumber, error: err.message }, "v7 native LID resolution failed for outgoing message");
+            }
+          }
+
+          // Fallback: Check if message.key.remoteJidAlt contains the phone JID
+          if (!lidValue) {
+            const outRemoteJidAlt = (message.key as any).remoteJidAlt as string | undefined;
+            if (outRemoteJidAlt && outRemoteJidAlt.includes("@s.whatsapp.net")) {
+              const altPhone = outRemoteJidAlt.replace("@s.whatsapp.net", "");
+              resolvedToNumber = altPhone.startsWith("+") ? altPhone : `+${altPhone}`;
+              lidValue = toNumber;
+              this.lidMappingService.saveLidMapping(userId, toNumber, resolvedToNumber);
+              this.logger.info(
+                { userId, phoneNumber, lid: toNumber, resolvedPhone: resolvedToNumber },
+                "Resolved LID via message.key.remoteJidAlt for outgoing message"
+              );
+            }
+          }
+
+          // Fallback: Try socket.onWhatsApp() with the LID
+          if (!lidValue && socket && typeof socket.onWhatsApp === "function") {
+            try {
+              const toJidForLookup = toNumber.includes("@") ? toNumber : toNumber + "@lid";
+              const results = await socket.onWhatsApp(toJidForLookup);
+              if (results && results.length > 0) {
+                const resultJid = results[0].jid;
+                if (resultJid && resultJid.includes("@s.whatsapp.net")) {
+                  const resolvedPhone = resultJid.replace("@s.whatsapp.net", "");
+                  resolvedToNumber = resolvedPhone.startsWith("+") ? resolvedPhone : `+${resolvedPhone}`;
+                  lidValue = toNumber;
+                  this.lidMappingService.saveLidMapping(userId, toNumber, resolvedToNumber);
+                  this.logger.info(
+                    { userId, phoneNumber, lid: toNumber, resolvedPhone: resolvedToNumber },
+                    "Resolved LID via onWhatsApp() lookup for outgoing message"
+                  );
+                }
+              }
+            } catch (err: any) {
+              this.logger.debug({ userId, phoneNumber, lid: toNumber, error: err.message }, "onWhatsApp LID lookup failed for outgoing message");
             }
           }
 
