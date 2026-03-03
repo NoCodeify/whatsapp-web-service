@@ -153,6 +153,17 @@ export class CloudRunSessionOptimizer {
    * Upload session to Cloud Storage (queued)
    */
   async uploadSession(userId: string, phoneNumber: string, localPath: string): Promise<void> {
+    // Backpressure: drop uploads if queue is too large (e.g. during Firestore outage)
+    // to prevent unbounded memory growth that leads to OOM crashes
+    const MAX_QUEUE_SIZE = 20;
+    if (this.uploadQueue.length >= MAX_QUEUE_SIZE) {
+      this.logger.warn(
+        { userId, phoneNumber, queueSize: this.uploadQueue.length },
+        "Upload queue full — dropping upload to prevent memory buildup"
+      );
+      return;
+    }
+
     return new Promise((resolve, reject) => {
       const uploadTask = async () => {
         try {

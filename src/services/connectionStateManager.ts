@@ -44,8 +44,10 @@ export class ConnectionStateManager extends EventEmitter {
   private logger = pino({ name: "ConnectionStateManager" });
   private states: Map<string, ConnectionState> = new Map();
   private heartbeatTimers: Map<string, NodeJS.Timeout> = new Map();
+  private consecutiveHeartbeatFailures: Map<string, number> = new Map();
 
   private readonly HEARTBEAT_INTERVAL = 30000; // 30 seconds
+  private readonly MAX_HEARTBEAT_FAILURES = 3; // Stop heartbeat after 3 consecutive failures to prevent retry storms
 
   constructor(firestore: Firestore) {
     super();
@@ -432,6 +434,9 @@ export class ConnectionStateManager extends EventEmitter {
     // Clear existing timer
     this.stopHeartbeat(userId, phoneNumber);
 
+    // Reset failure counter on new heartbeat
+    this.consecutiveHeartbeatFailures.set(key, 0);
+
     // Start new heartbeat timer
     const timer = setInterval(async () => {
       const state = this.states.get(key);
@@ -445,9 +450,23 @@ export class ConnectionStateManager extends EventEmitter {
       state.lastHeartbeat = new Date();
 
       // Persist to Firestore
-      await this.persistHeartbeat(userId, phoneNumber);
+      try {
+        await this.persistHeartbeat(userId, phoneNumber);
+        this.consecutiveHeartbeatFailures.set(key, 0);
+        this.logger.debug({ userId, phoneNumber }, "Heartbeat sent");
+      } catch {
+        const failures = (this.consecutiveHeartbeatFailures.get(key) || 0) + 1;
+        this.consecutiveHeartbeatFailures.set(key, failures);
 
-      this.logger.debug({ userId, phoneNumber }, "Heartbeat sent");
+        if (failures >= this.MAX_HEARTBEAT_FAILURES) {
+          this.logger.warn(
+            { userId, phoneNumber, consecutiveFailures: failures },
+            "Heartbeat stopped after consecutive failures — Firestore may be unavailable"
+          );
+          this.stopHeartbeat(userId, phoneNumber);
+          return;
+        }
+      }
     }, this.HEARTBEAT_INTERVAL);
 
     this.heartbeatTimers.set(key, timer);
@@ -463,6 +482,7 @@ export class ConnectionStateManager extends EventEmitter {
     if (timer) {
       clearInterval(timer);
       this.heartbeatTimers.delete(key);
+      this.consecutiveHeartbeatFailures.delete(key);
       this.logger.debug({ userId, phoneNumber }, "Heartbeat stopped");
     }
   }

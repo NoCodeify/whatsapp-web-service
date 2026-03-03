@@ -57,102 +57,119 @@ export class MediaService {
   /**
    * Upload media file to Cloud Storage
    */
-  async uploadMedia(file: MediaFile, userId: string, phoneNumber: string): Promise<MediaUploadResult> {
+  async uploadMedia(file: MediaFile, userId: string, phoneNumber: string, maxRetries: number = 3): Promise<MediaUploadResult> {
     const uploadStartTime = Date.now();
 
-    try {
-      // Validate file size
-      const maxSizeBytes = this.maxFileSizeMB * 1024 * 1024;
-      if (file.size > maxSizeBytes) {
-        throw new Error(`File size ${file.size} exceeds maximum ${maxSizeBytes} bytes`);
-      }
+    // Validate file size up-front (no point retrying this)
+    const maxSizeBytes = this.maxFileSizeMB * 1024 * 1024;
+    if (file.size > maxSizeBytes) {
+      throw new Error(`File size ${file.size} exceeds maximum ${maxSizeBytes} bytes`);
+    }
 
-      // Generate unique filename
-      const fileExtension = this.getFileExtension(file.mimetype);
-      const filename = `whatsapp-media/${userId}/${phoneNumber}/${Date.now()}_${uuidv4()}${fileExtension}`;
+    // Generate unique filename
+    const fileExtension = this.getFileExtension(file.mimetype);
+    const filename = `whatsapp-media/${userId}/${phoneNumber}/${Date.now()}_${uuidv4()}${fileExtension}`;
 
-      // Process image if needed (compress large images)
-      let processedBuffer = file.buffer;
-      if (this.isImage(file.mimetype) && file.size > 1024 * 1024) {
-        // 1MB threshold
-        processedBuffer = await this.compressImage(file.buffer, file.mimetype);
-        logger.info(
-          {
-            userId,
-            phoneNumber,
-            originalSize: file.size,
-            compressedSize: processedBuffer.length,
-            compressionRatio: (file.size - processedBuffer.length) / file.size,
-          },
-          "Image compressed for storage"
-        );
-      }
-
-      // Upload to Cloud Storage
-      const bucket = this.storage.bucket(this.bucket);
-      const fileObject = bucket.file(filename);
-
-      await fileObject.save(processedBuffer, {
-        metadata: {
-          contentType: file.mimetype,
-          metadata: {
-            userId,
-            phoneNumber,
-            originalName: file.originalname || "unknown",
-            uploadedAt: new Date().toISOString(),
-          },
-        },
-        gzip: true,
-      });
-
-      // Make file publicly accessible with signed URL (expires in 7 days)
-      const [url] = await fileObject.getSignedUrl({
-        action: "read",
-        expires: Date.now() + 7 * 24 * 60 * 60 * 1000, // 7 days
-      });
-
-      const result: MediaUploadResult = {
-        url,
-        filename,
-        contentType: file.mimetype,
-        size: processedBuffer.length,
-        bucket: this.bucket,
-      };
-
+    // Process image if needed (compress large images)
+    let processedBuffer = file.buffer;
+    if (this.isImage(file.mimetype) && file.size > 1024 * 1024) {
+      // 1MB threshold
+      processedBuffer = await this.compressImage(file.buffer, file.mimetype);
       logger.info(
         {
           userId,
           phoneNumber,
+          originalSize: file.size,
+          compressedSize: processedBuffer.length,
+          compressionRatio: (file.size - processedBuffer.length) / file.size,
+        },
+        "Image compressed for storage"
+      );
+    }
+
+    let lastError: any;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        // Upload to Cloud Storage
+        const bucket = this.storage.bucket(this.bucket);
+        const fileObject = bucket.file(filename);
+
+        await fileObject.save(processedBuffer, {
+          metadata: {
+            contentType: file.mimetype,
+            metadata: {
+              userId,
+              phoneNumber,
+              originalName: file.originalname || "unknown",
+              uploadedAt: new Date().toISOString(),
+            },
+          },
+          gzip: true,
+        });
+
+        // Make file publicly accessible with signed URL (expires in 7 days)
+        const [url] = await fileObject.getSignedUrl({
+          action: "read",
+          expires: Date.now() + 7 * 24 * 60 * 60 * 1000, // 7 days
+        });
+
+        const result: MediaUploadResult = {
+          url,
           filename,
           contentType: file.mimetype,
           size: processedBuffer.length,
-          uploadDuration: Date.now() - uploadStartTime,
-        },
-        "Media uploaded successfully"
-      );
+          bucket: this.bucket,
+        };
 
-      return result;
-    } catch (error: any) {
-      logger.error(
-        {
-          error: {
-            message: error.message,
-            code: error.code,
-            name: error.name,
-            stack: error.stack,
+        logger.info(
+          {
+            userId,
+            phoneNumber,
+            filename,
+            contentType: file.mimetype,
+            size: processedBuffer.length,
+            uploadDuration: Date.now() - uploadStartTime,
+            ...(attempt > 1 ? { attempt } : {}),
           },
-          userId,
-          phoneNumber,
-          fileSize: file.size,
-          mimetype: file.mimetype,
-          uploadDuration: Date.now() - uploadStartTime,
-          bucketName: this.bucket,
-          projectId: process.env.GOOGLE_CLOUD_PROJECT,
-        },
-        "Failed to upload media"
-      );
-      throw error;
+          "Media uploaded successfully"
+        );
+
+        return result;
+      } catch (error: any) {
+        lastError = error;
+
+        if (attempt < maxRetries) {
+          const delay = 1000 * attempt; // exponential backoff: 1s, 2s, 3s
+          logger.warn(
+            { userId, phoneNumber, attempt, maxRetries, error: error.message },
+            "Media upload attempt failed, retrying"
+          );
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        }
+      }
     }
+
+    logger.error(
+      {
+        error: {
+          message: lastError.message,
+          code: lastError.code,
+          name: lastError.name,
+          stack: lastError.stack,
+        },
+        userId,
+        phoneNumber,
+        fileSize: file.size,
+        mimetype: file.mimetype,
+        uploadDuration: Date.now() - uploadStartTime,
+        bucketName: this.bucket,
+        projectId: process.env.GOOGLE_CLOUD_PROJECT,
+        attempts: maxRetries,
+      },
+      "Failed to upload media after all retries"
+    );
+    throw lastError;
   }
 
   /**

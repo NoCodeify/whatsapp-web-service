@@ -92,7 +92,7 @@ export class ConnectionPool extends EventEmitter {
   private readonly config: ConnectionPoolConfig = {
     maxConnections: parseInt(process.env.MAX_CONNECTIONS || "50"),
     healthCheckInterval: parseInt(process.env.HEALTH_CHECK_INTERVAL || "30000"),
-    sessionCleanupInterval: parseInt(process.env.SESSION_CLEANUP_INTERVAL || "3600000"),
+    sessionCleanupInterval: parseInt(process.env.SESSION_CLEANUP_INTERVAL || "600000"), // 10 minutes — reduced from 1hr to prevent memory buildup
     instanceUrl: process.env.INSTANCE_URL || `http://localhost:${process.env.PORT || 8080}`,
   };
 
@@ -5120,7 +5120,7 @@ export class ConnectionPool extends EventEmitter {
   async waitForConnectionState(
     userId: string,
     phoneNumber: string,
-    timeout: number = 30000 // 30 seconds default
+    timeout: number = 15000 // 15 seconds default — reduced to prevent stacking past Cloud Run's 60s HTTP limit
   ): Promise<{ success: boolean; state: string; error?: string }> {
     const connectionKey = this.getConnectionKey(userId, phoneNumber);
     const connection = this.connections.get(connectionKey);
@@ -5395,7 +5395,7 @@ export class ConnectionPool extends EventEmitter {
           `CRITICAL STATUS TRANSITION: Connection ${status === "failed" ? "FAILED" : "DISCONNECTED"}`
         );
       } else if (isCriticalReconnection) {
-        this.logger.info(
+        this.logger.warn(
           {
             userId,
             phoneNumber,
@@ -5426,9 +5426,10 @@ export class ConnectionPool extends EventEmitter {
    * - whatsapp-web-typing-indicator (typing status)
    */
   private async publishEvent(eventType: string, data: any) {
-    // Skip Pub/Sub in local development
-    if (process.env.NODE_ENV === "development" || process.env.FIRESTORE_EMULATOR_HOST) {
-      this.logger.debug({ eventType, data }, "Event (local mode - not published to Pub/Sub)");
+    // Pub/Sub topics not yet created in GCP — publishing is disabled by default
+    // to avoid hundreds of failed API calls per day against non-existent topics.
+    // To enable: set ENABLE_PUBSUB_EVENTS=true and create the topics listed above.
+    if (!process.env.ENABLE_PUBSUB_EVENTS) {
       return;
     }
 
@@ -5436,7 +5437,7 @@ export class ConnectionPool extends EventEmitter {
       const topic = this.pubsub.topic(`whatsapp-web-${eventType}`);
       await topic.publishMessage({ data: Buffer.from(JSON.stringify(data)) });
     } catch (error) {
-      this.logger.error({ eventType, error }, "Failed to publish event");
+      this.logger.warn({ eventType, error }, "Failed to publish event");
     }
   }
 

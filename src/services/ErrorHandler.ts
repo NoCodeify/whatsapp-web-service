@@ -453,7 +453,7 @@ export class ErrorHandler extends EventEmitter {
         this.logger.warn(logData, "Medium severity error occurred");
         break;
       case "low":
-        this.logger.info(logData, "Low severity error occurred");
+        this.logger.warn(logData, "Low severity error occurred");
         break;
     }
   }
