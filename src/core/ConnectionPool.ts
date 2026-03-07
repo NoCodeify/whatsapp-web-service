@@ -2947,6 +2947,13 @@ export class ConnectionPool extends EventEmitter {
         this.processedMessageSenders.set(messageId, fromNumber);
       }
 
+      // Skip reaction messages (e.g. thumbs up, heart, etc.)
+      // Reactions have message.message.reactionMessage and are not real messages
+      if (message.message?.reactionMessage) {
+        this.logger.debug({ userId, phoneNumber, fromNumber, messageId: message.key.id }, "Skipping incoming reaction message");
+        return;
+      }
+
       // Skip group messages
       if (isGroup) {
         this.logger.debug({ userId, phoneNumber, fromJid }, "Skipping group message");
@@ -3212,6 +3219,13 @@ export class ConnectionPool extends EventEmitter {
         toNumber = toJid;
       } else {
         toNumber = toJid.replace("@s.whatsapp.net", "").replace("@g.us", "");
+      }
+
+      // Skip reaction messages (e.g. thumbs up, heart, etc.)
+      // Reactions have message.message.reactionMessage and are not real messages
+      if (message.message?.reactionMessage) {
+        this.logger.debug({ userId, phoneNumber, toNumber, messageId: message.key.id }, "Skipping outgoing reaction message");
+        return;
       }
 
       // Skip group messages
@@ -4459,6 +4473,9 @@ export class ConnectionPool extends EventEmitter {
       const messagesByContact = new Map<string, any[]>();
 
       for (const msg of messages) {
+        // Skip reaction messages (thumbs up, heart, etc.) — not real messages
+        if (msg.message?.reactionMessage) continue;
+
         const fromJid = msg.key?.remoteJid || "";
         const isGroup = fromJid.includes("@g.us");
 
